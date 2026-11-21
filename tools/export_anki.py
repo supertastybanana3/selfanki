@@ -41,6 +41,23 @@ ASK = re.compile(r'<!--ask:begin-->.*?<!--ask:end-->', re.S)
 # カードの HTML から、属性の中のスクリプト（onerror= など）と javascript: の URL を除く（もらったデッキが端末の記録を読み出せないように）
 ONATTR = re.compile(r'''(<[^>]*?)\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)''', re.I)
 JSURL = re.compile(r'''(href|src|action|formaction)\s*=\s*(["']?)\s*javascript:''', re.I)
+TYPE_PAT = re.compile(r'\[\[type:(.+?)\]\]')
+def type_info(card, note, q):
+    """入力して答える（{{type:…}}）の正しい答え。aqt reviewer.py の typeAnsQuestionFilter と同じ選び方（穴埋めは extract_cloze_for_typing）。
+    exp が None＝フィールドが無い（注意書きを出す）、''＝中身が空（入力欄を出さない）"""
+    m = TYPE_PAT.search(q)
+    if not m: return None
+    fld = m.group(1); cloze_idx = None; combining = True
+    if fld.startswith('cloze:'): cloze_idx = card.ord + 1; fld = fld.split(':')[1]
+    if fld.startswith('nc:'): combining = False; fld = fld.split(':')[1]
+    exp = None; font = 'Arial'; size = 20
+    for f in note.note_type()['flds']:
+        if f['name'] == fld:
+            exp = note[f['name']]
+            if cloze_idx: exp = col.extract_cloze_for_typing(exp, cloze_idx) or None
+            font, size = f['font'], f['size']
+            break
+    return {'exp': exp, 'nc': not combining, 'cloze': bool(cloze_idx), 'fld': fld, 'font': font, 'size': size}
 def clean(h):
     for _ in range(20):
         h2 = ONATTR.sub(r'\1', h)
@@ -75,6 +92,7 @@ for (cid, nid, did, odid, ord_, ctype, queue, due, odue, ivl, factor, reps, laps
                   'lapses': lapses, 'left': left, 'flags': flags, 'mod': mod, 'nmod': note.mod, 'data': json.loads(data) if data else {},
                   'tags': note.tags, 'q': q, 'a': a, 'qav': av(out.question_av_tags), 'aav': av(out.answer_av_tags),
                   'sfld': sort_text(note, note.note_type()), 'tname': (card.template() or {}).get('name', ''),
+                  **({'typ': type_info(card, note, q)} if TYPE_PAT.search(q) else {}),
                   **({'inDyn': 1} if odid else {})})  # Anki ではフィルターデッキの中（負荷分散の数に入らない）
 print('cards', len(cards), 'secs', round(time.time() - t0, 1))
 if not cards: die('書き出すカードが0枚でした。exclude_top_decks で全部を除いていないか確かめてください。')
@@ -91,7 +109,7 @@ for m in col.models.all():
 used_conf = {decks[did].get('conf') for did in keep_deck}
 presets = {c['id']: c for c in col.decks.all_config() if c['id'] in used_conf}
 conf_keys = ['rollover', 'collapseTime', 'newCardsIgnoreReviewLimit', 'dayLearnFirst', 'newSpread', 'applyAllParentLimits', 'creationOffset', 'localOffset', 'fsrs',
-             'loadBalancerEnabled', 'fsrsShortTermWithStepsEnabled', 'sched2021', 'nextPos', 'ignoreAccentsInSearch', 'normalize_note_text', 'curDeck']
+             'loadBalancerEnabled', 'fsrsShortTermWithStepsEnabled', 'sched2021', 'nextPos', 'ignoreAccentsInSearch', 'normalize_note_text', 'curDeck', 'restorePositionReviewer', 'resetCountsReviewer', 'setDueReviewer']
 meta = {'exported_at': int(time.time()), 'source': os.path.basename(SRC), 'crt': col.crt, 'config': {k: col.get_config(k, None) for k in conf_keys},
         'decks': [decks[d] for d in sorted(keep_deck, key=lambda d: decks[d]['name'])], 'presets': presets, 'notetypes': notetypes,
         # 負荷分散（rslib load_balancer.rs）は同じプリセットの全カードを数えるので、移していないデッキのカードの期日も送る（[期日, プリセット, ノート]）

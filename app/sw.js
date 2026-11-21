@@ -4,7 +4,7 @@
 //   /api/・/pair … いつもネット（アプリ側がつながらないときの扱いを持つ）
 const DATA = 'data-v1', MEDIA = 'media-v1', CODE = 'code-v1';
 // 入ったときにアプリ本体を控えておく（最初に開いたページは Service Worker を通っていないため）
-const SHELL = ['/app/', '/app/app.mjs', '/app/pen.mjs', '/app/scratchpad.mjs', '/app/ankiweb.mjs', '/app/search.mjs', '/app/i18n.mjs', '/i18n_anki.json', '/app/store.mjs', '/app/sync.mjs', '/app/ask.mjs', '/fsrs/sched.mjs', '/fsrs/queue.mjs', '/fsrs/fsrs6.mjs', '/fsrs/schedule.mjs', '/fsrs/rng.mjs', '/bundle/manifest.json'];
+const SHELL = ['/app/', '/app/app.mjs', '/app/pen.mjs', '/app/scratchpad.mjs', '/app/typeans.mjs', '/app/ankiweb.mjs', '/app/search.mjs', '/app/i18n.mjs', '/i18n_anki.json', '/app/store.mjs', '/app/sync.mjs', '/app/ask.mjs', '/fsrs/sched.mjs', '/fsrs/queue.mjs', '/fsrs/fsrs6.mjs', '/fsrs/schedule.mjs', '/fsrs/rng.mjs', '/bundle/manifest.json'];
 self.addEventListener('install', e => e.waitUntil((async () => {
   const c = await caches.open(CODE);
   await Promise.all(SHELL.map(async u => { try { const r = await fetch(u, { credentials: 'same-origin', cache: 'no-cache' }); if (r.ok) await c.put(u, r); } catch {} }));
