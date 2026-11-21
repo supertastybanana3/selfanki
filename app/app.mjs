@@ -64,7 +64,7 @@ mq.addEventListener('change', applyTheme);
 async function fetchJSON(u) { const r = await fetch(u); if (!r.ok) throw new Error(`${u}: ${r.status}`); return r.json(); }
 const nowSecs = () => Math.floor(Date.now() / 1000);
 const presetOf = did => S.meta.presets[S.decksById.get(did).conf];
-const cfg = () => ({ crt: S.meta.crt, meta: S.meta, fsrsShortTermWithStepsEnabled: !!S.meta.config.fsrsShortTermWithStepsEnabled });
+const cfg = () => ({ crt: S.meta.crt, meta: S.meta, fsrs: !!S.meta.config.fsrs, fsrsShortTermWithStepsEnabled: !!S.meta.config.fsrsShortTermWithStepsEnabled });
 
 // ---------- 読み込み ----------
 // カードの中身＝配ったファイル（c/*.json）。状態は「移行した時点（state.*.json）」に「サーバーの差分（D1 の写し）」と
