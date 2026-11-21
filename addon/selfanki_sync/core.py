@@ -1,4 +1,5 @@
-# 暗記（自分の Cloudflare）と、いま開いている Anki のコレクションのあいだで、学習の状態と記録をやり取りする（同期だけ。カードの中身は送らない）。
+# 暗記（自分の Cloudflare）と、いま開いている Anki のコレクションのあいだで、学習の状態と記録をやり取りする。
+# カードの中身は送らない（Anki で変えた中身は export_anki.py → build_site.py で配る）。暗記の端末で追加・編集・削除したノートは Anki に書く。
 # Anki の中（アドオン）からも、Python の anki パッケージからも呼べるように、画面の部品は使わない。
 # 決まりは tools/mirror.py と同じ: カードごとに新しいほうを正にする。新しさは、暗記の側＝最後に答えた時刻、Anki の側＝カードの更新時刻と最後の記録の遅いほう
 import json, time, urllib.request, urllib.error, urllib.parse
@@ -85,16 +86,20 @@ def server_view(srv):
             cards.setdefault(row[0], {'st': dict(zip(STATE_KEYS, row[1:10])), 'rev': row[10], 'src': 'base'})
         for r in add['revlog']:
             revs.setdefault(r[0], {'id': r[0], 'cid': r[1], 'ease': r[2], 'ivl': r[3], 'lastIvl': r[4], 'factor': r[5], 'time': r[6], 'type': r[7], 'src': 'base', 'del': 0})
-    cs = ci = rs = ri = 0; conf = []
+    cs = ci = rs = ri = ns = ni = 0; conf = []; notes = {}
     while True:
-        j = srv.json(f'/api/pull?cs={cs}&ci={ci}&rs={rs}&ri={ri}&n=5000')
+        j = srv.json(f'/api/pull?cs={cs}&ci={ci}&rs={rs}&ri={ri}&ns={ns}&ni={ni}&n=5000')
         for (id_, st, rev, src, seq) in j['cards']: cards[id_] = {'st': json.loads(st), 'rev': rev, 'src': src}; cs, ci = seq, id_
         for r in j['revlog']:
             revs[r[0]] = {'id': r[0], 'cid': r[1], 'ease': r[2], 'ivl': r[3], 'lastIvl': r[4], 'factor': r[5], 'time': r[6], 'type': r[7], 'src': r[8], 'del': r[9]}
             rs, ri = r[10], r[0]
+        # 端末で追加・編集・削除したノート（cards は [[カードの id, ord, デッキ, 新規の位置], …]）
+        for (id_, mid, flds, tags, did, ncards, rev, src, dl, added, seq) in j.get('notes', []):
+            notes[id_] = {'id': id_, 'mid': mid, 'flds': json.loads(flds), 'tags': tags, 'did': did, 'cards': json.loads(ncards), 'rev': rev, 'src': src, 'del': dl, 'added': added}
+            ns, ni = seq, id_
         conf = j.get('conf', [])
         if not j['more']: break
-    return cards, revs, conf
+    return cards, revs, conf, notes
 
 
 # ---------- Anki ----------
@@ -182,6 +187,99 @@ def write_card(col, cid, st):
     return c
 
 
+# ---------- ノート（端末で追加・編集・削除したもの） ----------
+def note_wire(rec, **kw):
+    return {**{k: rec[k] for k in ('id', 'mid', 'flds', 'tags', 'did', 'cards', 'rev', 'del', 'added')}, **kw}
+
+
+def _fix_cards(col, rec, before, log):
+    """新しくできたカード（before に無いもの）の id を端末が決めた id に、新規の位置を端末の位置に付け替える（ord で対応させる）"""
+    want = {o: (cid, due) for cid, o, _did, due in rec['cards']}
+    for cid, ord_, ctype in col.db.all('select id, ord, type from cards where nid = ?', rec['id']):
+        if cid in before or ord_ not in want: continue
+        new_id, due = want[ord_]
+        if new_id != cid:
+            if col.db.scalar('select count() from cards where id = ?', new_id):
+                log('カードの id が Anki のほかのカードと重なったので、付け替えなかった', new_id); continue
+            col.db.execute('update cards set id = ? where id = ?', new_id, cid)
+        if ctype == 0: col.db.execute('update cards set due = ? where id = ?', due, new_id)
+    top = max((due for _c, _o, _d, due in rec['cards']), default=-1)
+    if top >= (col.get_config('nextPos', 0) or 0): col.set_config('nextPos', top + 1)
+
+
+def _add_note(col, rec, log):
+    """端末で作ったノートを Anki に足し、ノートとカードの id を端末の id に付け替える（Anki は id を決めて足させてくれないので、足してから書き換える）"""
+    m = col.models.get(rec['mid'])
+    if not m: log('ノートタイプが Anki に無いので、足せなかった', rec['id']); return False
+    if col.db.scalar('select count() from notes where id = ?', rec['id']) or any(col.db.scalar('select count() from cards where id = ?', c[0]) for c in rec['cards']):
+        log('ノートかカードの id が Anki のほかのものと重なったので、足せなかった', rec['id']); return False
+    note = col.new_note(m)
+    for i in range(len(note.fields)): note.fields[i] = rec['flds'][i] if i < len(rec['flds']) else ''
+    note.tags = rec['tags'].split()
+    col.add_note(note, rec['did'])
+    col.db.execute('update notes set id = ? where id = ?', rec['id'], note.id)
+    col.db.execute('update cards set nid = ? where nid = ?', rec['id'], note.id)
+    _fix_cards(col, rec, set(), log)
+    return True
+
+
+def _update_note(col, rec, log):
+    note = col.get_note(rec['id'])
+    if note.mid != rec['mid']: log('ノートタイプが変わっているので、書かなかった', rec['id']); return False
+    before = set(col.db.list('select id from cards where nid = ?', rec['id']))
+    for i in range(len(note.fields)): note.fields[i] = rec['flds'][i] if i < len(rec['flds']) else ''
+    note.tags = rec['tags'].split()
+    col.update_note(note, skip_undo_entry=True)
+    _fix_cards(col, rec, before, log)
+    return True
+
+
+def _written(col, rec):
+    """Anki に書いたあとの中身（Anki がそろえたタグなど）を、src='anki' で送り返す。rev は Anki のノートの mod 以上にする（配り直した束と同じ新しさ）"""
+    note = col.get_note(rec['id'])
+    return note_wire(rec, flds=list(note.fields), tags=' '.join(note.tags), rev=max(rec['rev'], note.mod * 1000), **{'del': 0})
+
+
+def apply_notes(col, srv, notes, log, dry=False):
+    """暗記の端末で追加・編集・削除したノート（サーバーの notes）を Anki に書く。決まりは「新しいほう」＝端末の記録の rev と Anki のノートの mod（秒）。
+      消した   … Anki のノートより新しければ消す
+      Anki に無い … 端末で作ったノートなら足す（id を合わせる）。Anki に入れたことがある・前から Anki にあったノートなら、Anki で消したので端末でも消す
+      Anki にある … 端末の記録のほうが新しければ、フィールドとタグを書く（増えるカードの id を合わせる）。Anki のほうが新しければ書かない
+    カードの状態を比べる前に呼ぶ（端末で作ったカードを先に Anki に入れておくため）"""
+    n = {'added': 0, 'updated': 0, 'removed': 0, 'gone_in_anki': 0, 'anki_newer': 0, 'skipped': 0}
+    if not notes: return n
+    ids = list(notes); amod = {}
+    for i in range(0, len(ids), 500):
+        part = ids[i:i + 500]
+        amod.update(dict(col.db.all('select id, mod from notes where id in (%s)' % ','.join(str(int(x)) for x in part))))
+    push = []; now = int(time.time() * 1000)
+    for rec in sorted(notes.values(), key=lambda r: r['rev']):
+        nid = rec['id']; mod = amod.get(nid)
+        if rec['del']:
+            if mod is not None and rec['rev'] > mod * 1000:
+                if not dry: col.remove_notes([nid])
+                n['removed'] += 1
+            continue
+        if mod is None:
+            if rec['added'] and rec['src'] != 'anki':
+                if dry: n['added'] += 1
+                elif _add_note(col, rec, log): n['added'] += 1; push.append(_written(col, rec))
+                else: n['skipped'] += 1
+            else:
+                n['gone_in_anki'] += 1
+                if not dry: push.append(note_wire(rec, rev=max(now, rec['rev'] + 1), **{'del': 1}))
+            continue
+        if rec['rev'] > mod * 1000:
+            if dry: n['updated'] += 1
+            elif _update_note(col, rec, log): n['updated'] += 1; push.append(_written(col, rec))
+            else: n['skipped'] += 1
+        elif rec['src'] == 'app': n['anki_newer'] += 1
+    if not dry and (n['added'] or n['updated'] or n['removed']): col.db.execute('update col set mod = ?', now)   # AnkiWeb との同期で上がるように
+    if push and not dry: srv.push([{'t': 'note', 'src': 'anki', 'n': p} for p in push])
+    if any(n.values()): log('ノート', n)
+    return n
+
+
 def apply_conf(col, srv, conf_rows, log, dry=False):
     """暗記で変えたデッキのオプション（サーバーの conf、src='app'）を Anki に書く。プリセットの削除はしない（Anki の次の同期が一方向になることがあるため）"""
     presets = {c['id']: c for c in col.decks.all_config()}
@@ -225,7 +323,12 @@ def run(col, site_url, token, dry=False, log=print):
     """同期を1回する。dry なら数えるだけ（何も書かない）。結果の数を返す"""
     t0 = time.time()
     srv = Server(site_url, token)
-    scards, srevs, conf_rows = server_view(srv)
+    scards, srevs, conf_rows, snotes = server_view(srv)
+    # 端末で追加・編集・削除したノートを先に書く（端末で作ったカードを、カードの状態を比べる前に Anki に入れておく）
+    try: nnote = apply_notes(col, srv, snotes, log, dry=dry)
+    except SyncError: raise
+    except Exception as e: nnote = None; log('ノートを書けなかった', repr(e)); note_fail = repr(e)[:200]
+    else: note_fail = None
     acards = anki_view(col, set(scards))
     # 取り違えの見張り: サーバーが知っているカードの大半がこのコレクションに無ければ、別のプロファイル・別のコレクション
     if scards and len(acards) < 0.5 * len(scards):
@@ -234,7 +337,8 @@ def run(col, site_url, token, dry=False, log=print):
     anki_rev_ids = set(col.db.list('select id from revlog'))
     anki_revlog = [r for r in col.db.all('select id, cid, ease, ivl, lastIvl, factor, time, type from revlog') if r[1] in ids]
     p = plan(scards, srevs, acards, anki_rev_ids, anki_revlog)
-    summary = {k: len(v) for k, v in p.items()}; summary['dry'] = dry
+    summary = {k: len(v) for k, v in p.items()}; summary['dry'] = dry; summary['notes'] = nnote
+    if note_fail: summary['note_fail'] = note_fail
     log('比べた: Anki へ カード {to_anki} 記録 {rev_to_anki} ／暗記へ カード {to_srv} 記録 {rev_to_srv}'.format(**summary))
     if dry:
         try: summary['conf'] = apply_conf(col, srv, conf_rows, log, dry=True)
@@ -262,6 +366,6 @@ def run(col, site_url, token, dry=False, log=print):
     ng = [cid for cid, st, _ in p['to_anki'] if not same(st, after[cid]['st'])]
     summary['verify_ng'] = len(ng)
     if ng: log('書いた値が違うカード', len(ng), ng[:3])
-    summary['ok'] = not ng and not summary.get('conf_fail')
+    summary['ok'] = not ng and not summary.get('conf_fail') and not summary.get('note_fail')
     summary['secs'] = round(time.time() - t0, 1)
     return summary

@@ -1,6 +1,6 @@
 # 暗記と同期（Anki のアドオン）
-# 「ツール」→「暗記」から、暗記（自分の Cloudflare に置いた selfanki）と学習の状態・記録をやり取りする。カードの中身は送らない
-# （カードを足したり直したりしたら、パソコンで python tools/export_anki.py と python tools/build_site.py --deploy）。
+# 「ツール」→「暗記」から、暗記（自分の Cloudflare に置いた selfanki）と学習の状態・記録をやり取りする。暗記の端末で追加・編集・削除したノートは Anki に書く。
+# Anki 側のカードの中身は送らない（Anki でカードを足したり直したりしたら、パソコンで python tools/export_anki.py と python tools/build_site.py --deploy）。
 # つなぐ先と合言葉はプロファイルごとに覚える（6桁の番号を入れてつなぐ。合言葉そのものは画面に出さない）。
 from __future__ import annotations
 
@@ -39,6 +39,9 @@ _T = {
     'warn_ng': ('\n\n書いた値が違うカードが {n} 枚ありました。Anki の「ファイル」→「バックアップから復元」で戻せます。', '\n\n{n} cards did not match after writing. You can restore from the backup made just before.'),
     'warn_conf': ('\n\nデッキのオプションを書けませんでした: {e}', '\n\nCould not write deck options: {e}'),
     'extra': ('\nマーク {marks} 件・デッキのオプション {conf} 件', '\nMarks: {marks}, deck options: {conf}'),
+    'notes': ('\n暗記で変えたノート: 追加 {added}・編集 {updated}・削除 {removed}（Anki で消してあった {gone_in_anki}・Anki のほうが新しかった {anki_newer}・書けなかった {skipped}）',
+              '\nNotes changed in selfanki: added {added}, edited {updated}, deleted {removed} (already deleted in Anki {gone_in_anki}, newer in Anki {anki_newer}, not written {skipped})'),
+    'warn_note': ('\n\nノートを書けませんでした: {e}', '\n\nCould not write notes: {e}'),
     'busy': ('暗記との同期は、もう動いています。', 'A selfanki sync is already running.'),
     'pairing': ('暗記につないでいます…', 'Connecting to selfanki…'),
     'failed': ('暗記と同期できませんでした。\n\n{e}', 'Could not sync with selfanki.\n\n{e}'),
@@ -104,9 +107,12 @@ def disconnect():
 def _message(s, dry):
     s = {**s, 'to_src': s.get('to_srv', 0)}
     marks = s.get('mark_add', 0) + s.get('mark_del', 0); conf = sum((s.get('conf') or {}).get(k, 0) for k in ('preset', 'new', 'deck'))
-    if not dry and not any(s.get(k) for k in ('to_anki', 'rev_to_anki', 'to_srv', 'rev_to_srv', 'verify_ng', 'conf_fail')) and not marks and not conf: return None
+    nn = s.get('notes') or {}; nsum = sum(nn.get(k, 0) for k in ('added', 'updated', 'removed', 'gone_in_anki', 'skipped'))
+    if not dry and not any(s.get(k) for k in ('to_anki', 'rev_to_anki', 'to_srv', 'rev_to_srv', 'verify_ng', 'conf_fail', 'note_fail')) and not marks and not conf and not nsum: return None
     m = t('dry_done' if dry else 'done', **s)
     if marks or conf: m += t('extra', marks=marks, conf=conf)
+    if nsum: m += t('notes', **{k: nn.get(k, 0) for k in ('added', 'updated', 'removed', 'gone_in_anki', 'anki_newer', 'skipped')})
+    if s.get('note_fail'): m += t('warn_note', e=s['note_fail'])
     if s.get('verify_ng'): m += t('warn_ng', n=s['verify_ng'])
     if s.get('conf_fail'): m += t('warn_conf', e=s['conf_fail'])
     return m
@@ -140,7 +146,7 @@ def sync(dry=False, auto=False):
         s = result.get('s') or {}
         m = _message(s, dry)
         if m is None: tooltip(t('nothing'))
-        elif auto and not s.get('verify_ng') and not s.get('conf_fail'): tooltip(m.replace('\n\n', '\n'), period=6000)
+        elif auto and not s.get('verify_ng') and not s.get('conf_fail') and not s.get('note_fail'): tooltip(m.replace('\n\n', '\n'), period=6000)
         else: showInfo(m, parent=mw)
 
     def failed(e):
