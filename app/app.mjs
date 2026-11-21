@@ -7,13 +7,14 @@ import * as store from './store.mjs';
 import * as sync from './sync.mjs';
 import { createPen } from './pen.mjs';
 import { createAsk } from './ask.mjs';
+import { createScratchpad, spPref, SP_WIDTH, SP_SIZE, SP_ALPHA } from './scratchpad.mjs';
 
 const BUNDLE = new URL('../bundle/', location.href).href;
 const MEDIA = BUNDLE + 'media/';
 const MATHJAX_URL = new URL('../vendor/mathjax/tex-chtml.js', location.href).href;
 const $ = s => document.querySelector(s);
 const S = { meta: null, all: [], cards: [], byId: new Map(), revlog: [], revIds: new Set(), deck: null, q: null, card: null, side: 'q', undo: [], shownAt: 0, open: new Set() };
-let pen, ask;
+let pen, ask, sp;
 // ---------- 画面の明るさ（自動／ダーク／ライト） ----------
 const THEMES = ['auto', 'dark', 'light'], THEME_LABEL = { auto: '自動', dark: 'ダーク', light: 'ライト' };
 const mq = matchMedia('(prefers-color-scheme: dark)');
@@ -44,7 +45,7 @@ function applyTheme() {
   const bs = barStyle(); if (bs === 'gray') delete document.documentElement.dataset.bar; else document.documentElement.dataset.bar = bs;
   if (barDark() === 'black') document.documentElement.dataset.bard = 'black'; else delete document.documentElement.dataset.bard;
   if (t === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
-  penSide(S.side);
+  penSide(S.side); sp?.refresh();
   if (S.card) setFrame(S.side === 'q' ? S.card.q : S.card.a, S.card.mid, S.card.ord);
 }
 // 書き込みのデザインに、いま表と裏のどちらか・暗いテーマかを知らせる（墨の色はデザインが決める）
@@ -262,7 +263,7 @@ function openTools() {
 function showDecks() {
   if (ask) ask.onCard(null);
   if (typeof stopAv === 'function') stopAv();
-  S.deck = null; document.body.dataset.view = 'decks';
+  S.deck = null; document.body.dataset.view = 'decks'; sp?.setCard(null);
   checkDay();
   const decks = [...S.meta.decks].sort(deckCmp);
   const kids = name => decks.filter(d => d.name.startsWith(name + '::') && !d.name.slice(name.length + 2).includes('::'));
@@ -395,13 +396,13 @@ function advance(force = null) {
   const nx = force ? { card: force } : nextCard(q, nowSecs());
   $('#donebox').classList.toggle('show', !nx);
   if (!nx) {
-    S.card = null; S.side = 'q'; pen.clear(); paintCounts(c, null); setButtons('q'); ask.onCard(null); paintMarks();
+    S.card = null; S.side = 'q'; pen.clear(); sp?.setCard(null); paintCounts(c, null); setButtons('q'); ask.onCard(null); paintMarks();
     const soon = q.learning[0];
     // 課題を終えた画面は Anki 本体の画面（/congrats/）。中のリンク（カスタム学習・非表示を戻す）は ankiBridge で受ける
     { const f = $('#doneframe'); const u = `/congrats/?did=${S.deck}`; if (!f.src.endsWith(u)) f.src = u; else f.contentWindow?.location.reload(); }
     return;
   }
-  S.card = nx.card; S.side = 'q'; S.shownAt = performance.now(); S.shownState = curState(S.card, nowSecs());
+  S.card = nx.card; S.side = 'q'; S.shownAt = performance.now(); S.shownState = curState(S.card, nowSecs()); sp?.setCard(S.card);
   pen.clear(); penSide('q'); paintCounts(c, S.card); ask.onCard(S.card); paintMarks();
   setFrame(S.card.q, S.card.mid, S.card.ord); setButtons('q'); if (autoplay(S.card)) playAv(S.card.qav);
 }
@@ -1082,6 +1083,7 @@ window.ankiBridge = cmd => {
 // ---------- 起動 ----------
 function setupTools() {
   pen = createPen($('#cardhost')); pen.setEnabled(false);   // 書き込みのデザインを読み込むまでは書けない
+  sp = createScratchpad({ study: $('#study'), host: $('#cardhost'), bottom: $('#bottom'), corner: $('#corner'), isDark });   // 手書きパッド（本家の機能）
   $('#tab-decks').onclick = showDecks;
   // 歯車のメニュー
   const closeMenu = () => $('#menu').classList.remove('open');
@@ -1094,6 +1096,7 @@ function setupTools() {
     else if (a === 'options' && typeof S.deck === 'number') openAnkiPage('deck-options', 'オプション', S.deck);
     else if (a === 'stats') openAnkiPage('graphs', S.deck === 'session' ? 'カスタム学習セッション' : S.decksById.get(S.deck)?.name.split('::').pop() || '統計', S.deck);
     else if (a === 'custom') openCustom();
+    else if (a === 'scratchpad') sp.toggle();
     else if (a === 'topbar') { try { localStorage.setItem('pref:topbar', pref('topbar') ? '0' : '1'); } catch {} applyPrefs(); }
     else if (a === 'flag') setFlag(1);
     else if (a === 'bury') buryNote();
@@ -1149,9 +1152,15 @@ function setupTools() {
       { sec: '質問側だけが表示されているとき' }, ZONES.map(t => ({ t, v: '解答を表示', go: 'x', off: 1 })),
       { sec: '解答側も表示されているとき' }, ZONES.map((t, i) => ({ t, v: i % 3 === 0 ? 'もう一度' : i % 3 === 2 ? '正解' : 'オフ', go: 'x', off: 1 }))] }),
     swipe: () => ({ title: 'スワイプ', groups: [[['左にスワイプ', 'ツール'], ['右にスワイプ', 'デッキ'], ['上にスワイプ', 'オフ'], ['下にスワイプ', 'オフ']].map(([t, v]) => ({ t, v, go: 'x', off: 1 }))] }),
-    pad: () => ({ title: '手書きパッド', groups: [
-      [{ t: 'ペンの太さ', v: '標準', go: 'x', off: 1 }, { t: 'パッドの大きさ', v: '25%', go: 'x', off: 1 }, { t: '手書きパッドの透明度', v: '透明（少）', go: 'x', off: 1 },
-       { t: 'グリッドを表示', tg: false, off: 1 }, { t: '指での入力を無視', tg: false, off: 1 }, { t: '「元に戻す」アイコンですべて消去', tg: false, off: 1 }, { t: '手書きパッドをボトムバーの下に表示', tg: true, off: 1 }]] }),
+    pad: () => {
+      const tg = (t, k) => ({ t, tg: spPref.flag(k), run: () => { spPref.set(k, !spPref.flag(k)); sp.refresh(); } });
+      return { title: '手書きパッド', groups: [
+        [{ t: 'ペンの太さ', v: SP_WIDTH[spPref.width()][0], go: 'padw' }, { t: 'パッドの大きさ', v: spPref.size() + '%', go: 'pads' }, { t: '手書きパッドの透明度', v: SP_ALPHA[spPref.alpha()][0], go: 'pada' },
+         tg('グリッドを表示', 'grid'), tg('指での入力を無視', 'finger'), tg('「元に戻す」アイコンですべて消去', 'undoAll'), tg('手書きパッドをボトムバーの下に表示', 'below')]] };
+    },
+    padw: () => ({ title: 'ペンの太さ', groups: [Object.entries(SP_WIDTH).map(([k, [t]]) => ({ t, ck: spPref.width() === k, run: () => { spPref.set('width', k); sp.refresh(); } }))] }),
+    pads: () => ({ title: 'パッドの大きさ', groups: [SP_SIZE.map(n => ({ t: n + '%', ck: spPref.size() === n, run: () => { spPref.set('size', n); sp.refresh(); } }))] }),
+    pada: () => ({ title: '手書きパッドの透明度', groups: [Object.entries(SP_ALPHA).map(([k, [t]]) => ({ t, ck: spPref.alpha() === k, run: () => { spPref.set('alpha', k); sp.refresh(); } }))] }),
     edit: () => ({ title: '編集', groups: [
       [{ t: '最大画像サイズ（長辺）', v: '1024', off: 1 }, { t: 'クリップボード画像を PNG 形式で貼り付ける', tg: false, off: 1 }, { t: '貼り付けの際にリサイズ', tg: false, off: 1 }, { t: 'カメラで撮影した写真をクロップ（切り出し）', tg: false, off: 1 }, { t: 'カメラで撮影する動画を高画質にする', tg: false, off: 1 }],
       [{ t: '英字入力時に文頭を自動で大文字にする', tg: true, off: 1 }, { t: 'オートコレクト', tg: true, off: 1 }, { t: 'スマート引用符とダッシュを自動変換', tg: true, off: 1 }],

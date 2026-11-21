@@ -136,6 +136,11 @@ button,.ask-bar,#ask-imgl,#bottom,#tabs,#pentools,#corner,#navbar,#bottomnav,#de
 body.nopen .pen-layer{display:none}
 #corner{right:2.75px;bottom:2.75px;display:flex;flex-direction:column;align-items:flex-end;gap:0}
 #timer{color:var(--st-plus);font-size:14px;line-height:16px;font-variant-numeric:tabular-nums;padding-right:16.75px;min-height:16px;margin-bottom:-8.5px;position:relative;z-index:1}
+#scratch{position:absolute;left:0;right:0;bottom:0;z-index:2;touch-action:none;-webkit-user-select:none;user-select:none}
+#scratch.below{position:relative;flex:none}
+#scratch canvas{display:block;width:100%;height:100%;touch-action:none}
+#sp-undo{left:2.75px;width:44px;height:44px;color:var(--st-tab);display:flex;align-items:center;justify-content:center;background:none;border:0;padding:0;touch-action:none}
+#sp-undo[hidden]{display:none} #sp-undo svg{width:31px;height:31px}
 #gear{width:44px;height:44px;color:var(--st-tab);display:flex;align-items:center;justify-content:center} #gear svg{width:33px;height:33px}
 #bottom{flex:none;min-height:calc(55px + env(safe-area-inset-bottom));padding:6px 12px env(safe-area-inset-bottom);background:var(--st-bot);border-top:.5px solid var(--st-line);display:flex;align-items:center;justify-content:center}
 #counts{font-size:20px;position:relative;top:2.5px;color:var(--st-plus);font-family:-apple-system,'SF Pro Text','Helvetica Neue',sans-serif}
@@ -262,7 +267,7 @@ body:has(#answerbar:not([hidden])) #bottom{padding-left:8px;padding-right:8px;pa
   <div class="grid">
     <button data-act="undo" id="menu-undo">元に戻す</button><button data-act="redo" disabled>やり直す</button><button data-act="options">オプション</button>
     <button data-act="custom">カスタム学習</button><button data-act="stats">デッキの統計</button><button data-act="info">カード情報</button>
-    <button data-act="filter" disabled>フィルター / 詰め込み</button><button data-act="scratchpad" disabled>手書きパッド</button><button data-act="topbar">トップバー</button>
+    <button data-act="filter" disabled>フィルター / 詰め込み</button><button data-act="scratchpad">手書きパッド</button><button data-act="topbar">トップバー</button>
     <button data-act="flag">フラグ1 (レッド)</button><button data-act="bury">ノートを今日は非表示</button><button data-act="suspend">カードを休止</button>
   </div>
   <h3>すべてのアクション</h3>
