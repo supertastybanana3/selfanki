@@ -81,7 +81,7 @@ const DEFAULT_PRESET = { id: 1, name: 'デフォルト', mod: 0, usn: 0, maxTake
   desiredRetention: 0.9, ignoreRevlogsBeforeDate: '1970-01-01', easyDaysPercentages: [1, 1, 1, 1, 1, 1, 1], stopTimerOnAnswer: false, secondsToShowQuestion: 0, secondsToShowAnswer: 0, questionAction: 0, answerAction: 0, waitForAudio: true, sm2Retention: 0.9, weightSearch: '' };
 function writeDeckConfig(w, f, p) { w.msg(f, x => { x.i32(1, p.id); x.str(2, p.name); x.i32(3, p.mod || 0); x.i32(4, p.usn || 0); x.msg(5, y => writeConfig(y, p)); }); }
 function deckConfigsForUpdate(S, did) {
-  const deck = S.decksById.get(did); const today = timingToday(Math.floor(Date.now() / 1000), S.meta.crt).daysElapsed;
+  const deck = S.decksById.get(did); const today = timingToday(Math.floor(Date.now() / 1000), S.meta).daysElapsed;
   const w = new W();
   const uses = {}; for (const d of S.meta.decks) if (!d.dyn) uses[d.conf] = (uses[d.conf] || 0) + 1;
   for (const p of Object.values(S.meta.presets)) w.msg(1, x => { writeDeckConfig(x, 1, p); x.u32(2, uses[p.id] || 0); });
@@ -115,7 +115,7 @@ const percentToBin = x => (x === 100 ? 95 : Math.floor(x / 5) * 5);
 const median = a => { if (!a.length) return 0; a.sort((x, y) => x - y); const m = a.length >> 1; return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
 function graphs(S, search, days, currentDid) {
   const nowSecs = Date.now() / 1000;
-  const t = timingToday(Math.floor(nowSecs), S.meta.crt);
+  const t = timingToday(Math.floor(nowSecs), S.meta);
   const nextDayStart = t.nextDayAt, daysElapsed = t.daysElapsed;
   const localOffset = -new Date().getTimezoneOffset() * 60;
   const all = !search.trim();
@@ -242,7 +242,7 @@ function congrats(S, did) {
   const deck = S.decksById.get(did);
   const ids = deck ? new Set(S.meta.decks.filter(d => d.name === deck.name || d.name.startsWith(deck.name + '::')).map(d => d.id)) : null;
   const cards = ids ? S.cards.filter(c => ids.has(c.did)) : [];
-  const t = timingToday(Math.floor(Date.now() / 1000), S.meta.crt);
+  const t = timingToday(Math.floor(Date.now() / 1000), S.meta);
   let review = 0, nw = 0, sb = 0, ub = 0, learn = 0, firstLearn = null;
   for (const c of cards) {
     if ((c.queue === 2 || c.queue === 3) && c.due <= t.daysElapsed) review++;

@@ -329,7 +329,7 @@ const cmpNull = (a, op, b) => (a == null || b == null || Number.isNaN(a) || Numb
 
 export function compileSearch(S, query, currentDid) {
   const nodes = parse(query || '');
-  const now = Math.floor(Date.now() / 1000), t = timingToday(now, S.meta.crt), cfg = S.meta.config || {};
+  const now = Math.floor(Date.now() / 1000), t = timingToday(now, S.meta), cfg = S.meta.config || {};
   const ignoreAccents = cfg.ignoreAccentsInSearch === true, normNote = cfg.normalize_note_text === false ? s => s : nfc;
   const learnAhead = cfg.collapseTime ?? 1200;
   const notes = S.notes || new Map();
