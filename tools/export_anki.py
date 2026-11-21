@@ -98,18 +98,21 @@ print('cards', len(cards), 'secs', round(time.time() - t0, 1))
 if not cards: die('書き出すカードが0枚でした。exclude_top_decks で全部を除いていないか確かめてください。')
 keep_cids = {c['id'] for c in cards}
 revlog = [r for r in col.db.all("select id, cid, ease, ivl, lastIvl, factor, time, type from revlog") if r[1] in keep_cids]
+# ノートタイプ（端末でノートを追加・編集するときに、テンプレートからカードを描くので、全部のノートタイプの中身も配る）
 notetypes = {}
 for m in col.models.all():
+    css = m['css']
+    notetypes[m['id']] = {'name': m['name'], 'css': css, 'type': m['type'], 'sortf': m.get('sortf', 0),
+                          'fields': [{'name': f['name'], 'ord': f['ord'], 'excludeFromSearch': bool(f.get('excludeFromSearch')), 'font': f.get('font', 'Arial'), 'size': f.get('size', 20),
+                                      'sticky': bool(f.get('sticky')), 'rtl': bool(f.get('rtl')), 'plainText': bool(f.get('plainText')), 'description': f.get('description', '')} for f in m['flds']],
+                          'templates': [{'name': t['name'], 'ord': t['ord'], 'qfmt': t['qfmt'], 'afmt': t['afmt'], 'did': t.get('did')} for t in m['tmpls']],
+                          'used': m['id'] in nt_used}
     if m['id'] in nt_used:
-        css = m['css']
-        notetypes[m['id']] = {'name': m['name'], 'css': css, 'type': m['type'], 'sortf': m.get('sortf', 0),
-                              'fields': [{'name': f['name'], 'ord': f['ord'], 'excludeFromSearch': bool(f.get('excludeFromSearch'))} for f in m['flds']],
-                              'templates': [{'name': t['name'], 'ord': t['ord']} for t in m['tmpls']]}
         for u in re.findall(r'url\(["\']?([^"\')]+)["\']?\)', m['css']): media[u] += 1
 used_conf = {decks[did].get('conf') for did in keep_deck}
 presets = {c['id']: c for c in col.decks.all_config() if c['id'] in used_conf}
 conf_keys = ['rollover', 'collapseTime', 'newCardsIgnoreReviewLimit', 'dayLearnFirst', 'newSpread', 'applyAllParentLimits', 'creationOffset', 'localOffset', 'fsrs',
-             'loadBalancerEnabled', 'fsrsShortTermWithStepsEnabled', 'sched2021', 'nextPos', 'ignoreAccentsInSearch', 'normalize_note_text', 'curDeck', 'restorePositionReviewer', 'resetCountsReviewer', 'randomOrderReposition', 'shiftPositionOfExistingCards', 'setDueReviewer']
+             'loadBalancerEnabled', 'fsrsShortTermWithStepsEnabled', 'sched2021', 'nextPos', 'ignoreAccentsInSearch', 'normalize_note_text', 'curDeck', 'restorePositionReviewer', 'resetCountsReviewer', 'randomOrderReposition', 'shiftPositionOfExistingCards', 'setDueReviewer', 'curModel']
 meta = {'exported_at': int(time.time()), 'source': os.path.basename(SRC), 'crt': col.crt, 'config': {k: col.get_config(k, None) for k in conf_keys},
         'decks': [decks[d] for d in sorted(keep_deck, key=lambda d: decks[d]['name'])], 'presets': presets, 'notetypes': notetypes,
         # 負荷分散（rslib load_balancer.rs）は同じプリセットの全カードを数えるので、移していないデッキのカードの期日も送る（[期日, プリセット, ノート]）
