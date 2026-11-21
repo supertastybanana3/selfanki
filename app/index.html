@@ -75,6 +75,15 @@ body.notools #gear{display:none} body.toolsleft #corner{right:auto;left:2.75px;a
 #blist .br span{position:absolute;top:0;line-height:29.5px;overflow:hidden} /* 列は窓を3等分（AnkiMobile と同じく、どの幅でも3等分） */
 #blist .br .c1{left:6px;width:calc(33.333% - 16px)} #blist .br .c2{left:calc(33.333% + 3.5px);width:calc(33.333% - 16px)} #blist .br .c3{left:66.667%;right:10px;text-align:center}
 #blist .br.susp{background:var(--br-susp)} #blist .br.f1{background:#7a3b39} #blist .br.f2{background:#7e5a2c} #blist .br.f3{background:#3d6b3a} #blist .br.f4{background:#2f4f7f} #blist .br.f5{background:#7a3d68} #blist .br.f6{background:#2f6b66} #blist .br.f7{background:#5a3f7f} #blist .br.mark{background:var(--br-mark)}
+#blist .br.selmode .c1{left:20px;width:calc(33.333% - 30px)} #blist .br.on::before{content:"✓";position:absolute;left:5px;top:0;line-height:29.5px;font-size:14px}
+#browse > .pnav .tx{display:none;color:var(--am-bartext);font-size:16px;background:none;border:0;padding:0} #browse > .pnav.selmode .tx{display:block} #browse > .pnav.selmode .ic,#browse > .pnav.selmode .nl .ic{display:none}
+#browse > .pnav.selmode .nr{gap:12px;padding-right:14px}
+#bactions{position:fixed;z-index:30;top:calc(40px + env(safe-area-inset-top));width:304px;border-radius:13px;background:var(--br-pop,#2c2c2e);box-shadow:0 8px 30px rgba(0,0,0,.45);overflow:hidden;display:flex;flex-direction:column}
+#bactions .h{font-size:13px;color:#8e8e93;text-align:center;padding:12px 0 11px}
+#bactions button{height:57.5px;border:0;border-top:.5px solid rgba(255,255,255,.12);background:none;color:#4ea2ff;font-size:19px} #bactions button.red{color:#ff4c44} #bactions button:disabled{opacity:.4}
+#flagdlg{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center}
+#flagdlg .box{width:180px;border-radius:13px;background:#2c2c2e;display:flex;flex-direction:column;overflow:hidden}
+#flagdlg b{font-size:14px;color:#fff;text-align:center;padding:14px 0 12px} #flagdlg button{height:30px;border:0;border-top:.5px solid rgba(255,255,255,.12);background:none;color:#4ea2ff;font-size:13.5px} #flagdlg button.cancel{font-weight:600}
 #blist .empty{padding:24px;text-align:center;color:var(--am-zero);font-size:15px}
 #bprev{position:absolute;inset:0;z-index:2;background:var(--am-bg);display:flex;flex-direction:column} #bprev iframe{flex:1;width:100%;border:0;background:var(--st-card)}
 #awpage{position:fixed;inset:0;z-index:26;background:var(--am-bg);display:flex;flex-direction:column} #awpage[hidden]{display:none} #awpage iframe{flex:1;width:100%;border:0;background:var(--am-bg)}

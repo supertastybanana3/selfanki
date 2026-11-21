@@ -333,7 +333,7 @@ function showDecks() {
 
 // ---------- 出題 ----------
 // ---------- ブラウザ（AnkiMobile 25.09 と同じ並べ替え項目・カードの種類・期日の3列。休止は黄色地で期日をかっこ書き） ----------
-const BR = { list: [], rowH: 30 };
+const BR = { list: [], rowH: 30, sel: null };   // sel: 選ぶ状態のとき、選んだカードの id の Set
 const pad2 = n => String(n).padStart(2, '0');
 const ymd = secs => { const d = new Date(secs * 1000); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
 function dueText(c, t, now) {
@@ -355,8 +355,58 @@ function fitMiddle(text, width) {
   const b = Math.min(text.length - a, fit(k => w(text.slice(text.length - k)) <= half));
   return text.slice(0, a) + '…' + text.slice(text.length - b);
 }
+// ブラウザの「選択」（AnkiMobile 25.09: 右上が「アクション」「すべて選択」「キャンセル」、題が「N/M 件選択」、選んだ行の左に ✓）
+function setBrowseSelect(on) {
+  BR.sel = on ? new Set() : null;
+  const nav = $('#browse > .pnav'); nav.classList.toggle('selmode', on);
+  paintBrowseTitle(); paintBrowse(true);
+}
+function paintBrowseTitle() { $('#browse > .pnav .ptitle').textContent = BR.sel ? `${BR.sel.size}/${BR.list.length} 件選択` : 'ブラウザ'; }
+// 「アクション」の一覧（実機の並び）。暗記で写せないもの（デッキ・タグ・ノートの変更、削除など）は薄く出して押せない
+const BROWSE_ACTIONS = [
+  ['deck', 'デッキの変更', null],
+  ['flag', 'フラグを変更', cs => pickFlag(cs)],
+  ['suspend', '休止 / 休止解除', cs => { const un = cs.length && cs[0].queue === -1; return changeCards(cs, c => { c.queue = un ? (c.type === 0 ? 0 : c.type === 2 ? 2 : (c.due > 1e9 ? 1 : 3)) : -1; }, un ? `${cs.length}枚の休止を解除しました` : `${cs.length}枚を休止しました`, '休止 / 休止解除', false); }],
+  ['due', '期日を指定', null],
+  ['reposition', '並び替える', null],
+  ['reset', 'カードをリセット', null],
+  ['replace', '検索して置換', null],
+  ['tagAdd', 'タグを追加', null],
+  ['tagDel', 'タグを解除', null],
+  ['notetype', 'ノートタイプを変更', null],
+  ['delete', 'ノートを削除する', null],
+];
+function openBrowseActions() {
+  if (!BR.sel || !BR.sel.size) return;
+  const cs = BR.list.filter(c => BR.sel.has(c.id));
+  let pop = $('#bactions'); if (pop) { pop.remove(); return; }
+  pop = document.createElement('div'); pop.id = 'bactions';
+  pop.innerHTML = '<div class="h">アクション</div>';
+  for (const [k, t, fn] of BROWSE_ACTIONS) {
+    const b = document.createElement('button'); b.textContent = t; if (k === 'delete') b.className = 'red'; if (!fn) b.disabled = true;
+    b.onclick = async () => { pop.remove(); await fn(cs); paintBrowse(true); };   // 全部を書き終えてから描き直す
+    pop.append(b);
+  }
+  const close = e => { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('pointerdown', close, true); } };
+  document.addEventListener('pointerdown', close, true);
+  $('#browse').append(pop);
+  // 「アクション」の真下に、中心をそろえて出す（画面からはみ出さないように）
+  const r = $('#browse > .pnav .sel-act').getBoundingClientRect();
+  pop.style.left = Math.max(8, Math.min(innerWidth - 312, r.left + r.width / 2 - 152)) + 'px';
+}
+// 「フラグを変更」の小窓（実機: フラグ1 (レッド)〜フラグ7 (パープル)・フラグを消去・キャンセル）
+function pickFlag(cs) {
+  const d = document.createElement('div'); d.id = 'flagdlg';
+  d.innerHTML = '<div class="box"><b>フラグを変更</b></div>';
+  const box = d.firstChild;
+  const add = (t, fn, cls) => { const b = document.createElement('button'); b.textContent = t; if (cls) b.className = cls; b.onclick = () => { d.remove(); fn && fn(); }; box.append(b); };
+  for (let n = 1; n <= 7; n++) add(`フラグ${n} (${FLAG_NAMES[n]})`, () => changeCards(cs, c => { c.flags = (c.flags & ~7) | n; }, `フラグ${n}（${FLAG_NAMES[n]}）を付けました`, 'フラグ', false).then(() => paintBrowse(true)));
+  add('フラグを消去', () => changeCards(cs, c => { c.flags = c.flags & ~7; }, 'フラグを外しました', 'フラグ', false).then(() => paintBrowse(true)));
+  add('キャンセル', null, 'cancel');
+  document.body.append(d);
+}
 function openBrowse(query) {
-  $('#browse').hidden = false; $('#bprev').hidden = true;
+  $('#browse').hidden = false; $('#bprev').hidden = true; if (BR.sel) setBrowseSelect(false);
   if (query != null) $('#bq').value = query;
   runBrowse();
 }
@@ -368,6 +418,7 @@ async function runBrowse() {
   BR.list = S.cards.filter(pred).sort((x, y) => { const a = x.sfld || '', b = y.sfld || ''; return a < b ? -1 : a > b ? 1 : x.ord - y.ord || x.id - y.id; });
   const box = $('#blist'); box.scrollTop = 0;
   box.querySelector('.spacer').style.height = BR.list.length * BR.rowH + 'px';
+  if (BR.sel) paintBrowseTitle();
   box.querySelectorAll('.br,.empty').forEach(e => e.remove());
   if (!BR.list.length) { const e = document.createElement('div'); e.className = 'empty'; e.textContent = '一致するカードはありません'; box.appendChild(e); }
   paintBrowse(true);
@@ -381,7 +432,7 @@ function paintBrowse(force = false) {
   const c1w = Math.max(40, box.clientWidth / 3 - 16); // 1列目の幅（窓の 1/3 から余白を引いたもの）
   for (let i = from; i < to; i++) {
     const c = BR.list[i]; const r = document.createElement('div');
-    r.className = 'br' + (c.queue === -1 ? ' susp' : (c.flags & 7) ? ` f${c.flags & 7}` : isMarked(c) ? ' mark' : '');
+    r.className = 'br' + (c.queue === -1 ? ' susp' : (c.flags & 7) ? ` f${c.flags & 7}` : isMarked(c) ? ' mark' : '') + (BR.sel ? ' selmode' : '') + (BR.sel?.has(c.id) ? ' on' : '');
     r.style.top = i * h + 'px'; r.dataset.i = i;
     r.innerHTML = '<span class="c1"></span><span class="c2"></span><span class="c3"></span>';
     r.children[0].textContent = fitMiddle(c.sfld || '', c1w); r.children[1].textContent = c.tname || ''; r.children[2].textContent = dueText(c, t, now);
@@ -1397,7 +1448,16 @@ function setupTools() {
   $('#bq').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); runBrowse(); } });
   $('#browse .clr').onclick = e => { e.preventDefault(); $('#bq').value = ''; $('#bq').focus(); };
   $('#blist').addEventListener('scroll', () => paintBrowse(), { passive: true });
-  $('#blist').addEventListener('click', e => { const r = e.target.closest('.br'); if (r) previewCard(BR.list[+r.dataset.i]); });
+  $('#blist').addEventListener('click', e => {
+    const r = e.target.closest('.br'); if (!r) return; const c = BR.list[+r.dataset.i];
+    if (BR.sel) { if (BR.sel.has(c.id)) BR.sel.delete(c.id); else BR.sel.add(c.id); paintBrowseTitle(); paintBrowse(true); return; }
+    previewCard(c);
+  });
+  { const nr = $('#browse > .pnav .nr'); const selBtn = nr.querySelector('[title="選択"]'); selBtn.disabled = false; selBtn.onclick = () => setBrowseSelect(true);
+    const mk = (t, cls, fn) => { const b = document.createElement('button'); b.className = 'tx ' + cls; b.textContent = t; b.onclick = fn; nr.append(b); };
+    mk('アクション', 'sel-act', openBrowseActions);
+    mk('すべて選択', 'sel-all', () => { BR.sel = new Set(BR.list.map(c => c.id)); paintBrowseTitle(); paintBrowse(true); });
+    mk('キャンセル', 'sel-cancel', () => setBrowseSelect(false)); }
   // 一覧の左下「追加/エクスポート」（AnkiMobile と同じ吹き出し。中の機能はまだ）
   $('#nav-add').onclick = () => { $('#addpop').hidden = false; document.body.classList.add('addopen'); };
   $('#addpop').onclick = e => { if (e.target.id === 'addpop') { $('#addpop').hidden = true; document.body.classList.remove('addopen'); } };
