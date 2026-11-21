@@ -249,7 +249,7 @@ function countsFor(did) {
   const counts = todayCounts(S.revlog, S.byId, (timing.nextDayAt - 86400) * 1000);
   const extend = new Map(S.meta.decks.map(d => [d.id, getExt(timing.daysElapsed, d.id)]).filter(([, e]) => e.new || e.rev));
   const ahead = S.meta.config.collapseTime ?? 1200;   // 学習中を先取りする秒数（Anki の「先取りの時間」）
-  const q = buildQueues({ selectedDid: did, decks: S.meta.decks, presets: S.meta.presets, cards: S.cards, timing, now, counts, extend, learnAheadSecs: ahead, newIgnoresReviewLimit: !!S.meta.config.newCardsIgnoreReviewLimit });
+  const q = buildQueues({ selectedDid: did, decks: S.meta.decks, presets: S.meta.presets, cards: S.cards, timing, now, counts, extend, learnAheadSecs: ahead, newIgnoresReviewLimit: !!S.meta.config.newCardsIgnoreReviewLimit, applyAllParentLimits: !!S.meta.config.applyAllParentLimits, fsrs: !!S.meta.config.fsrs });
   const learnNow = q.learning.filter(c => c.due <= now + ahead).length + (q.counts.learn - q.learning.length);
   return { q, c: [q.counts.new, learnNow, q.counts.review] };
 }
