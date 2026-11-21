@@ -30,7 +30,7 @@ const barDark = () => { try { return localStorage.getItem('barDark') || 'translu
 // 入れた機能は「設定」→「このアプリ独自の機能」で端末ごとに切れる
 const FEAT = { pen: '', autoSync: false, lang: 'ja' };   // lang … 画面の言語（Anki の言語の番号の形 ja・de-DE など。tools/build_site.py が config.json の language から入れる）
 let DESIGN = null;   // 読み込んだ書き込みのデザイン（mount の返り値）
-const PREF_DEFAULT = { neverType: false, replayBtn: true, stopQAudio: true, topbar: true, bottombar: true, counts: true, answerBtn: true, ivl: true, pen: true, autoSync: false, ticks: true, toolsBtn: true, noPad: false, extLinks: true };
+const PREF_DEFAULT = { neverType: false, replayBtn: true, stopQAudio: true, topbar: true, bottombar: true, counts: true, answerBtn: true, ivl: true, pen: true, autoSync: false, ticks: true, ticksByType: false, toolsBtn: true, noPad: false, extLinks: true };
 // autoSync: 既定は本家の Anki と同じく、下の「同期」を押したときだけ送受信する。オンにすると、答えるたびに数秒後に送り、開いたとき・戻ったとき・5分ごとにも同期する（このアプリ独自の方式）
 const pref = k => { try { const v = localStorage.getItem('pref:' + k); return v == null ? PREF_DEFAULT[k] : v === '1'; } catch { return PREF_DEFAULT[k]; } };
 // 学習の設定を画面に映す（トップバー・ボトムバー・残り枚数・回答ボタン・次回までの間隔）
@@ -47,12 +47,18 @@ function applyPrefs() {
 const toolsLeft = () => { try { return localStorage.getItem('toolsPos') === 'left'; } catch { return false; } };
 // 回答確認用のマーク（AnkiMobile 25.09 の実機で測った: カードの右上、上の帯の下 27.5pt・右から 20.5pt を中心に、
 // 「もう一度」は赤い×（25pt）、それ以外は緑のチェック（30×25pt）。出てすぐ約 0.53 秒かけて同じ速さで消える）
+// 「表示位置を種類別にする」をオンにすると、その答えのボタンの真上（横の中心をそろえる）に、ボタンと同じ色で出る（もう一度＝赤の×・難しい＝橙・正解＝緑・簡単＝青の✓。実機で測った）
+const TICK_COLOR = { 1: 'rgb(255,78,78)', 2: 'rgb(255,150,0)', 3: 'rgb(0,255,0)', 4: 'rgb(0,135,255)' };
 function flashTick(g) {
   if (!pref('ticks')) return;
   let el = $('#tick'); if (!el) { el = document.createElement('div'); el.id = 'tick'; el.className = 'float'; $('#cardhost').append(el); }
+  const byType = pref('ticksByType'), color = byType ? TICK_COLOR[g] : (g === 1 ? TICK_COLOR[1] : TICK_COLOR[3]);
   el.innerHTML = g === 1
-    ? '<svg viewBox="0 0 30 30" width="30" height="30"><path d="M8 8 22 22M22 8 8 22" stroke="#2e2e2e" stroke-width="6.6" stroke-linecap="square"/><path d="M8 8 22 22M22 8 8 22" stroke="rgb(255,78,78)" stroke-width="5" stroke-linecap="square"/></svg>'
-    : '<svg viewBox="0 0 30 30" width="30" height="30"><path d="M4 16.5 11.2 23.5 26.5 7.5" fill="none" stroke="#2e2e2e" stroke-width="6.6" stroke-linejoin="miter" stroke-linecap="square"/><path d="M4 16.5 11.2 23.5 26.5 7.5" fill="none" stroke="rgb(0,255,0)" stroke-width="5" stroke-linejoin="miter" stroke-linecap="square"/></svg>';
+    ? `<svg viewBox="0 0 30 30" width="30" height="30"><path d="M8 8 22 22M22 8 8 22" stroke="#2e2e2e" stroke-width="6.6" stroke-linecap="square"/><path d="M8 8 22 22M22 8 8 22" stroke="${color}" stroke-width="5" stroke-linecap="square"/></svg>`
+    : `<svg viewBox="0 0 30 30" width="30" height="30"><path d="M4 16.5 11.2 23.5 26.5 7.5" fill="none" stroke="#2e2e2e" stroke-width="6.6" stroke-linejoin="miter" stroke-linecap="square"/><path d="M4 16.5 11.2 23.5 26.5 7.5" fill="none" stroke="${color}" stroke-width="5" stroke-linejoin="miter" stroke-linecap="square"/></svg>`;
+  const btn = byType && document.querySelector(`#answerbar .rate:nth-child(${g})`);
+  if (btn) { const r = btn.getBoundingClientRect(), h = $('#cardhost').getBoundingClientRect(); el.style.right = 'auto'; el.style.left = (r.left + r.width / 2 - h.left - 15) + 'px'; }
+  else { el.style.left = ''; el.style.right = ''; }
   el.style.transition = 'none'; el.style.opacity = '1'; void el.offsetWidth;
   el.style.transition = 'opacity 530ms linear'; el.style.opacity = '0';
 }
@@ -368,9 +374,9 @@ const BROWSE_ACTIONS = [
   ['deck', 'デッキの変更', null],
   ['flag', 'フラグを変更', cs => pickFlag(cs)],
   ['suspend', '休止 / 休止解除', cs => { const un = cs.length && cs[0].queue === -1; return changeCards(cs, c => { c.queue = un ? (c.type === 0 ? 0 : c.type === 2 ? 2 : (c.due > 1e9 ? 1 : 3)) : -1; }, un ? `${cs.length}枚の休止を解除しました` : `${cs.length}枚を休止しました`, '休止 / 休止解除', false); }],
-  ['due', '期日を指定', null],
+  ['due', '期日を指定', cs => manualMany(cs, 'due')],
   ['reposition', '並び替える', null],
-  ['reset', 'カードをリセット', null],
+  ['reset', 'カードをリセット', cs => manualMany(cs, 'reset')],
   ['replace', '検索して置換', null],
   ['tagAdd', 'タグを追加', null],
   ['tagDel', 'タグを解除', null],
@@ -733,12 +739,39 @@ function iosPrompt({ title, message = '', input = null, toggles = [] }) {
 // 記録の id（ミリ秒）を、ほかの記録と重ならないように選ぶ（rslib の add_revlog_entry の uniquify と同じ考え方）
 function freshRevId() { let id = Date.now(); while (S.revIds.has(id)) id++; return id; }
 // 手で決めた期日・リセット（記録は種類 4「手動」）を、答えと同じ形で残して送る（元に戻すでも戻せる）
-async function applyManual(prevCard, res, msg) {
+async function applyManual(prevCard, res, msg, quiet = false) {
   const c = S.byId.get(prevCard.id), prev = structuredClone(prevCard);
   Object.assign(c, res.card); if (!('inDyn' in res.card)) delete c.inDyn; c.rev = res.revlog.id; addRev(res.revlog);
   S.undo.push({ prev, revlogId: res.revlog.id, sibs: [] }); if (S.undo.length > 30) S.undo.shift();
   await store.addOp({ t: 'ans', r: res.revlog, c: { id: c.id, st: pickState(c), rev: c.rev } });
-  toast(msg); S.mainQ = null; refreshCards(); advance(); scheduleSync();
+  if (quiet) return;   // ブラウザでまとめてするとき（最後に一度だけ知らせる）
+  toast(msg); S.mainQ = null; refreshCards(); if (document.body.dataset.view === 'study' && S.deck != null) advance(); scheduleSync();
+}
+// ブラウザで選んだカードにまとめて（「カードをリセット」「期日を指定」。聞く小窓は1回だけ）
+async function manualMany(cs, kind) {
+  if (!cs.length || S.busy) return;
+  const one = S.card; S.card = cs[0];
+  try {
+    if (kind === 'reset') {
+      const lsb = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v === '1'; } catch { return d; } };
+      const r = await iosPrompt({ title: '新規カードにリセット', toggles: [{ label: '可能な限り元の位置に復元', on: lsb('restorePositionReviewer', S.meta.config.restorePositionReviewer ?? true) }, { label: '学習回数と復習での忘却回数をリセット', on: lsb('resetCountsReviewer', S.meta.config.resetCountsReviewer ?? false) }] });
+      if (!r) return;
+      const [rp, rc] = r.toggles;
+      try { localStorage.setItem('restorePositionReviewer', rp ? '1' : '0'); localStorage.setItem('resetCountsReviewer', rc ? '1' : '0'); } catch {}
+      for (const card of cs) { const nextPos = nextNewPos(); const res = forgetCard(card, { restorePosition: rp, resetCounts: rc, nextPos, nowMs: freshRevId() }); if (res.usedNextPos) bumpNewPos(nextPos + 1); await applyManual(card, res, '', true); }
+      toast(`${cs.length}枚のカードを新規カードに戻しました。`);
+    } else {
+      let last = S.meta.config.setDueReviewer ?? ''; try { last = localStorage.getItem('setDueReviewer') ?? last; } catch {}
+      const r = await iosPrompt({ title: '期日を指定', message: '何日後にカードを表示しますか？\n\n入力例）\n　0    = 今日\n　1!   = 明日。かつ、復習間隔を1日に変更\n　3-7 = 3日後～7日後からランダムに選択', input: last });
+      if (!r) return;
+      const sp = parseDueDate(r.value.trim()); if (!sp) { iosAlert('Error', `invalid input: ${r.value}`); return; }
+      try { localStorage.setItem('setDueReviewer', r.value.trim()); } catch {}
+      const t = timingToday(nowSecs(), S.meta);
+      for (const card of cs) { const days = sp.min + Math.floor(Math.random() * (sp.max - sp.min + 1)); const res = setDueDate(card, { today: t.daysElapsed, nextDayAt: t.nextDayAt, days, forceReset: sp.forceReset, initialFactor: presetOf(card.did)?.new?.initialFactor ?? 2500, nowMs: freshRevId() }); await applyManual(card, res, '', true); }
+      toast(`${cs.length}枚のカードの期日を設定しました。`);
+    }
+    S.mainQ = null; refreshCards(); scheduleSync();
+  } finally { S.card = one; }
 }
 // 新規カードにリセット（Anki の「リセット」。元の位置に戻す・回数をリセットは、前に選んだもの。初めは Anki の既定＝戻す・リセットしない）
 async function resetAction() {
@@ -1450,7 +1483,7 @@ function setupTools() {
     study: () => ({ title: '学習', groups: [
       [{ t: 'スケジュール', go: 'x', off: 1 }, { t: '通知', go: 'notify' }, { t: 'トップバー', go: 'topbar' }, { t: 'ボトムバー', go: 'bottombar' }, { t: 'タップ', go: 'tap' }, { t: 'スワイプ', go: 'swipe' }, { t: '手書きパッド', go: 'pad' }, { t: 'ゲームパッド', go: 'x', off: 1 }],
       [tgl('ツールアイコンを表示', 'toolsBtn', applyPrefs), { t: 'ツールアイコンの配置', v: toolsLeft() ? '左側' : '右側', go: 'toolspos' }],
-      [tgl('回答確認用のマークを表示', 'ticks'), { t: '回答確認用マークの表示位置を種類別にする', tg: false, off: 1 }],
+      [tgl('回答確認用のマークを表示', 'ticks'), tgl('回答確認用マークの表示位置を種類別にする', 'ticksByType')],
       [tgl('音声再生ボタンを表示', 'replayBtn', () => { if (S.card) setFrame(cardHtml(S.card, S.side), S.card.mid, S.card.ord, S.side === 'a'); }),
        tgl('質問の音声・動画の再生を解答表示で停止', 'stopQAudio'),
        { t: 'サイレントモードでも音声を自動再生', tg: true, off: 1 }, { t: '他アプリの音（BGMなど）の音量を常に抑えめにする', tg: false, off: 1 }],
