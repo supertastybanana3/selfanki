@@ -10,13 +10,14 @@ import { createAsk } from './ask.mjs';
 import { typeQuestion, typeAnswer } from './typeans.mjs';
 import { createScratchpad, spPref, SP_WIDTH, SP_SIZE, SP_ALPHA } from './scratchpad.mjs';
 import { repositionNew } from '../fsrs/reposition.mjs';
+import { createNotes } from './notes.mjs';
 
 const BUNDLE = new URL('../bundle/', location.href).href;
 const MEDIA = BUNDLE + 'media/';
 const MATHJAX_URL = new URL('../vendor/mathjax/tex-chtml.js', location.href).href;
 const $ = s => document.querySelector(s);
 const S = { meta: null, all: [], cards: [], byId: new Map(), revlog: [], revIds: new Set(), deck: null, q: null, card: null, side: 'q', undo: [], shownAt: 0, open: new Set() };
-let pen, ask, sp;
+let pen, ask, sp, notes;
 // ---------- 画面の明るさ（自動／ダーク／ライト） ----------
 const THEMES = ['auto', 'dark', 'light'], THEME_LABEL = { auto: '自動', dark: 'ダーク', light: 'ライト' };
 const mq = matchMedia('(prefers-color-scheme: dark)');
@@ -115,6 +116,7 @@ const REV_KEYS = ['id', 'cid', 'ease', 'ivl', 'lastIvl', 'factor', 'time', 'type
 function addRev(r) { if (S.revIds.has(r.id)) return; S.revIds.add(r.id); const o = {}; for (const k of REV_KEYS) o[k] = r[k]; S.revlog.push(o); }
 function delRev(id) { if (!S.revIds.delete(id)) return; S.revlog = S.revlog.filter(r => r.id !== id); }
 function applyOp(op) {
+  if (op.t === 'note') { notes.apply({ ...op.n, src: 'app' }); return; }   // まだ送っていないノートの追加・編集・削除
   const c = S.byId.get(op.c?.id); if (!c) return;
   if (op.t === 'ans') { applyState(c, op.c.st, op.c.rev); addRev(op.r); }
   else if (op.t === 'undo') { applyState(c, op.c.st, op.c.rev); delRev(op.rid); }
@@ -161,7 +163,7 @@ function applyServer(cards, revlog) {
   for (const row of cards) { const c = S.byId.get(row.id); if (c) applyState(c, row.st, row.rev); }
   for (const r of revlog) { if (r.del) delRev(r.id); else addRev(r); }
 }
-const refreshCards = () => { S.cards = S.all.filter(c => c.type != null); };
+const refreshCards = () => { S.cards = S.all.filter(c => c.type != null && !c.gone); };   // gone＝消したノートのカード
 async function load() {
   $('#status').textContent = '読み込み中…';
   const man = await fetchJSON(BUNDLE + 'manifest.json');
@@ -186,6 +188,8 @@ async function load() {
   }
   for (const r of baseRev) addRev({ id: r[0], cid: r[1], ease: r[2], ivl: r[3], lastIvl: r[4], factor: r[5], time: r[6], type: r[7] });
   if ((await store.get('kv', 'base')) !== man.base.state) await store.resetServerCopy(man.base.state);
+  // 端末で追加・編集・削除したノート（D1 の notes の写し）を、カードの状態より先に重ねる（端末で作ったカードに状態を入れられるように）
+  notes.reset(); for (const n of (await store.getAll('srv_notes')).sort((a, b) => a.rev - b.rev)) notes.apply(n);
   applyServer(await store.getAll('srv_cards'), (await store.getAll('srv_revlog')).sort((a, b) => a.seq - b.seq));
   applyConf(await store.get('kv', 'conf')); applyConf((await store.outbox()).map(x => x.op).filter(o => o.t === 'conf'));
   for (const { op } of await store.outbox()) applyOp(op);
@@ -227,24 +231,27 @@ async function runSync(manual = false) {
   let dlg = null;
   if (manual) {
     const ops = (await store.outbox()).map(x => x.op);
-    const up = ops.filter(o => o.t !== 'undo').length, upDel = ops.filter(o => o.t === 'undo').length;
+    const isDel = o => o.t === 'undo' || (o.t === 'note' && o.n.del);
+    const up = ops.filter(o => !isDel(o)).length, upDel = ops.filter(isDel).length;
     dlg = document.createElement('div'); dlg.id = 'syncdlg';
     dlg.innerHTML = `<div class="box"><b>同期中...</b><p>追加/変更： ${up}↑ <span class="dn">0</span>↓<br>削除：${upDel}↑ <span class="dd">0</span>↓</p><svg class="spin" viewBox="0 0 36 36"><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.25" transform="rotate(0 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.36" transform="rotate(45 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.46" transform="rotate(90 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.57" transform="rotate(135 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.68" transform="rotate(180 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.79" transform="rotate(225 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.89" transform="rotate(270 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="1.00" transform="rotate(315 18 18)"/></svg><button>キャンセル</button></div>`;
     dlg.querySelector('button').onclick = () => dlg.remove(); document.body.append(dlg);
   }
   const t0 = Date.now(), got = await sync.syncNow();
   if (dlg) {
-    if (got) { dlg.querySelector('.dn').textContent = got.cards.length + got.revlog.filter(r => !r.del).length; dlg.querySelector('.dd').textContent = got.revlog.filter(r => r.del).length; }
+    if (got) { const nn = got.notes || []; dlg.querySelector('.dn').textContent = got.cards.length + got.revlog.filter(r => !r.del).length + nn.filter(n => !n.del).length; dlg.querySelector('.dd').textContent = got.revlog.filter(r => r.del).length + nn.filter(n => n.del).length; }
     setTimeout(() => dlg.remove(), Math.max(0, 600 - (Date.now() - t0)));
   }
   btn.classList.remove('busy');
   if (sync.state.online) { try { localStorage.setItem('syncedOnce', '1'); } catch {} }
-  if (got && (got.cards.length || got.revlog.length || got.conf?.length)) {
+  if (got && (got.cards.length || got.revlog.length || got.conf?.length || got.notes?.length)) {
+    const nids = new Set(); for (const n of got.notes || []) if (notes.apply(n)) nids.add(n.id);
     applyServer(got.cards, got.revlog);
     if (got.conf) { applyConf(got.conf); applyConf((await store.outbox()).map(x => x.op).filter(o => o.t === 'conf')); }
     for (const { op } of await store.outbox()) applyOp(op); // 同期の最中に答えた分を重ね直す
     refreshCards(); S.mainQ = null; unburyOld();
-    if (document.body.dataset.view === 'decks') showDecks(); else if (S.deck) paintCounts(countsFor(S.deck).c, S.card);
+    if (nids.size) notesChanged(nids);
+    else if (document.body.dataset.view === 'decks') showDecks(); else if (S.deck) paintCounts(countsFor(S.deck).c, S.card);
   }
   paintSync();
 }
@@ -267,7 +274,7 @@ function startSyncLoop() {
 const SESSION_NAME = 'カスタム学習セッション';
 function loadSession() { try { return JSON.parse(localStorage.getItem('session') || 'null'); } catch { return null; } }
 function saveSession(x) { try { x ? localStorage.setItem('session', JSON.stringify(x)) : localStorage.removeItem('session'); } catch {} }
-function sessionCards() { const se = loadSession(); return se ? se.ids.map(id => S.byId.get(id)).filter(c => c && c.queue >= 0) : []; }
+function sessionCards() { const se = loadSession(); return se ? se.ids.map(id => S.byId.get(id)).filter(c => c && c.queue >= 0 && !c.gone) : []; }
 function sessionCounts() {
   const now = nowSecs(); const t = timingToday(now, S.meta);
   const cards = sessionCards();
@@ -307,7 +314,7 @@ function countsFor(did) {
 // 道具の画面（歯車のメニュー）を開く
 function openTools() {
   if (document.body.dataset.view !== 'study') return;
-  const u = $('#menu-undo'); u.disabled = !S.undo.length; u.textContent = S.undo.length ? 'カードへの回答 を元に戻す' : '元に戻す';
+  const u = $('#menu-undo'), top = S.undo[S.undo.length - 1]; u.disabled = !S.undo.length; u.textContent = !top ? '元に戻す' : top.kind === 'note' ? `${top.label} を元に戻す` : 'カードへの回答 を元に戻す';
   $('#menu').classList.add('open');
 }
 function showDecks() {
@@ -370,7 +377,7 @@ function setBrowseSelect(on) {
   paintBrowseTitle(); paintBrowse(true);
 }
 function paintBrowseTitle() { $('#browse > .pnav .ptitle').textContent = BR.sel ? `${BR.sel.size}/${BR.list.length} 件選択` : 'ブラウザ'; }
-// 「アクション」の一覧（実機の並び）。暗記で写せないもの（デッキ・タグ・ノートの変更、削除など）は薄く出して押せない
+// 「アクション」の一覧（実機の並び）。暗記で写せないもの（デッキ・タグ・ノートタイプの変更、検索して置換）は薄く出して押せない
 const BROWSE_ACTIONS = [
   ['deck', 'デッキの変更', null],
   ['flag', 'フラグを変更', cs => pickFlag(cs)],
@@ -382,7 +389,7 @@ const BROWSE_ACTIONS = [
   ['tagAdd', 'タグを追加', null],
   ['tagDel', 'タグを解除', null],
   ['notetype', 'ノートタイプを変更', null],
-  ['delete', 'ノートを削除する', null],
+  ['delete', 'ノートを削除する', cs => notes.deleteBrowse(cs)],
 ];
 function openBrowseActions() {
   if (!BR.sel || !BR.sel.size) return;
@@ -404,7 +411,7 @@ function openBrowseActions() {
 }
 // 「並び替える」（新規カードの位置を変える。Anki の「位置（新規カード番号）を変更」の小窓と同じ項目・既定。rslib sort_cards と同じ結果）
 async function repositionAction(cs) {
-  const news = S.all.filter(c => c.type === 0 && !c.inDyn).map(c => c.due);
+  const news = S.all.filter(c => c.type === 0 && !c.inDyn && !c.gone).map(c => c.due);
   const minP = Math.max(news.length ? Math.min(...news) : 0, 0), maxP = news.length ? Math.max(...news) : 0;
   const lsb = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v === '1'; } catch { return d; } };
   const r = await iosPrompt({ title: '位置（新規カード番号）を変更', message: `先頭: ${minP}\n最後: ${maxP}`,
@@ -414,7 +421,7 @@ async function repositionAction(cs) {
   const clampN = (v, lo, hi, d) => { const n = Math.trunc(+v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
   const start = clampN(r.numbers[0], 0, 1000000, 0), step = clampN(r.numbers[1], 1, 10000, 1), [random, shift] = r.toggles;
   try { localStorage.setItem('randomOrderReposition', random ? '1' : '0'); localStorage.setItem('shiftPositionOfExistingCards', shift ? '1' : '0'); } catch {}
-  const { changes, count } = repositionNew(cs, S.all, { start, step, random, shift });
+  const { changes, count } = repositionNew(cs, S.all.filter(c => !c.gone), { start, step, random, shift });
   const touched = S.all.filter(c => changes.has(c.id));
   if (!touched.length) { toast(`新規カードの位置を${count}枚変更しました。`); return; }
   await changeCards(touched, c => Object.assign(c, changes.get(c.id)), `新規カードの位置を${count}枚変更しました。`, '並び替える', false);
@@ -465,9 +472,10 @@ function paintBrowse(force = false) {
   }
   sp.appendChild(frag);
 }
-async function previewCard(c) {
-  $('#bprev').hidden = false;
-  const f = $('#bprevf'); const css = S.meta.notetypes[c.mid]?.css || ''; const dark = isDark();
+async function previewCard(c) { $('#bprev').hidden = false; await previewInto($('#bprevf'), c); }
+// カードの裏をプレビューの枠に出す（ブラウザのプレビューと、編集の画面の目のボタン）
+async function previewInto(f, c) {
+  const css = S.meta.notetypes[c.mid]?.css || ''; const dark = isDark();
   const math = /\\\(|\\\[/.test(c.a) ? `<script>${MATHJAX_CONFIG}</script><script src="${MATHJAX_URL}" async></script>` : '';
   const body = c.a.replace(/\[\[type:[^\]]*\]\]/g, '').replace(/\[anki:play:(q|a):(\d+)\]/g, '');
   f.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="${MEDIA}"><style id="sa-base">${BASE_LIGHT}</style><style>${CARD_EXTRA}</style><style>${css}</style><style id="sa-dark"></style>${math}</head><body class="card${dark ? ' nightMode night_mode' : ''}">${body}</body></html>`;
@@ -482,7 +490,7 @@ function openAnkiPage(route, title, did) {
 function rebuildLB() {
   if (S.meta.config.loadBalancerEnabled === false) { S.lb = null; return; }
   const t = timingToday(nowSecs(), S.meta);
-  const cards = S.all.map(c => ({ due: c.due, nid: c.nid, conf: c.inDyn ? null : S.decksById.get(c.did)?.conf }));
+  const cards = S.all.filter(c => !c.gone).map(c => ({ due: c.due, nid: c.nid, conf: c.inDyn ? null : S.decksById.get(c.did)?.conf }));
   for (const [due, conf, nid] of S.meta.lbExtra || []) cards.push({ due, conf, nid });
   S.lb = buildLoadBalancer(cards, t.daysElapsed, t.nextDayAt, S.meta.presets);
 }
@@ -500,7 +508,7 @@ function fixMain(q) {
   const key = `${S.deck}|${S.day}`;
   if (!S.mainQ || S.mainQ.key !== key) { S.mainQ = { key, ids: q.main.map(c => c.id) }; return; }
   const day = timingToday(nowSecs(), S.meta).daysElapsed;
-  const still = c => !!c && (c.queue === 0 || ((c.queue === 2 || c.queue === 3) && c.due <= day));
+  const still = c => !!c && !c.gone && (c.queue === 0 || ((c.queue === 2 || c.queue === 3) && c.due <= day));
   q.main = S.mainQ.ids.map(id => S.byId.get(id)).filter(still);
   S.mainQ.ids = q.main.map(c => c.id);
   const dayLearn = q.main.filter(c => c.queue === 3).length;
@@ -589,6 +597,7 @@ async function undoAnswer() {
 }
 async function undoInner() {
   const top = S.undo[S.undo.length - 1];
+  if (top.kind === 'note') { S.undo.pop(); await notes.undo(top); toast(`元に戻しました（${top.label}）`); return; }   // ノートの追加・編集・削除
   if (top.kind === 'set') { // 非表示・休止・フラグ・マークを戻す（新しい時刻で前の状態を送る）
     S.undo.pop(); const now = Date.now();
     const base = lastRevIds(top.prevs.map(p => p.id));
@@ -723,7 +732,7 @@ function checkModified(card) {
 }
 // iOS の警告の小窓（AnkiMobile のエラー表示と同じ見た目: 幅270pt・見出し太字・本文13pt中央・区切り線の下に OK）
 // iOS の確認の小窓（見出し・説明・入力欄かスイッチ・キャンセル／OK）。OK なら { value, toggles }、キャンセルなら null
-function iosPrompt({ title, message = '', input = null, toggles = [], numbers = [] }) {
+function iosPrompt({ title, message = '', input = null, toggles = [], numbers = [], ok = 'OK', cancel = 'キャンセル' }) {
   let el = $('#iosDialog');
   if (!el) {
     const st = document.createElement('style');
@@ -744,6 +753,7 @@ function iosPrompt({ title, message = '', input = null, toggles = [], numbers = 
     document.body.append(el);
   }
   el.querySelector('.t').textContent = title; el.querySelector('.m').textContent = message;
+  el.querySelector('.no').textContent = cancel; el.querySelector('.yes').textContent = ok;
   const f = el.querySelector('.f'); f.innerHTML = '';
   let inp = null; const tgs = [], nums = [];
   for (const n of numbers) { const l = document.createElement('div'); l.className = 'num'; const s = document.createElement('span'); s.textContent = n.label; const c = document.createElement('input'); c.type = 'number'; c.inputMode = 'numeric'; c.value = n.value; if (n.min != null) c.min = n.min; if (n.max != null) c.max = n.max; l.append(s, c); f.append(l); nums.push(c); }
@@ -1220,8 +1230,8 @@ function setupAskButton() {
   }).catch(() => {});
 }
 function diag(o) { if (!DIAG.on || DIAG.n++ > 30) return; try { fetch(new URL('../api/diag', location.href), { method: 'POST', body: JSON.stringify({ ...o, t: Date.now(), view: document.body.dataset.view, kbd: kbdActive() }), keepalive: true }).catch(() => {}); } catch {} }
-// キー操作（PC 版 Anki 25.09.4 の qt/aqt/reviewer.py _shortcutKeys と同じ割り当て。アプリに無い機能＝e 編集・o オプション・v 録音・
-// Ctrl+Alt+N リセット・Ctrl+Alt+E 複製・Ctrl+Delete 削除・Ctrl+Shift+D 期日・Shift+A 自動で進む は未対応）
+// キー操作（PC 版 Anki 25.09.4 の qt/aqt/reviewer.py _shortcutKeys と同じ割り当て。アプリに無い機能＝o オプション・v 録音・
+// Ctrl+Alt+N リセット・Ctrl+Alt+E 複製・Ctrl+Shift+D 期日・Shift+A 自動で進む は未対応）
 // 日本語入力のままのキーボードでは e.key が全角（スペースは「　」、数字は「１」、記号は「＠」など）や かな になる。
 // 全角を半角に直し、文字と数字は押したキーの位置（e.code）で読む
 const toHalf = s => s.replace(/[\uFF01-\uFF5E]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)).replace(/\u3000/g, ' ').replace(/[ー−]/g, '-');
@@ -1241,7 +1251,7 @@ function onKey(e) {
   if ($('#iosDialog') && !$('#iosDialog').hidden) return;   // 確認の小窓（入力欄・OK はその中で受ける）
   if (!$('#iosAlert').hidden) { if (['Enter', 'Escape'].includes(e.key) || e.code === 'Space' || keyOf(e) === ' ') { e.preventDefault(); $('#iosAlert').hidden = true; } return; }
   // ブラウザ・設定・統計などを開いているあいだは、下の出題に答えない（Esc で閉じる）
-  const over = ['#bprev', '#browse', '#awpage', '#prefs'].map(q => $(q)).find(el => el && !el.hidden);
+  const over = ['#editor', '#bprev', '#browse', '#awpage', '#prefs'].map(q => $(q)).find(el => el && !el.hidden);
   if (over) { if (e.key === 'Escape') { e.preventDefault(); over.querySelector('.back')?.click(); } return; }
   // 日本語入力のままのキーボードで、処理しなかったキー（表の面の数字など）を iPad が文字入力として変換に回し、候補が出て
   // 以後のキーが全部変換に吸われてしまう。入力欄の外では、文字・数字・スペース・Enter・Backspace は全部ここで止める
@@ -1251,12 +1261,14 @@ function onKey(e) {
   const k = keyOf(e), ctrl = e.ctrlKey || e.metaKey, done = () => { e.preventDefault(); e.stopPropagation(); };
   if (ctrl && !e.altKey && /^[1-7]$/.test(k)) { done(); setFlag(+k); return; }        // Ctrl+1〜7 フラグ（同じフラグならはずす）
   if (ctrl && !e.altKey && (k === 'z' || k === 'Z')) { done(); undoAnswer(); return; } // 元に戻す
-  if (ctrl && e.altKey && (k === 'i' || k === 'I' || e.code === 'KeyI')) { done(); cardInfo(S.undo.length ? S.byId.get(S.undo[S.undo.length - 1].prev?.id ?? S.undo[S.undo.length - 1].prevs[0].id) : null); return; } // 前のカードの情報
+  if (ctrl && !e.altKey && e.key === 'Delete') { done(); notes.deleteFrom(S.card); return; } // ノートを削除
+  if (ctrl && e.altKey && (k === 'i' || k === 'I' || e.code === 'KeyI')) { done(); const u = [...S.undo].reverse().find(x => x.kind !== 'note'); cardInfo(u ? S.byId.get(u.prev?.id ?? u.prevs[0].id) : null); return; } // 前のカードの情報（ノートの追加・編集・削除は飛ばす）
   if (ctrl || e.altKey) return;
   switch (k) {
     case ' ': case 'Enter': done(); S.side === 'q' ? showAnswer() : rate(3, true); return;
     case '1': case '2': case '3': case '4': if (S.side === 'a') { done(); rate(+k, true); } return;
     case 'u': case 'z': done(); undoAnswer(); return;
+    case 'e': done(); notes.openEdit(S.card); return;   // 編集
     case 'r': case 'F5': done(); if (S.card) playAv(replayList(S.card)); return;
     case '5': done(); if (nativeAudio()) nativeAudio().postMessage({ audio: 'pause' }); else if (waPauseToggle()) {} else if (audio) audio.paused ? audio.play().catch(() => {}) : audio.pause(); else if (speechSynthesis.speaking) speechSynthesis.paused ? speechSynthesis.resume() : speechSynthesis.pause(); return;
     case '6': case '7': done(); if (nativeAudio()) nativeAudio().postMessage({ audio: 'seek', d: k === '6' ? -5 : 5 }); else if (waSeek(k === '6' ? -5 : 5)) {} else if (audio) audio.currentTime = Math.max(0, audio.currentTime + (k === '6' ? -5 : 5)); return;
@@ -1342,7 +1354,7 @@ const ACTIONS = [
   ['night', 'ナイトモード', () => { try { localStorage.setItem('theme', isDark() ? 'light' : 'dark'); } catch {} applyTheme(); }],
   ['buryNote', 'ノートを今日は非表示', () => buryNote()],
   ['suspendNote', 'ノートを休止', () => suspendNote()],
-  ['deleteNote', 'ノートを削除', null],
+  ['deleteNote', 'ノートを削除', () => notes.deleteFrom(S.card)],
   ['filter', 'フィルター / 詰め込み', null],
   ...[1, 2, 3, 4, 5, 6, 7].map(n => [`flag${n}`, `フラグ${n}`, () => setFlag(n)]),
   ['browse', 'ブラウザ', () => openBrowse('deck:current')],
@@ -1364,10 +1376,10 @@ const ACTIONS = [
   ['scratchpad', '手書きパッド', () => sp.toggle()],
   ['due', '期日を指定', () => dueAction()],
   ['empty', '空にする', null],
-  ['edit', '編集', null],
+  ['edit', '編集', () => notes.openEdit(S.card)],
   ['show', '解答を表示', () => { if (S.side === 'q') showAnswer(); }],
   ['showGood', '解答を表示 / 回答 (正解)', () => { if (S.side === 'q') showAnswer(); else answerBy(3); }],
-  ['add', '追加', null],
+  ['add', '追加', () => notes.openAdd({ did: typeof S.deck === 'number' ? S.deck : null })],
   ['playRec', '録音した声を再生', null],
   ['recMenu', '録音メニュー', null],
   ['fwd5', '音声 +5秒', () => avSeek(5)],
@@ -1474,6 +1486,31 @@ window.ankiBridge = cmd => {
   }
 };
 
+// ---------- ノートの追加・編集・削除（notes.mjs）のあとに画面を合わせる ----------
+function notesChanged(nids) {
+  refreshCards(); S.mainQ = null; if (S.lb) rebuildLB();
+  if (!$('#browse').hidden) {   // ブラウザ: 消したカードを外す（並びと位置はそのまま）
+    BR.list = BR.list.filter(c => !c.gone);
+    if (BR.sel) { for (const id of [...BR.sel]) if (S.byId.get(id)?.gone) BR.sel.delete(id); paintBrowseTitle(); }
+    $('#blist .spacer').style.height = BR.list.length * BR.rowH + 'px'; paintBrowse(true);
+  }
+  const view = document.body.dataset.view;
+  if (view === 'decks') showDecks();
+  else if (view === 'study') {
+    if (!S.card || S.card.gone) advance();   // 今のカードのノートを消した・課題を終えた画面で足した
+    else if (nids.has(S.card.nid)) { setFrame(cardHtml(S.card, S.side), S.card.mid, S.card.ord, S.side === 'a'); paintMarks(); paintCounts(countsFor(S.deck).c, S.card); }
+    else paintCounts(countsFor(S.deck).c, S.card);
+  }
+}
+function setupNotes() {
+  notes = createNotes({ S, store, MEDIA, loadNotes: () => loadNotes(S, BUNDLE), toast, iosAlert, isDark, isMarked,
+    confirm: (title, message, o = {}) => iosPrompt({ title, message, ...o }).then(r => !!r),
+    pushUndo: e => { S.undo.push(e); if (S.undo.length > 30) S.undo.shift(); },
+    changed: notesChanged, scheduleSync: () => scheduleSync(), nextNewPos, bumpNewPos,
+    showPreview: (f, c) => previewInto(f, c),
+    typing: t => { try { window.webkit?.messageHandlers?.sa?.postMessage({ typing: t }); } catch {} } });
+  notes.element();   // 戻るボタン（Android）が開け閉めを見られるように、先に作っておく
+}
 // ---------- 起動 ----------
 function setupTools() {
   pen = createPen($('#cardhost')); pen.setEnabled(false);   // 書き込みのデザインを読み込むまでは書けない
@@ -1630,7 +1667,7 @@ function setupTools() {
   $('#blist').addEventListener('click', e => {
     const r = e.target.closest('.br'); if (!r) return; const c = BR.list[+r.dataset.i];
     if (BR.sel) { if (BR.sel.has(c.id)) BR.sel.delete(c.id); else BR.sel.add(c.id); paintBrowseTitle(); paintBrowse(true); return; }
-    previewCard(c);
+    notes.openEdit(c);   // 行を押すとそのノートの編集（プレビューは編集の画面の目のボタン）
   });
   { const nr = $('#browse > .pnav .nr'); const selBtn = nr.querySelector('[title="選択"]'); selBtn.disabled = false; selBtn.onclick = () => setBrowseSelect(true);
     const mk = (t, cls, fn) => { const b = document.createElement('button'); b.className = 'tx ' + cls; b.textContent = t; b.onclick = fn; nr.append(b); };
@@ -1690,6 +1727,7 @@ const OVERLAYS = [
   ['#addpop', el => !el.hidden, () => $('#addpop').click()],
   ['#customPage', el => el.classList.contains('open'), () => $('#cp-back').click()],
   ['#askPanel', el => !el.hidden, () => $('#ask-close').click()],
+  ['#editor', el => !el.hidden, () => notes.close()],
   ['#bprev', el => !el.hidden, () => $('#bprev .back').click()],
   ['#browse', el => !el.hidden, () => $('#browse > .pnav .back').click()],
   ['#awpage', el => !el.hidden, () => $('#awpage .back').click()],
@@ -1714,6 +1752,7 @@ function setupBack() {
   mo.observe(document.body, { attributes: true, attributeFilter: ['data-view'] });
   for (const [q] of OVERLAYS) { const el = $(q); if (el) mo.observe(el, { attributes: true, attributeFilter: ['hidden', 'class'] }); }
 }
+setupNotes();
 setupTools();
 setupBack();
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});

@@ -5,6 +5,7 @@
 //   {t:'set', c:{...}}                    非表示・休止・フラグなど（答えではない変更）
 //   'set'・'state' に base（送った側が知っている、そのカードの最後の答えの記録 id）があれば、それより新しい答え（種類 0〜4、消していないもの）が
 //   もう届いているときは状態を置き換えない（古い期日で、別の端末や Anki の答えを上書きしないように）
+import { ensureNotes } from './_notes.js';
 const SEQ = "(select v from kv where k = 'seq')";
 const isInt = x => Number.isSafeInteger(x);
 export async function onRequestPost({ request, env }) {
@@ -12,6 +13,7 @@ export async function onRequestPost({ request, env }) {
   const ops = Array.isArray(body.ops) ? body.ops : [];
   if (ops.length > 1000) return Response.json({ error: 'too many ops' }, { status: 413 });
   const DB = env.DB;
+  if (ops.some(o => o && o.t === 'note')) await ensureNotes(DB);
   const st = [DB.prepare("update kv set v = v + 1 where k = 'seq'")];
   for (const o of ops) {
     const src = o.src === 'anki' ? 'anki' : 'app';
@@ -24,6 +26,16 @@ export async function onRequestPost({ request, env }) {
     if (o.t === 'undo') {
       if (!isInt(o.rid)) return Response.json({ error: 'bad rid' }, { status: 400 });
       st.push(DB.prepare(`update revlog set del = 1, seq = ${SEQ} where id = ?1 and del = 0`).bind(o.rid));
+    }
+    if (o.t === 'note') {
+      // ノートの追加・編集・削除（{t:'note', n:{id, mid, flds:[…], tags, did, cards:[[cid, ord, did, due], …], rev, del, added}}）。今より新しい（rev が大きいか同じ）ときだけ置き換える。
+      // added（端末で作ったノートか）は一度立てたら下ろさない
+      const n = o.n || {};
+      const okCards = Array.isArray(n.cards) && n.cards.every(x => Array.isArray(x) && x.length === 4 && x.every(isInt));
+      if (![n.id, n.mid, n.did, n.rev].every(isInt) || !Array.isArray(n.flds) || !n.flds.every(x => typeof x === 'string') || typeof n.tags !== 'string' || !okCards) return Response.json({ error: 'bad note' }, { status: 400 });
+      st.push(DB.prepare(`insert into notes(id, mid, flds, tags, did, cards, rev, src, del, added, seq) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ${SEQ}) on conflict(id) do update set mid = excluded.mid, flds = excluded.flds, tags = excluded.tags, did = excluded.did, cards = excluded.cards, rev = excluded.rev, src = excluded.src, del = excluded.del, added = max(notes.added, excluded.added), seq = excluded.seq where excluded.rev >= notes.rev`)
+        .bind(n.id, n.mid, JSON.stringify(n.flds), n.tags, n.did, JSON.stringify(n.cards), n.rev, src, n.del ? 1 : 0, n.added ? 1 : 0));
+      continue;
     }
     if (o.t === 'conf') {
       // デッキのオプション。今より新しい（rev が大きいか同じ）ときだけ置き換える

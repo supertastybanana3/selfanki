@@ -1,9 +1,10 @@
 // 端末の中の保存（IndexedDB）。
 //   srv_cards / srv_revlog … サーバー（D1）から取ってきた「移行時点より後の変化」の写し
 //   outbox                 … まだサーバーに送っていない自分の操作（答えた・元に戻した）。送れたら消す
+//   srv_notes              … サーバーから取ってきた、端末で追加・編集・削除したノート（束の上に重ねる）
 //   kv                     … 差分の続きの位置など
 // 版1（試作）の cards / revlog は試しに答えた分なので、版2に上げるときに捨てる（本番の開始）。
-const DB_NAME = 'selfanki', VERSION = 2;
+const DB_NAME = 'selfanki', VERSION = 3;
 let dbp = null;
 function open() {
   if (dbp) return dbp;
@@ -16,6 +17,7 @@ function open() {
       if (!db.objectStoreNames.contains('srv_revlog')) db.createObjectStore('srv_revlog', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('outbox')) db.createObjectStore('outbox', { autoIncrement: true });
       if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+      if (!db.objectStoreNames.contains('srv_notes')) db.createObjectStore('srv_notes', { keyPath: 'id' });
     };
     r.onsuccess = () => res(r.result);
     r.onerror = () => rej(r.error);
@@ -36,17 +38,18 @@ export async function outbox() {
 }
 export async function dropOps(keys) { const db = await open(); const tx = db.transaction('outbox', 'readwrite'); for (const k of keys) tx.objectStore('outbox').delete(k); return done(tx); }
 // サーバーから取った差分をまとめて書く（続きの位置も同じ取引で）
-export async function savePulled(cards, revlog, cursor) {
-  const db = await open(); const tx = db.transaction(['srv_cards', 'srv_revlog', 'kv'], 'readwrite');
+export async function savePulled(cards, revlog, cursor, notes = []) {
+  const db = await open(); const tx = db.transaction(['srv_cards', 'srv_revlog', 'srv_notes', 'kv'], 'readwrite');
   for (const c of cards) tx.objectStore('srv_cards').put(c);
   for (const r of revlog) tx.objectStore('srv_revlog').put(r);
+  for (const n of notes) tx.objectStore('srv_notes').put(n);
   tx.objectStore('kv').put(cursor, 'cursor');
   return done(tx);
 }
 // 移行時点のファイルが作り直されたら、差分の写しを捨てて最初から取り直す
 export async function resetServerCopy(baseName) {
-  const db = await open(); const tx = db.transaction(['srv_cards', 'srv_revlog', 'kv'], 'readwrite');
-  tx.objectStore('srv_cards').clear(); tx.objectStore('srv_revlog').clear();
-  tx.objectStore('kv').put({ cs: 0, ci: 0, rs: 0, ri: 0 }, 'cursor'); tx.objectStore('kv').put(baseName, 'base');
+  const db = await open(); const tx = db.transaction(['srv_cards', 'srv_revlog', 'srv_notes', 'kv'], 'readwrite');
+  tx.objectStore('srv_cards').clear(); tx.objectStore('srv_revlog').clear(); tx.objectStore('srv_notes').clear();
+  tx.objectStore('kv').put({ cs: 0, ci: 0, rs: 0, ri: 0, ns: 0, ni: 0 }, 'cursor'); tx.objectStore('kv').put(baseName, 'base');
   return done(tx);
 }

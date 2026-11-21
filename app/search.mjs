@@ -520,6 +520,7 @@ export async function loadNotes(S, bundleUrl) {
     const files = S.manifest?.notes || []; const m = new Map();
     const parts = await Promise.all(files.map(f => fetch(bundleUrl + f).then(r => { if (!r.ok) throw new Error(f + ': ' + r.status); return r.json(); })));
     for (const arr of parts) for (const [nid, mid, flds, sfld, csum, tags, mod] of arr) m.set(nid, { mid, flds, sfld: sfld == null ? '' : sfld, csum, tags, mod });
+    S.onNotesLoaded?.(m);   // 端末で追加・編集・削除したノートを重ねる（notes.mjs）
     S.notes = m; return m;
   })().catch(e => { S._notesP = null; throw e; });
   return S._notesP;

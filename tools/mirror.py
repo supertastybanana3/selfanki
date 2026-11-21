@@ -3,7 +3,8 @@
 #   python tools/mirror.py --dry      何をするかだけ数える（Anki にもサーバーにも書かない）
 # 前提: このパソコンで Anki が起動していて、アドオン AnkiConnect が入っている。動いている間は Anki で勉強・編集しない
 # 流れ:
-#   1. （ankiweb_sync が true なら）Anki を AnkiWeb と同期 → コレクションの写しを取る（書く前の控えを兼ねる。cloud/state/snap に20個まで）
+#   1. （ankiweb_sync が true なら）Anki を AnkiWeb と同期 → 端末で編集・削除したノートを Anki に書く → コレクションの写しを取る（書く前の控えを兼ねる。cloud/state/snap に20個まで）
+#      端末で追加したノートと、カードが増える編集は書かない（AnkiConnect ではノート・カードの id を端末と合わせられないため。Anki のアドオン「暗記と同期」で入る）
 #   2. 写しから自作アプリ用に書き出す（export_bundle.py）＝ Anki 側の今の状態
 #   3. サーバー側の今の状態＝移行時点（state/base.json）＋ D1 の差分
 #   4. カードごとに比べて、違っていれば新しいほうを正にする（新しさ: アプリ＝最後に答えた時刻、Anki＝カードの mod と最後の記録の遅いほう）
@@ -67,7 +68,7 @@ def server_view():
     if cache.get('base_at') != base['at']: cache = {'base_at': base['at'], 'cur': [0, 0, 0, 0], 'cards': {}, 'revlog': {}}
     cs, ci, rs, ri = cache['cur']
     while True:
-        j = api(f'pull?cs={cs}&ci={ci}&rs={rs}&ri={ri}&n=5000')
+        j = api(f'pull?cs={cs}&ci={ci}&rs={rs}&ri={ri}&ns={2 ** 53 - 1}&n=5000')   # ノートは server_notes で別に読む
         for (id_, st, rev, src, seq) in j['cards']: cache['cards'][str(id_)] = [json.loads(st), rev, src, seq]; cs, ci = seq, id_
         for row in j['revlog']: cache['revlog'][str(row[0])] = row; rs, ri = row[10], row[0]
         if not j['more']: break
@@ -104,6 +105,47 @@ def anki_params(cid, st, odid):
     if 'flags' in st: keys.append('flags'); vals.append(st['flags'])
     if odid: keys += ['did', 'odid', 'odue']; vals += [odid, 0, 0]  # フィルターデッキに入っていたら元のデッキに戻してから書く
     return {'card': cid, 'keys': keys, 'newValues': vals, 'warning_check': True}
+
+# ---- 端末で追加・編集・削除したノート（サーバーの notes 表） ----
+def server_notes():
+    big = 2 ** 53 - 1; ns = ni = 0; out = {}
+    while True:   # カードと記録の続きの位置は端に置いて、ノートだけを読む
+        j = api(f'pull?cs={big}&ci={big}&rs={big}&ri={big}&ns={ns}&ni={ni}&n=5000')
+        for (id_, mid, flds, tags, did, cards, rev, src, dl, added, seq) in j.get('notes', []):
+            out[id_] = {'id': id_, 'mid': mid, 'flds': json.loads(flds), 'tags': tags, 'did': did, 'cards': json.loads(cards), 'rev': rev, 'src': src, 'del': dl, 'added': added}; ns, ni = seq, id_
+        if not j.get('notes') or not j['more']: break
+    return out
+
+def apply_notes():
+    """決まりはアドオン（core.apply_notes）と同じ「新しいほう」＝端末の記録の rev と Anki のノートの mod。編集（カードが増えないもの）と削除だけを書く"""
+    recs = server_notes(); n = {'updated': 0, 'removed': 0, 'gone_in_anki': 0, 'anki_newer': 0, 'need_addon': 0}
+    if not recs: return n
+    ids = list(recs); info = []
+    for i in range(0, len(ids), 200): info += ac('notesInfo', notes=ids[i:i + 200])
+    push = []; now = int(time.time() * 1000)
+    for rec, inf in zip(recs.values(), info):
+        have = bool(inf and inf.get('noteId')); mod = (inf or {}).get('mod', 0) if have else None
+        if rec['del']:
+            if have and rec['rev'] > mod * 1000:
+                if not DRY: ac('deleteNotes', notes=[rec['id']])
+                n['removed'] += 1
+            continue
+        if not have:
+            if rec['added'] and rec['src'] != 'anki': n['need_addon'] += 1; continue
+            n['gone_in_anki'] += 1   # Anki で消してある → 端末でも消す
+            push.append({'t': 'note', 'src': 'anki', 'n': {**{k: rec[k] for k in ('id', 'mid', 'flds', 'tags', 'did', 'cards', 'added')}, 'rev': max(now, rec['rev'] + 1), 'del': 1}})
+            continue
+        if rec['rev'] <= mod * 1000:
+            if rec['src'] == 'app': n['anki_newer'] += 1
+            continue
+        names = sorted(inf['fields'], key=lambda k: inf['fields'][k]['order'])
+        if set(c[0] for c in rec['cards']) - set(inf.get('cards') or []) or len(names) != len(rec['flds']):
+            n['need_addon'] += 1; continue   # カードが増える編集・ノートタイプが変わっている
+        if not DRY: ac('updateNote', note={'id': rec['id'], 'fields': dict(zip(names, rec['flds'])), 'tags': rec['tags'].split()})
+        n['updated'] += 1
+    if push and not DRY: api('push', {'ops': push})
+    if n['need_addon']: log('端末で追加したノート・カードが増える編集', n['need_addon'], '件は、Anki のアドオン「暗記と同期」で入れる（ここでは書かない）')
+    return n
 
 def apply_conf(exp):
     """アプリで変えたデッキのオプション（サーバーの conf 表、src='app'）を Anki に書く。
@@ -163,7 +205,10 @@ def main():
         # 0. 同期する前に、今のコレクションの控えを取る（同期や書き戻しで困ったときに戻せるように）
         if CFG.get('ankiweb_sync') is True and not DRY: b0 = snap.take('before_sync'); log('同期の前の控え', b0['path'])
         # 1. 同期 → 写し
-        snap.sync_anki(); info = snap.take('mirror'); log('写し', info['dir'], 'カード', info['cards'], '記録', info['revlog'])
+        snap.sync_anki()
+        try: nnote = apply_notes(); summary['notes'] = nnote; log('ノート', nnote)
+        except Exception as e: log('ノートを書けなかった（続ける）', repr(e)); summary['note_fail'] = repr(e)[:200]
+        info = snap.take('mirror'); log('写し', info['dir'], 'カード', info['cards'], '記録', info['revlog'])
         # 2. 書き出し
         exp = os.path.join(ST, 'export_new')
         r = subprocess.run([sys.executable, os.path.join(HERE, 'export_anki.py'), info['local'], exp], cwd=ROOT, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=1800)
@@ -249,7 +294,7 @@ def main():
             ok = build_site.deploy(log)
             if ok: open(kp, 'w', encoding='utf-8').write(k)
             summary['deployed'] = ok
-        summary['ok'] = not bad and not summary.get('verify_card_ng') and not summary.get('verify_rev_missing') and summary.get('deployed', True) is not False and not summary.get('conf_fail')
+        summary['ok'] = not bad and not summary.get('verify_card_ng') and not summary.get('verify_rev_missing') and summary.get('deployed', True) is not False and not summary.get('conf_fail') and not summary.get('note_fail')
         return summary
     finally:
         lock(False)

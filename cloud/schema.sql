@@ -18,5 +18,10 @@ create table if not exists kv (k text primary key, v integer not null);
 insert or ignore into kv(k, v) values ('seq', 0);
 -- デッキのオプション（プリセット・デッキの割り当てと上限・全体の設定）。k＝'preset:<id>'・'deck:<did>'・'global'、v＝JSON
 create table if not exists conf (k text primary key, v text not null, rev integer not null, src text not null, seq integer not null);
+-- 端末で追加・編集・削除したノート（束の上に重ねる）。flds＝フィールドの JSON 配列、tags＝空白区切り、cards＝JSON [[カードの id, ord, デッキ, 新規の位置], …]、
+-- rev＝新しさ（ミリ秒）、src＝'app'（端末で変えた）／'anki'（アドオンが Anki に書いた・Anki で消えていた）、del＝1 なら消した、added＝1 なら端末で作ったノート
+create table if not exists notes (id integer primary key, mid integer not null, flds text not null, tags text not null, did integer not null, cards text not null,
+  rev integer not null, src text not null, del integer not null default 0, added integer not null default 0, seq integer not null);
+create index if not exists notes_seq on notes(seq, id);
 -- 別の端末を足すときの使い捨ての番号（h＝'pair:'+番号 の SHA-256、exp＝期限のミリ秒）。pair_code.py が入れ、/pair が使ったら消す
 create table if not exists pair (h text primary key, exp integer not null);
