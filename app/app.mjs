@@ -836,6 +836,9 @@ function cardInfo(c) {
 // ---------- カードの表示 ----------
 const CARD_EXTRA = `
 html,body{margin:0}
+#image-occlusion-container{position:relative;margin:0 auto;max-height:calc(95vh - 40px)}
+#image-occlusion-container img{position:absolute;top:0;left:0;width:100%;height:100%;max-width:unset;max-height:unset}
+#image-occlusion-canvas{position:absolute;top:0;left:0;width:100%;height:100%}
 body{padding:14.5px 15px 40px;overflow-wrap:break-word;-webkit-text-size-adjust:100%}
 img{max-width:100%;height:auto}
 #typeans{width:100%;box-sizing:border-box;line-height:1.75}
@@ -937,10 +940,20 @@ async function setFrame(html, mid, ord, scrollToAnswer = false) {
   const se = doc.scrollingElement; se.scrollTop = 0;
   if (scrollToAnswer) { const hr = doc.getElementById('answer'); if (hr && hr.offsetTop > $('#card').clientHeight * 0.6) se.scrollTop = hr.offsetTop - 40; }
   if (/\\\(|\\\[/.test(body)) typesetMath(doc, qa);
+  if (doc.getElementById('image-occlusion-container')) setupOcclusion(doc, my);
   // 入力欄: Enter で答えを出す（日本語の変換を確定する Enter は除く）。Anki と同じく出したら入力欄に移る
   const ti = doc.getElementById('typeans');
   if (ti && ti.tagName === 'INPUT') { ti.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); e.stopPropagation(); showAnswer(); } }); setTimeout(() => { if (doc.getElementById('typeans') === ti) ti.focus(); }, 0); }
   applyAa();
+}
+// 画像穴埋め（Image Occlusion）: テンプレートのスクリプトは書き出しで外しているので、Anki 25.9.4 の reviewer.js（aqt の
+// _aqt/data/web/js/reviewer.js そのもの。ankiweb/js に置いてある）を最初の1回だけカードの枠に読み込み、Anki と同じ anki.imageOcclusion.setup() を呼ぶ
+function setupOcclusion(doc, my) {
+  const run = () => { if (my !== frameSeq) return; try { doc.defaultView.anki.imageOcclusion.setup(); } catch (e) { const er = doc.getElementById('err'); if (er) er.textContent = String(e); } };
+  if (doc.defaultView.anki?.imageOcclusion) { run(); return; }
+  let s = doc.getElementById('sa-reviewer');
+  if (!s) { s = doc.createElement('script'); s.id = 'sa-reviewer'; s.src = new URL('../js/reviewer.js', location.href).href; doc.head.appendChild(s); }
+  s.addEventListener('load', run, { once: true });
 }
 // ---------- 文字を選んでいるときのタップ（選択を外すだけにする） ----------
 // 押し始めの時点で選択があったかを覚えておく（iOS はタップの途中で選択を消すので、click の時点では分からない）
