@@ -109,6 +109,8 @@ export function createScratchpad({ study, host, bottom, corner, isDark }) {
       cardId = card.id; mid = card.mid; on = get(onKey(mid), '0') === '1'; layout();
     },
     toggle() { if (mid == null) return; on = !on; put(onKey(mid), on ? '1' : '0'); layout(); },
+    // アクション「手書きサイズ」: 25% → 50% → 75% → 25%（実機。ほかの大きさのときは 25% へ）
+    cycleSize() { const n = spPref.size(); spPref.set('size', n === 25 ? 50 : n === 50 ? 75 : 25); layout(); },
     refresh() { layout(); },
     get on() { return on; },
   };
