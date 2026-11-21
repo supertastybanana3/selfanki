@@ -1,5 +1,5 @@
 // 自作の暗記アプリ（試作）本体
-import { makeContext, nextStates, answer, timingToday, learningSteps, buildLoadBalancer, lbAdd, learningFuzzSecs } from '../fsrs/sched.mjs';
+import { makeContext, nextStates, answer, forgetCard, setDueDate, parseDueDate, timingToday, learningSteps, buildLoadBalancer, lbAdd, learningFuzzSecs } from '../fsrs/sched.mjs';
 import { buildQueues, todayCounts, nextCard, deckCmp } from '../fsrs/queue.mjs';
 import { installAnkiBackend } from './ankiweb.mjs';
 import { compileSearch, loadNotes, displayText } from './search.mjs';
@@ -7,6 +7,7 @@ import * as store from './store.mjs';
 import * as sync from './sync.mjs';
 import { createPen } from './pen.mjs';
 import { createAsk } from './ask.mjs';
+import { typeQuestion, typeAnswer } from './typeans.mjs';
 import { createScratchpad, spPref, SP_WIDTH, SP_SIZE, SP_ALPHA } from './scratchpad.mjs';
 
 const BUNDLE = new URL('../bundle/', location.href).href;
@@ -29,7 +30,7 @@ const barDark = () => { try { return localStorage.getItem('barDark') || 'translu
 // 入れた機能は「設定」→「このアプリ独自の機能」で端末ごとに切れる
 const FEAT = { pen: '', autoSync: false, lang: 'ja' };   // lang … 画面の言語（Anki の言語の番号の形 ja・de-DE など。tools/build_site.py が config.json の language から入れる）
 let DESIGN = null;   // 読み込んだ書き込みのデザイン（mount の返り値）
-const PREF_DEFAULT = { replayBtn: true, stopQAudio: true, topbar: true, bottombar: true, counts: true, answerBtn: true, ivl: true, pen: true, autoSync: false, ticks: true, toolsBtn: true, noPad: false, extLinks: true };
+const PREF_DEFAULT = { neverType: false, replayBtn: true, stopQAudio: true, topbar: true, bottombar: true, counts: true, answerBtn: true, ivl: true, pen: true, autoSync: false, ticks: true, toolsBtn: true, noPad: false, extLinks: true };
 // autoSync: 既定は本家の Anki と同じく、下の「同期」を押したときだけ送受信する。オンにすると、答えるたびに数秒後に送り、開いたとき・戻ったとき・5分ごとにも同期する（このアプリ独自の方式）
 const pref = k => { try { const v = localStorage.getItem('pref:' + k); return v == null ? PREF_DEFAULT[k] : v === '1'; } catch { return PREF_DEFAULT[k]; } };
 // 学習の設定を画面に映す（トップバー・ボトムバー・残り枚数・回答ボタン・次回までの間隔）
@@ -75,7 +76,7 @@ function applyTheme() {
   if (barDark() === 'black') document.documentElement.dataset.bard = 'black'; else delete document.documentElement.dataset.bard;
   if (t === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
   penSide(S.side); sp?.refresh();
-  if (S.card) setFrame(S.side === 'q' ? S.card.q : S.card.a, S.card.mid, S.card.ord);
+  if (S.card) setFrame(cardHtml(S.card, S.side), S.card.mid, S.card.ord);
 }
 // 書き込みのデザインに、いま表と裏のどちらか・暗いテーマかを知らせる（墨の色はデザインが決める）
 const penSide = side => { try { DESIGN?.onSide?.(side, isDark()); } catch {} };
@@ -497,7 +498,7 @@ function advance(force = null) {
   }
   S.card = nx.card; S.side = 'q'; S.shownAt = performance.now(); S.shownState = curState(S.card, nowSecs()); sp?.setCard(S.card);
   pen.clear(); penSide('q'); paintCounts(c, S.card); ask.onCard(S.card); paintMarks();
-  setFrame(S.card.q, S.card.mid, S.card.ord); setButtons('q'); if (autoplay(S.card)) playAv(S.card.qav);
+  S.typed = null; setFrame(cardHtml(S.card, 'q'), S.card.mid, S.card.ord); setButtons('q'); if (autoplay(S.card)) playAv(S.card.qav);
   autoArm();
 }
 // 裏が画面に出た時刻。キーで答えるのは、裏が出てから少し（GUARD ms）経ってから（スペースの押し直しで「正解」になってしまうのを防ぐ）
@@ -507,9 +508,10 @@ const autoplay = card => presetOf(card.did).autoplay !== false;
 const replayList = card => S.side === 'a' ? (presetOf(card.did).replayq === false ? card.aav : [...card.qav, ...card.aav]) : card.qav;
 function showAnswer() {
   if (!S.card || S.side !== 'q' || S.busy) return;
+  S.typed = typedNow();   // 入力して答える: 打ったもの（入力欄が無ければ空）
   S.side = 'a'; S.answerAt = 0; penSide('a');
   const card = S.card;
-  setFrame(card.a, card.mid, card.ord, true).then(() => { if (S.card === card && S.side === 'a') S.answerAt = performance.now(); });
+  setFrame(cardHtml(card, 'a'), card.mid, card.ord, true).then(() => { if (S.card === card && S.side === 'a') S.answerAt = performance.now(); });
   setButtons('a'); if (autoplay(card)) { if (card.aav.length || pref('stopQAudio')) playAv(card.aav); } else if (pref('stopQAudio')) stopAv();
   autoArm();
 }
@@ -696,6 +698,79 @@ function checkModified(card) {
   return false;
 }
 // iOS の警告の小窓（AnkiMobile のエラー表示と同じ見た目: 幅270pt・見出し太字・本文13pt中央・区切り線の下に OK）
+// iOS の確認の小窓（見出し・説明・入力欄かスイッチ・キャンセル／OK）。OK なら { value, toggles }、キャンセルなら null
+function iosPrompt({ title, message = '', input = null, toggles = [] }) {
+  let el = $('#iosDialog');
+  if (!el) {
+    const st = document.createElement('style');
+    st.textContent = `#iosDialog{position:fixed;inset:0;z-index:81;background:rgba(0,0,0,.48);display:flex;align-items:center;justify-content:center}
+#iosDialog[hidden]{display:none}
+#iosDialog .box{width:270px;max-height:calc(100% - 40px);display:flex;flex-direction:column;border-radius:14px;background:var(--al-bg);color:var(--al-text);overflow:hidden;font-family:-apple-system,system-ui,sans-serif}
+#iosDialog .t{font-size:17px;font-weight:600;text-align:center;padding:19px 16px 0;line-height:22px}
+#iosDialog .m{font-size:13px;line-height:16px;text-align:left;white-space:pre-wrap;padding:2px 16px 12px;overflow:auto}
+#iosDialog .m:empty{display:none}
+#iosDialog input[type=text]{margin:0 16px 16px;height:26px;border:.5px solid var(--al-line);border-radius:7px;padding:0 6px;font-size:13px;background:var(--al-bg);color:var(--al-text)}
+#iosDialog label{display:flex;align-items:center;gap:8px;font-size:13px;padding:0 16px 12px}
+#iosDialog .bt{display:flex;border-top:.5px solid var(--al-line)} #iosDialog .bt button{flex:1;height:44px;font-size:17px;color:var(--al-blue)}
+#iosDialog .bt button+button{border-left:.5px solid var(--al-line);font-weight:600}`;
+    document.head.append(st);
+    el = document.createElement('div'); el.id = 'iosDialog'; el.hidden = true;
+    el.innerHTML = '<div class="box"><div class="t"></div><div class="m"></div><div class="f"></div><div class="bt"><button class="no">キャンセル</button><button class="yes">OK</button></div></div>';
+    document.body.append(el);
+  }
+  el.querySelector('.t').textContent = title; el.querySelector('.m').textContent = message;
+  const f = el.querySelector('.f'); f.innerHTML = '';
+  let inp = null; const tgs = [];
+  if (input != null) { inp = document.createElement('input'); inp.type = 'text'; inp.value = input; inp.setAttribute('inputmode', 'text'); f.append(inp); }
+  for (const t of toggles) { const l = document.createElement('label'); const c = document.createElement('input'); c.type = 'checkbox'; c.checked = !!t.on; l.append(c, document.createTextNode(t.label)); f.append(l); tgs.push(c); }
+  el.hidden = false; if (inp) setTimeout(() => { inp.focus(); inp.select(); }, 0);
+  return new Promise(res => {
+    const done = ok => { el.hidden = true; el.onkeydown = null; res(ok ? { value: inp ? inp.value : null, toggles: tgs.map(c => c.checked) } : null); };
+    el.querySelector('.no').onclick = () => done(false); el.querySelector('.yes').onclick = () => done(true);
+    el.onkeydown = e => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); done(true); } else if (e.key === 'Escape') { e.preventDefault(); done(false); } };
+  });
+}
+// 記録の id（ミリ秒）を、ほかの記録と重ならないように選ぶ（rslib の add_revlog_entry の uniquify と同じ考え方）
+function freshRevId() { let id = Date.now(); while (S.revIds.has(id)) id++; return id; }
+// 手で決めた期日・リセット（記録は種類 4「手動」）を、答えと同じ形で残して送る（元に戻すでも戻せる）
+async function applyManual(prevCard, res, msg) {
+  const c = S.byId.get(prevCard.id), prev = structuredClone(prevCard);
+  Object.assign(c, res.card); if (!('inDyn' in res.card)) delete c.inDyn; c.rev = res.revlog.id; addRev(res.revlog);
+  S.undo.push({ prev, revlogId: res.revlog.id, sibs: [] }); if (S.undo.length > 30) S.undo.shift();
+  await store.addOp({ t: 'ans', r: res.revlog, c: { id: c.id, st: pickState(c), rev: c.rev } });
+  toast(msg); S.mainQ = null; refreshCards(); advance(); scheduleSync();
+}
+// 新規カードにリセット（Anki の「リセット」。元の位置に戻す・回数をリセットは、前に選んだもの。初めは Anki の既定＝戻す・リセットしない）
+async function resetAction() {
+  const card = S.card; if (!card || S.busy) return;
+  const lsb = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v === '1'; } catch { return d; } };
+  const rp0 = lsb('restorePositionReviewer', S.meta.config.restorePositionReviewer ?? true), rc0 = lsb('resetCountsReviewer', S.meta.config.resetCountsReviewer ?? false);
+  const r = await iosPrompt({ title: '新規カードにリセット', toggles: [{ label: '可能な限り元の位置に復元', on: rp0 }, { label: '学習回数と復習での忘却回数をリセット', on: rc0 }] });
+  if (!r || S.card !== card) return;
+  const [rp, rc] = r.toggles;
+  try { localStorage.setItem('restorePositionReviewer', rp ? '1' : '0'); localStorage.setItem('resetCountsReviewer', rc ? '1' : '0'); } catch {}
+  const nextPos = nextNewPos();
+  const res = forgetCard(card, { restorePosition: rp, resetCounts: rc, nextPos, nowMs: freshRevId() });
+  if (res.usedNextPos) bumpNewPos(nextPos + 1);
+  await applyManual(card, res, '1枚のカードを新規カードに戻しました。');
+}
+// 次の新規の位置（コレクションの nextPos。この端末で使った分は覚えておく）
+function nextNewPos() { let ls = 0; try { ls = +localStorage.getItem('nextPos') || 0; } catch {} return Math.max(+S.meta.config.nextPos || 0, ls); }
+function bumpNewPos(n) { S.meta.config.nextPos = n; try { localStorage.setItem('nextPos', String(n)); } catch {} }
+// 期日を指定（"0"＝今日、"1!"＝明日にして間隔も1日に、"3-7"＝3〜7日後からランダム。前に入れたものを出しておく）
+async function dueAction() {
+  const card = S.card; if (!card || S.busy) return;
+  let last = S.meta.config.setDueReviewer ?? '';
+  try { last = localStorage.getItem('setDueReviewer') ?? last; } catch {}
+  const r = await iosPrompt({ title: '期日を指定', message: '何日後にカードを表示しますか？\n\n入力例）\n　0    = 今日\n　1!   = 明日。かつ、復習間隔を1日に変更\n　3-7 = 3日後～7日後からランダムに選択', input: last });
+  if (!r || S.card !== card) return;
+  const sp = parseDueDate(r.value.trim());
+  if (!sp) { iosAlert('Error', `invalid input: ${r.value}`); return; }
+  try { localStorage.setItem('setDueReviewer', r.value.trim()); } catch {}
+  const t = timingToday(nowSecs(), S.meta), days = sp.min + Math.floor(Math.random() * (sp.max - sp.min + 1));
+  const res = setDueDate(card, { today: t.daysElapsed, nextDayAt: t.nextDayAt, days, forceReset: sp.forceReset, initialFactor: presetOf(card.did)?.new?.initialFactor ?? 2500, nowMs: freshRevId() });
+  await applyManual(card, res, '1枚のカードの期日を設定しました。');
+}
 function iosAlert(title, msg) {
   const el = $('#iosAlert'); el.querySelector('.t').textContent = title; el.querySelector('.m').textContent = msg; el.querySelector('.m').hidden = !msg; el.hidden = false;
   el.querySelector('.m').scrollTop = 0;
@@ -730,6 +805,9 @@ const CARD_EXTRA = `
 html,body{margin:0}
 body{padding:14.5px 15px 40px;overflow-wrap:break-word;-webkit-text-size-adjust:100%}
 img{max-width:100%;height:auto}
+#typeans{width:100%;box-sizing:border-box;line-height:1.75}
+code#typeans{white-space:pre-wrap;font-variant-ligatures:none}
+.typeGood{background:#afa;color:black} .typeBad{color:black;background:#faa} .typeMissed{color:black;background:#ccc}
 .replay-button{display:inline-block;width:2.57em;height:2.57em;vertical-align:middle;margin:0 .1em;text-decoration:none}
 .replay-button svg{width:100%;height:100%;display:block}`;
 const MATHJAX_CONFIG = `window.MathJax={tex:{inlineMath:[['\\\\(','\\\\)']],displayMath:[['\\\\[','\\\\]']],processEscapes:false,processEnvironments:false,processRefs:false,packages:{'[+]':['noerrors','mathtools','mhchem'],'[-]':['textmacros']}},loader:{load:['[tex]/noerrors','[tex]/mathtools','[tex]/mhchem']},startup:{typeset:true}};`;
@@ -806,6 +884,9 @@ function cardDoc() {
   fr.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="${MEDIA}"><style id="sa-base">${isDark() ? BASE_DARK : BASE_LIGHT}</style><style>${CARD_EXTRA}</style><style id="sa-nt"></style><style id="sa-dark"></style><style id="sa-kbd">${kbdActive() ? KBD_CSS : ''}</style></head><body><div id="qa"></div></body></html>`;
   return frameP;
 }
+// 入力して答える（{{type:…}}）を差し込んだ、表か裏の HTML（aqt reviewer.py の typeAnsFilter と同じ）
+const cardHtml = (card, side) => side === 'q' ? typeQuestion(card.q, card.typ, pref('neverType')) : typeAnswer(card.a, card.typ, S.typed ?? '');
+function typedNow() { const el = $('#card').contentDocument?.getElementById('typeans'); return el && el.tagName === 'INPUT' ? el.value : ''; }
 async function setFrame(html, mid, ord, scrollToAnswer = false) {
   const my = ++frameSeq;
   const doc = await cardDoc(); if (my !== frameSeq) return;
@@ -823,6 +904,9 @@ async function setFrame(html, mid, ord, scrollToAnswer = false) {
   const se = doc.scrollingElement; se.scrollTop = 0;
   if (scrollToAnswer) { const hr = doc.getElementById('answer'); if (hr && hr.offsetTop > $('#card').clientHeight * 0.6) se.scrollTop = hr.offsetTop - 40; }
   if (/\\\(|\\\[/.test(body)) typesetMath(doc, qa);
+  // 入力欄: Enter で答えを出す（日本語の変換を確定する Enter は除く）。Anki と同じく出したら入力欄に移る
+  const ti = doc.getElementById('typeans');
+  if (ti && ti.tagName === 'INPUT') { ti.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); e.stopPropagation(); showAnswer(); } }); setTimeout(() => { if (doc.getElementById('typeans') === ti) ti.focus(); }, 0); }
   applyAa();
 }
 // ---------- 文字を選んでいるときのタップ（選択を外すだけにする） ----------
@@ -1098,6 +1182,7 @@ function onKey(e) {
   if (DIAG.n < 25) diag({ ev: 'key', key: e.key, code: e.code, ctrl: e.ctrlKey, meta: e.metaKey, comp: e.isComposing, nat: !!e.native, tgt: e.target && (e.target.id || e.target.tagName), inFrame: e.target && e.target.ownerDocument !== document });
   if (e.target && e.target.closest && e.target.closest('textarea,input,#askPanel')) return; // 質問を打っている最中はめくらない
   // 警告の小窓が出ている間は Enter・Space・Esc で閉じるだけ（iPad の標準の小窓と同じく、Enter は OK）
+  if ($('#iosDialog') && !$('#iosDialog').hidden) return;   // 確認の小窓（入力欄・OK はその中で受ける）
   if (!$('#iosAlert').hidden) { if (['Enter', 'Escape'].includes(e.key) || e.code === 'Space' || keyOf(e) === ' ') { e.preventDefault(); $('#iosAlert').hidden = true; } return; }
   // ブラウザ・設定・統計などを開いているあいだは、下の出題に答えない（Esc で閉じる）
   const over = ['#bprev', '#browse', '#awpage', '#prefs'].map(q => $(q)).find(el => el && !el.hidden);
@@ -1188,7 +1273,7 @@ const ACTIONS = [
   ['options', 'オプション', () => { if (typeof S.deck === 'number') openAnkiPage('deck-options', 'オプション', S.deck); }],
   ['custom', 'カスタム学習', () => openCustom()],
   ['auto', 'カードの自動送り', () => toggleAuto()],
-  ['reset', 'カードをリセット', null],
+  ['reset', 'カードをリセット', () => resetAction()],
   ['buryCard', 'カードを今日は非表示', () => buryCard()],
   ['suspendCard', 'カードを休止', () => suspendCard()],
   ['template', 'カードテンプレート', null],
@@ -1221,7 +1306,7 @@ const ACTIONS = [
   ['record', '声を録音', null],
   ['spSize', '手書きサイズ', () => sp.cycleSize()],
   ['scratchpad', '手書きパッド', () => sp.toggle()],
-  ['due', '期日を指定', null],
+  ['due', '期日を指定', () => dueAction()],
   ['empty', '空にする', null],
   ['edit', '編集', null],
   ['show', '解答を表示', () => { if (S.side === 'q') showAnswer(); }],
@@ -1366,11 +1451,12 @@ function setupTools() {
       [{ t: 'スケジュール', go: 'x', off: 1 }, { t: '通知', go: 'notify' }, { t: 'トップバー', go: 'topbar' }, { t: 'ボトムバー', go: 'bottombar' }, { t: 'タップ', go: 'tap' }, { t: 'スワイプ', go: 'swipe' }, { t: '手書きパッド', go: 'pad' }, { t: 'ゲームパッド', go: 'x', off: 1 }],
       [tgl('ツールアイコンを表示', 'toolsBtn', applyPrefs), { t: 'ツールアイコンの配置', v: toolsLeft() ? '左側' : '右側', go: 'toolspos' }],
       [tgl('回答確認用のマークを表示', 'ticks'), { t: '回答確認用マークの表示位置を種類別にする', tg: false, off: 1 }],
-      [tgl('音声再生ボタンを表示', 'replayBtn', () => { if (S.card) setFrame(S.side === 'q' ? S.card.q : S.card.a, S.card.mid, S.card.ord, S.side === 'a'); }),
+      [tgl('音声再生ボタンを表示', 'replayBtn', () => { if (S.card) setFrame(cardHtml(S.card, S.side), S.card.mid, S.card.ord, S.side === 'a'); }),
        tgl('質問の音声・動画の再生を解答表示で停止', 'stopQAudio'),
        { t: 'サイレントモードでも音声を自動再生', tg: true, off: 1 }, { t: '他アプリの音（BGMなど）の音量を常に抑えめにする', tg: false, off: 1 }],
       [{ t: '動画をループ再生', tg: false, off: 1 }, { t: '動画再生コントローラーを表示', tg: true, off: 1 }],
-      [tgl('手書きパッドを表示しない', 'noPad', () => sp.refresh())],
+      [tgl('文字入力で解答しない', 'neverType', () => { if (S.card && S.side === 'q') setFrame(cardHtml(S.card, 'q'), S.card.mid, S.card.ord); }),
+       tgl('手書きパッドを表示しない', 'noPad', () => sp.refresh())],
       [{ t: 'シェイクアクション', v: actName(shakeAct()), go: 'shake' }, { t: 'ダブルタップ防止', v: DTP[dtpKey()][0], go: 'dtp' }, tgl('リンクをこのアプリの外部で開く', 'extLinks')]] }),
     toolspos: () => ({ title: 'ツールアイコンの配置', groups: [[['left', '左側'], ['right', '右側']].map(([k, t]) => ({ t, ck: (toolsLeft() ? 'left' : 'right') === k, run: () => { setLS('toolsPos', k); applyPrefs(); } }))] }),
     dtp: () => ({ title: 'ダブルタップ防止', groups: [Object.entries(DTP).map(([k, [t]]) => ({ t, ck: dtpKey() === k, run: () => setLS('dtp', k) }))] }),

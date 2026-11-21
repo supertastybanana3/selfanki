@@ -395,3 +395,54 @@ export function answer(card, rating, ctx, takenMillis = 0, answeredAtMs = ctx.no
   };
   return { card: c, revlog, state: st };
 }
+
+// ---- 新規カードにリセット（rslib scheduler/new.rs reschedule_cards_as_new → Card::schedule_as_new、記録は revlog/mod.rs log_manually_scheduled_review） ----
+// card は暗記の形（due はフィルターデッキの中でも元のデッキの値、data に pos・s・d・dr・decay・lrt）。nextPos はコレクションの「次の新規の位置」
+// 返り値: { card, revlog, usedNextPos }（usedNextPos が true なら、呼んだ側で次の位置を 1 進める）
+export function forgetCard(card, { restorePosition = true, resetCounts = false, nextPos = 0, nowMs = Date.now() } = {}) {
+  const c = { ...card, data: { ...(card.data || {}) } };
+  const lastPos = restorePosition ? (card.type === 0 ? card.due : (card.data?.pos ?? null)) : null;
+  c.due = lastPos ?? nextPos;
+  c.type = 0; c.queue = 0; c.ivl = 0; c.factor = 0;
+  delete c.data.pos;
+  if (resetCounts) { c.reps = 0; c.lapses = 0; }
+  delete c.data.s; delete c.data.d;   // memory_state = None（dr・decay・最後に答えた時刻はそのまま）
+  delete c.inDyn;                      // フィルターデッキから元のデッキへ
+  const revlog = { id: nowMs, cid: card.id, ease: 0, ivl: 0, lastIvl: Math.min(card.ivl, 2147483647), factor: 0, time: 0, type: 4 };
+  return { card: c, revlog, usedNextPos: lastPos == null };
+}
+
+// ---- 期日を指定（rslib scheduler/reviews.rs set_due_date。書式は "0"・"1-3"・"5!"） ----
+export function parseDueDate(s) {
+  const m = /^(\d+)(?:-(\d+))?(!)?$/.exec(String(s ?? ''));
+  if (!m) return null;
+  const a = +m[1], b = m[2] != null ? +m[2] : a;
+  if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b) || a > 4294967295 || b > 4294967295) return null;
+  return { min: Math.min(a, b), max: Math.max(a, b), forceReset: !!m[3] };
+}
+// days は min〜max から選んだ日数（rand の Uniform。呼んだ側で選ぶ）。initialFactor はプリセットの new.initialFactor（2500 など）
+export function setDueDate(card, { today, nextDayAt, days, forceReset = false, initialFactor = 2500, nowMs = Date.now() }) {
+  const c = { ...card, data: { ...(card.data || {}) } };
+  const newDue = today + days;
+  const fsrs = card.data?.s != null && card.data?.d != null;
+  let ivl;
+  if (fsrs) {
+    if (card.data?.lrt != null) ivl = Math.floor(Math.max(0, nextDayAt - card.data.lrt) / 86400) + days;
+    else {
+      let due = card.due;
+      if (due > 1000000000) due = today + Math.trunc((due - nextDayAt) / 86400);
+      ivl = Math.min(4294967295, Math.max(0, card.ivl + (newDue - due)));
+    }
+  } else if (forceReset || !(card.type === 2 || card.type === 3)) ivl = Math.max(days, 1);
+  else ivl = Math.max(card.ivl, 1);
+  // schedule_as_review: 元の位置を覚え（新規なら今の位置）、復習にする。易しさが 0 ならプリセットの初期値
+  const lastPos = card.type === 0 ? card.due : (card.data?.pos ?? null);
+  if (lastPos == null) delete c.data.pos; else c.data.pos = lastPos;
+  delete c.inDyn;
+  c.ivl = ivl; c.due = newDue; c.type = 2; c.queue = 2;
+  if (!card.factor) c.factor = Math.round(Math.fround(Math.fround(initialFactor / 1000) * 1000));
+  const fr = Math.fround;
+  const factor = fsrs ? Math.trunc(fr(fr(fr(fr(fr(card.data.d) - 1) / 9) + fr(0.1)) * 1000)) : c.factor;
+  const revlog = { id: nowMs, cid: card.id, ease: 0, ivl: Math.min(ivl, 2147483647), lastIvl: Math.min(card.ivl, 2147483647), factor, time: 0, type: 4 };
+  return { card: c, revlog };
+}
