@@ -1386,6 +1386,31 @@ const ZONE_N = 9;
 const TAP_DEF = { q: Array(ZONE_N).fill('show'), a: ['again', 'off', 'good', 'again', 'off', 'good', 'again', 'off', 'good'] };
 const SWIPE_DEF = { left: 'tools', right: 'decks', up: 'off', down: 'off' };
 const shakeAct = () => lsGet('shake', 'undo');
+// ゲームパッド（設定＞学習＞ゲームパッド。既定は AnkiMobile の実機の値。スティックはいつもカードを上下に送る＝マニュアル）
+// ボタンの番号はブラウザの Gamepad API の標準の並び（0=A 1=B 2=X 3=Y 4/5=左右ショルダー 6/7=左右トリガー 8=オプション 9=メニュー 10/11=スティック押し込み 12〜15=十字）
+const PAD_BTNS = [[0, 'A', 'showGood'], [1, 'B', 'again'], [2, 'X', 'easy'], [3, 'Y', 'hard'], [12, '▲', 'off'], [13, '▼', 'off'], [14, '◀', 'off'], [15, '▶', 'off'],
+  [4, '左ショルダー', 'undo'], [5, '右ショルダー', 'replay'], [6, '左トリガー', 'off'], [7, '右トリガー', 'off'], [10, '左スティック', 'off'], [11, '右スティック', 'off'], [8, 'オプション', 'off'], [9, 'メニュー', 'off']];
+const padAct = (i, d) => lsGet('pad:' + i, d);
+function setupGamepad() {
+  if (!navigator.getGamepads) return;
+  let raf = 0, prev = {};
+  const loop = () => {
+    raf = 0;
+    const pads = [...navigator.getGamepads()].filter(Boolean); if (!pads.length) return;
+    for (const gp of pads) {
+      const was = prev[gp.index] || [];
+      if (document.body.dataset.view === 'study') {
+        for (const [i, , d] of PAD_BTNS) { const on = !!gp.buttons[i]?.pressed; if (on && !was[i]) { const k = padAct(i, d); if (k !== 'off') runAction(k); } }
+        const dz = Math.max(0.05, +(localStorage.getItem('padDeadzone') || 0));   // スティック: 縦の傾きでカードを送る
+        const y = gp.axes[1] || gp.axes[3] || 0;
+        if (Math.abs(y) > dz) { const se = $('#card').contentDocument?.scrollingElement; if (se) se.scrollTop += y * 18; }
+      }
+      prev[gp.index] = gp.buttons.map(b => b.pressed);
+    }
+    raf = requestAnimationFrame(loop);
+  };
+  window.addEventListener('gamepadconnected', () => { if (!raf) raf = requestAnimationFrame(loop); });
+}
 const TOP_DEF = ['decks', 'add', 'edit', 'browse', 'off', 'off', 'off', 'off', 'off'];
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v != null && ACT.has(v) ? v : d; } catch { return d; } };
 const tapAct = (side, i) => lsGet(`tap:${side}:${i}`, TAP_DEF[side][i]);
@@ -1457,7 +1482,7 @@ function setupTools() {
   // 「すべてのアクション」は AnkiMobile と同じ並びで全部出す（まだ写していないものは薄く）
   { const g = $('#menu-all'); g.innerHTML = ''; for (const [k, t, fn] of ACTIONS) { if (k === 'off') continue; const b = document.createElement('button'); b.textContent = t; b.dataset.all = k; if (!fn) b.disabled = true; b.onclick = () => { closeMenu(); runAction(k); }; g.append(b); } }
   $('#menu .fs .s').onclick = e => { e.stopPropagation(); aaStep(-1); }; $('#menu .fs .b').onclick = e => { e.stopPropagation(); aaStep(1); };
-  applyAa(); renderTopbar(); setupShake();
+  applyAa(); renderTopbar(); setupShake(); setupGamepad();
   $('#nav-help').onclick = () => window.open('https://docs.ankiweb.net/ankimobile/intro', '_blank', 'noopener');   // 「？」＝AnkiMobile のマニュアル（実機と同じページ）
   document.querySelectorAll('#menu [data-act]').forEach(b => b.onclick = () => {
     const a = b.dataset.act; closeMenu();
@@ -1501,7 +1526,7 @@ function setupTools() {
       ? Object.entries(BAR_D).map(([k, t]) => ({ t, ck: barDark() === k, run: () => { setLS('barDark', k); applyTheme(); } }))
       : Object.entries(BAR_L).map(([k, t]) => ({ t, ck: barStyle() === k, run: () => { setLS('bar', k); applyTheme(); } }))] }),
     study: () => ({ title: '学習', groups: [
-      [{ t: 'スケジュール', go: 'x', off: 1 }, { t: '通知', go: 'notify' }, { t: 'トップバー', go: 'topbar' }, { t: 'ボトムバー', go: 'bottombar' }, { t: 'タップ', go: 'tap' }, { t: 'スワイプ', go: 'swipe' }, { t: '手書きパッド', go: 'pad' }, { t: 'ゲームパッド', go: 'x', off: 1 }],
+      [{ t: 'スケジュール', go: 'sched' }, { t: '通知', go: 'notify' }, { t: 'トップバー', go: 'topbar' }, { t: 'ボトムバー', go: 'bottombar' }, { t: 'タップ', go: 'tap' }, { t: 'スワイプ', go: 'swipe' }, { t: '手書きパッド', go: 'pad' }, { t: 'ゲームパッド', go: 'gamepad' }],
       [tgl('ツールアイコンを表示', 'toolsBtn', applyPrefs), { t: 'ツールアイコンの配置', v: toolsLeft() ? '左側' : '右側', go: 'toolspos' }],
       [tgl('回答確認用のマークを表示', 'ticks'), tgl('回答確認用マークの表示位置を種類別にする', 'ticksByType')],
       [tgl('音声再生ボタンを表示', 'replayBtn', () => { if (S.card) setFrame(cardHtml(S.card, S.side), S.card.mid, S.card.ord, S.side === 'a'); }),
@@ -1511,6 +1536,17 @@ function setupTools() {
       [tgl('文字入力で解答しない', 'neverType', () => { if (S.card && S.side === 'q') setFrame(cardHtml(S.card, 'q'), S.card.mid, S.card.ord); }),
        tgl('手書きパッドを表示しない', 'noPad', () => sp.refresh())],
       [{ t: 'シェイクアクション', v: actName(shakeAct()), go: 'shake' }, { t: 'ダブルタップ防止', v: DTP[dtpKey()][0], go: 'dtp' }, tgl('リンクをこのアプリの外部で開く', 'extLinks')]] }),
+    // スケジュール（AnkiMobile 25.09: 日付更新時刻 00:00〜23:00・習得学習の前倒し許容時間 (分)・Legacy Timezone Handling）。コレクションの全体の設定（rollover・collapseTime）を変え、ほかの端末にも同期する（Anki には書き戻さない）
+    sched: () => ({ title: 'スケジュール', groups: [[
+      { t: '日付更新時刻', v: String(S.meta.config.rollover ?? 4).padStart(2, '0') + ':00', go: 'rollover' },
+      { t: '習得学習の前倒し許容時間 (分)', v: String(Math.round((S.meta.config.collapseTime ?? 1200) / 60)), run: async () => {
+        const r = await iosPrompt({ title: '習得学習の前倒し許容時間 (分)', input: String(Math.round((S.meta.config.collapseTime ?? 1200) / 60)) });
+        const n = r && parseInt(r.value, 10); if (!(n >= 0 && n <= 1440)) return;
+        await saveConf('global', { collapseTime: n * 60 }, Date.now()); S.mainQ = null; renderPrefs(); } },
+      { t: 'Legacy Timezone Handling', tg: S.meta.config.creationOffset == null, off: 1 }],
+      { note: 'Buggy. Only enable if you have an old Anki version that can\'t sync.' }] }),
+    rollover: () => ({ title: '日付更新時刻', groups: [Array.from({ length: 24 }, (_, h) => ({ t: String(h).padStart(2, '0') + ':00', ck: (S.meta.config.rollover ?? 4) === h, run: async () => { await saveConf('global', { rollover: h }, Date.now()); S.mainQ = null; checkDay(true); } }))] }),
+    gamepad: () => ({ title: 'ゲームパッド', groups: [PAD_BTNS.map(([i, t, d]) => ({ t, v: actName(padAct(i, d)), go: 'gp' + i })), { note: 'スティックは、いつもカードを上下に送ります。' }] }),
     toolspos: () => ({ title: 'ツールアイコンの配置', groups: [[['left', '左側'], ['right', '右側']].map(([k, t]) => ({ t, ck: (toolsLeft() ? 'left' : 'right') === k, run: () => { setLS('toolsPos', k); applyPrefs(); } }))] }),
     dtp: () => ({ title: 'ダブルタップ防止', groups: [Object.entries(DTP).map(([k, [t]]) => ({ t, ck: dtpKey() === k, run: () => setLS('dtp', k) }))] }),
     notify: () => ({ title: '通知', groups: [
@@ -1555,6 +1591,7 @@ function setupTools() {
   for (const side of ['q', 'a']) for (let i = 0; i < ZONES.length; i++) PAGES['tap' + side + i] = picker(ZONES[i], () => tapAct(side, i), `tap:${side}:${i}`);
   for (const [d, t] of SWIPES) PAGES['sw_' + d] = picker(t, () => swipeAct(d), 'swipe:' + d);
   for (let i = 0; i < TOP_DEF.length; i++) PAGES['tb' + i] = picker(`ボタン${i + 1}`, () => topAct(i), 'top:' + i);
+  for (const [i, t, d] of PAD_BTNS) PAGES['gp' + i] = picker(t, () => padAct(i, d), 'pad:' + i);
   PAGES.shake = () => { const pg = picker('シェイクアクション', shakeAct, 'shake')(); for (const it of pg.groups[0]) { const run = it.run; it.run = () => { run(); try { DeviceMotionEvent.requestPermission?.(); } catch {} }; } return pg; };
   let stack = [];
   const closePrefs = () => { $('#prefs').hidden = true; stack = []; };
