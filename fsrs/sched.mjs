@@ -12,10 +12,34 @@ const fr = Math.fround;
 export function roundPlaces(v, places) { const f = fr(10 ** places); return fr(Math.round(fr(fr(v) * f)) / f); }
 const MIN_EASE = 1.3, EASE_AGAIN = -0.2, EASE_HARD = -0.15, EASE_EASY = 0.15;
 
-// ---- 日付 ----
-export function timingToday(nowSecs, crt) {
-  const daysElapsed = Math.floor((nowSecs - crt) / DAY);
-  return { daysElapsed, nextDayAt: crt + (daysElapsed + 1) * DAY };
+// ---- 日付（rslib scheduler/timing.rs の sched_timing_today と、scheduler/mod.rs の timing_for_timestamp） ----
+// 2つ目の引数は、コレクションの情報 { crt, config: { rollover, creationOffset } }（S.meta）か、crt の数だけ。
+// 次の日の開始時刻 rollover（無ければ 4 時）と、作ったときの時差 creationOffset（分・西向きが正）を使い、今の時差は端末の時計から取る
+// （Anki のパソコン版・AnkiMobile と同じく、localOffset の設定ではなく、いま動いている端末のタイムゾーン）。
+// creationOffset が無い古いコレクションは v2 の古い計算（crt をその日の rollover 時刻にそろえて 86400 秒で割る）
+const localOffsetSecs = secs => -new Date(secs * 1000).getTimezoneOffset() * 60;   // 東向きが正（秒）
+const localDayNum = (secs, offEast) => Math.floor((secs + offEast) / DAY);           // その時差での暦の日の番号（num_days_from_ce の差に使う）
+const rolloverAt = (secs, offEast, hour) => localDayNum(secs, offEast) * DAY + (hour % 24) * 3600 - offEast;   // その日の rollover 時刻（UTC 秒）
+export function timingToday(nowSecs, meta) {
+  const crt = typeof meta === 'number' ? meta : meta.crt;
+  const conf = (typeof meta === 'number' ? null : meta.config) || {};
+  const hour = conf.rollover == null ? 4 : Math.min(Number(conf.rollover), 23);
+  const nowOff = localOffsetSecs(nowSecs);
+  if (conf.creationOffset == null) {
+    // sched_timing_today_v2_legacy
+    const crtAt = rolloverAt(crt, nowOff, hour);
+    const daysElapsed = Math.trunc((nowSecs - crtAt) / DAY);
+    let nextDayAt = rolloverAt(nowSecs, nowOff, hour);
+    if (nextDayAt < nowSecs) nextDayAt += DAY;
+    return { daysElapsed: Math.max(daysElapsed, 0), nextDayAt };
+  }
+  // sched_timing_today_v2_new
+  const crtOff = -Math.max(-23 * 60, Math.min(23 * 60, Number(conf.creationOffset))) * 60;
+  const today = rolloverAt(nowSecs, nowOff, hour);
+  const passed = today <= nowSecs;
+  let days = localDayNum(nowSecs, nowOff) - localDayNum(crt, crtOff);
+  if (!passed) days -= 1;
+  return { daysElapsed: Math.max(days, 0), nextDayAt: passed ? today + DAY : today };
 }
 
 // ---- 学習ステップ（steps.rs） ----
@@ -218,7 +242,7 @@ export function currentState(card, ctx) {
 export function makeContext(card, preset, cfg, nowSecs, lastReviewSecs, opts = {}) {
   const w = preset.fsrsParams6 && preset.fsrsParams6.length ? preset.fsrsParams6 : DEFAULT_W;
   const f = makeFsrs(w, true);
-  const timing = timingToday(nowSecs, cfg.crt);
+  const timing = timingToday(nowSecs, cfg.meta || cfg.crt);
   const dr = preset.desiredRetention;
   const lrt = card.data?.lrt ?? lastReviewSecs;
   const daysElapsed = lrt != null ? Math.floor((timing.nextDayAt - lrt) / DAY) : 0;

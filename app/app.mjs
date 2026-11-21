@@ -64,7 +64,7 @@ mq.addEventListener('change', applyTheme);
 async function fetchJSON(u) { const r = await fetch(u); if (!r.ok) throw new Error(`${u}: ${r.status}`); return r.json(); }
 const nowSecs = () => Math.floor(Date.now() / 1000);
 const presetOf = did => S.meta.presets[S.decksById.get(did).conf];
-const cfg = () => ({ crt: S.meta.crt, fsrsShortTermWithStepsEnabled: !!S.meta.config.fsrsShortTermWithStepsEnabled });
+const cfg = () => ({ crt: S.meta.crt, meta: S.meta, fsrsShortTermWithStepsEnabled: !!S.meta.config.fsrsShortTermWithStepsEnabled });
 
 // ---------- 読み込み ----------
 // カードの中身＝配ったファイル（c/*.json）。状態は「移行した時点（state.*.json）」に「サーバーの差分（D1 の写し）」と
@@ -100,7 +100,7 @@ function applyConf(rows) {
 async function saveConf(k, v, rev) { applyConf([{ k, v, rev }]); await store.addOp({ t: 'conf', k, v, rev }); }
 // Anki の「デッキのオプション」画面で保存したとき（rslib deckconfig/update.rs と同じ考え方）
 async function updateDeckConfigs(req) {
-  const rev = Date.now(), today = timingToday(nowSecs(), S.meta.crt).daysElapsed; let lastId = null, n = 0;
+  const rev = Date.now(), today = timingToday(nowSecs(), S.meta).daysElapsed; let lastId = null, n = 0;
   for (const p of req.configs) { const id = p.id || rev + n++; await saveConf('preset:' + id, { ...p, id }, rev); lastId = id; }
   for (const id of req.removed) if (id !== 1) await saveConf('preset:' + id, { removed: true }, rev);
   for (const d of S.meta.decks) if (req.removed.includes(d.conf) && d.id !== req.target) await saveConf('deck:' + d.id, { conf: 1 }, rev);
@@ -218,7 +218,7 @@ function loadSession() { try { return JSON.parse(localStorage.getItem('session')
 function saveSession(x) { try { x ? localStorage.setItem('session', JSON.stringify(x)) : localStorage.removeItem('session'); } catch {} }
 function sessionCards() { const se = loadSession(); return se ? se.ids.map(id => S.byId.get(id)).filter(c => c && c.queue >= 0) : []; }
 function sessionCounts() {
-  const now = nowSecs(); const t = timingToday(now, S.meta.crt);
+  const now = nowSecs(); const t = timingToday(now, S.meta);
   const cards = sessionCards();
   const learning = cards.filter(c => c.queue === 1 && c.due < t.nextDayAt).sort((a, b) => a.due - b.due);
   const main = cards.filter(c => c.queue === 2 || c.queue === 3 || c.queue === 0).sort((a, b) => a.due - b.due || a.id - b.id);
@@ -227,7 +227,7 @@ function sessionCounts() {
 }
 // 先取り学習: deck:そのデッキ prop:due<=N（復習・日をまたぐ学習）、休止中を除く、期日順
 function createReviewAhead(did, days) {
-  const root = S.decksById.get(did); const t = timingToday(nowSecs(), S.meta.crt);
+  const root = S.decksById.get(did); const t = timingToday(nowSecs(), S.meta);
   const inDeck = c => { const n = S.decksById.get(c.did)?.name; return n === root.name || n?.startsWith(root.name + '::'); };
   const ids = S.cards.filter(c => inDeck(c) && (c.queue === 2 || c.queue === 3) && c.due - t.daysElapsed <= days).sort((a, b) => a.due - b.due).map(c => c.id);
   saveSession({ kind: 'ahead', from: did, days, ids, created: Date.now() });
@@ -236,16 +236,16 @@ function createReviewAhead(did, days) {
 function leaveSessionIfDone(card) {
   const se = loadSession(); if (!se) return;
   // 答えて先の日の復習になったカードはセッションから抜ける（元のデッキに戻る）
-  if (card.queue === 2 && card.due > timingToday(nowSecs(), S.meta.crt).daysElapsed) { se.ids = se.ids.filter(id => id !== card.id); saveSession(se.ids.length ? se : null); }
+  if (card.queue === 2 && card.due > timingToday(nowSecs(), S.meta).daysElapsed) { se.ids = se.ids.filter(id => id !== card.id); saveSession(se.ids.length ? se : null); }
 }
 
 // ---------- デッキ一覧 ----------
 const extKey = (day, did) => `ext:${day}:${did}`;
 function getExt(day, did) { try { return JSON.parse(localStorage.getItem(extKey(day, did)) || 'null') || { new: 0, rev: 0 }; } catch { return { new: 0, rev: 0 }; } }
-function addExt(did, kind, n) { S.mainQ = null; const day = timingToday(nowSecs(), S.meta.crt).daysElapsed; const e = getExt(day, did); e[kind] += n; try { localStorage.setItem(extKey(day, did), JSON.stringify(e)); } catch {} }
+function addExt(did, kind, n) { S.mainQ = null; const day = timingToday(nowSecs(), S.meta).daysElapsed; const e = getExt(day, did); e[kind] += n; try { localStorage.setItem(extKey(day, did), JSON.stringify(e)); } catch {} }
 function countsFor(did) {
   if (did === 'session') return sessionCounts();
-  const now = nowSecs(); const timing = timingToday(now, S.meta.crt);
+  const now = nowSecs(); const timing = timingToday(now, S.meta);
   const counts = todayCounts(S.revlog, S.byId, (timing.nextDayAt - 86400) * 1000);
   const extend = new Map(S.meta.decks.map(d => [d.id, getExt(timing.daysElapsed, d.id)]).filter(([, e]) => e.new || e.rev));
   const ahead = S.meta.config.collapseTime ?? 1200;   // 学習中を先取りする秒数（Anki の「先取りの時間」）
@@ -334,7 +334,7 @@ function paintBrowse(force = false) {
   const from = Math.max(0, Math.floor(box.scrollTop / h) - 10), to = Math.min(BR.list.length, Math.ceil((box.scrollTop + box.clientHeight) / h) + 10);
   if (!force && BR.from === from && BR.to === to) return; BR.from = from; BR.to = to;
   sp.querySelectorAll('.br').forEach(e => e.remove());
-  const now = nowSecs(), t = timingToday(now, S.meta.crt), frag = document.createDocumentFragment();
+  const now = nowSecs(), t = timingToday(now, S.meta), frag = document.createDocumentFragment();
   const c1w = Math.max(40, box.clientWidth / 3 - 16); // 1列目の幅（窓の 1/3 から余白を引いたもの）
   for (let i = from; i < to; i++) {
     const c = BR.list[i]; const r = document.createElement('div');
@@ -362,7 +362,7 @@ function openAnkiPage(route, title, did) {
 // 負荷分散の数（rslib は出題の並びを作るときに作り直す＝デッキを開いたとき・日付が変わったとき）
 function rebuildLB() {
   if (S.meta.config.loadBalancerEnabled === false) { S.lb = null; return; }
-  const t = timingToday(nowSecs(), S.meta.crt);
+  const t = timingToday(nowSecs(), S.meta);
   const cards = S.all.map(c => ({ due: c.due, nid: c.nid, conf: c.inDyn ? null : S.decksById.get(c.did)?.conf }));
   for (const [due, conf, nid] of S.meta.lbExtra || []) cards.push({ due, conf, nid });
   S.lb = buildLoadBalancer(cards, t.daysElapsed, t.nextDayAt, S.meta.presets);
@@ -380,7 +380,7 @@ function paintCounts(c, card) {
 function fixMain(q) {
   const key = `${S.deck}|${S.day}`;
   if (!S.mainQ || S.mainQ.key !== key) { S.mainQ = { key, ids: q.main.map(c => c.id) }; return; }
-  const day = timingToday(nowSecs(), S.meta.crt).daysElapsed;
+  const day = timingToday(nowSecs(), S.meta).daysElapsed;
   const still = c => !!c && (c.queue === 0 || ((c.queue === 2 || c.queue === 3) && c.due <= day));
   q.main = S.mainQ.ids.map(id => S.byId.get(id)).filter(still);
   S.mainQ.ids = q.main.map(c => c.id);
@@ -543,7 +543,7 @@ function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.ad
 // Anki は「最後に非表示を戻した日」をコレクションに1つ持つ。暗記は端末が複数あるので、代わりに「非表示にした時刻（状態の rev）が今日の始まりより前」のものを戻す
 // （別の端末で今日非表示にしたものを、ほかの端末が戻してしまわないように）
 function checkDay(first = false) {
-  const t = timingToday(nowSecs(), S.meta.crt), d = t.daysElapsed;
+  const t = timingToday(nowSecs(), S.meta), d = t.daysElapsed;
   if (!first && S.day === d) return false;
   const changed = S.day != null && S.day !== d; S.day = d;
   if (changed) { S.undo = []; if (S.lb) rebuildLB(); }
@@ -551,7 +551,7 @@ function checkDay(first = false) {
   return changed;
 }
 function unburyOld() {
-  const t = timingToday(nowSecs(), S.meta.crt), start = (t.nextDayAt - 86400) * 1000, now = Date.now();
+  const t = timingToday(nowSecs(), S.meta), start = (t.nextDayAt - 86400) * 1000, now = Date.now();
   const cs = S.cards.filter(c => (c.queue === -2 || c.queue === -3) && (c.rev || 0) < start);
   if (!cs.length) return;
   const base = lastRevIds(cs.map(c => c.id)), ops = [];
@@ -566,7 +566,7 @@ function unburyOld() {
 // AnkiMobile はカードを出したときに状態を計算しておき、答えたときの状態と違えば「card was modified」で答えを断る（日付をまたいだ・同期で中身が変わった）。
 // 状態の作り方は ans_current.rs current_card_state。学習中の経過秒は比べない（set_elapsed_secs_equal）。カスタム学習セッションはフィルターデッキ扱い
 function curState(card, now) {
-  const t = timingToday(now, S.meta.crt), p = presetOf(card.did), filtered = S.deck === 'session';
+  const t = timingToday(now, S.meta), p = presetOf(card.did), filtered = S.deck === 'session';
   const mem = card.data && card.data.s != null ? { stability: card.data.s, difficulty: card.data.d } : null;
   const rem = (card.left || 0) % 1000;
   const learn = steps => { const sec = steps.currentDelay(rem);
@@ -613,7 +613,7 @@ function fmtDays(ivl) { if (ivl < 0) return fmtIvl(-ivl); return fmtIvl(ivl * 86
 function cardInfo(c) {
   if (!c) return;
   const revs = S.revlog.filter(r => r.cid === c.id).sort((a, b) => b.id - a.id);
-  const t = timingToday(nowSecs(), S.meta.crt);
+  const t = timingToday(nowSecs(), S.meta);
   const d = c.data || {}, nt = S.meta.notetypes[c.mid];
   const due = c.queue === -1 ? '（休止中）' : c.queue < -1 ? '（今日は非表示）' : c.type === 0 ? `新規 #${c.due}` : c.queue === 1 ? fmtTime(c.due * 1000) : fmtDate((t.nextDayAt - 86400 + (c.due - t.daysElapsed) * 86400) * 1000);
   let R = '';
@@ -952,7 +952,7 @@ function setButtons(mode) {
   if (mode === 'a') {
     const { next } = nextStates(S.card, ctxFor(S.card));
     // 1日の境目をまたぐ学習ステップは日に直してから書く（describe_next_states と同じ）
-    const t = timingToday(nowSecs(), S.meta.crt); const untilRollover = t.nextDayAt - nowSecs();
+    const t = timingToday(nowSecs(), S.meta); const untilRollover = t.nextDayAt - nowSecs();
     const secsOf = st => { if (st.kind === 'review') return st.days * 86400; const x = st.kind === 'relearn' ? st.learn.secs : st.secs; return x >= untilRollover ? (Math.floor((x - untilRollover) / 86400) + 1) * 86400 : x; };
     const collapse = S.meta.config.collapseTime ?? 1200;
     [[1, 'もう一度', 'again'], [2, '難しい', 'hard'], [3, '正解', 'good'], [4, '簡単', 'easy']].forEach(([g, name, cls]) => {
@@ -1042,7 +1042,7 @@ function openCustom() {
   const d = S.decksById.get(did);
   // 上乗せ可能＝そのデッキそのものにある新規（子デッキは含まない。custom_study_defaults の available_new と同じ）
   const own = q => S.cards.filter(c => c.did === did && q(c)).length;
-  const t = timingToday(nowSecs(), S.meta.crt);
+  const t = timingToday(nowSecs(), S.meta);
   const availNew = own(c => c.queue === 0), availRev = own(c => c.queue === 2 && c.due <= t.daysElapsed);
   const last = k => { try { return +localStorage.getItem(`cs:${k}:${did}`) || 0; } catch { return 0; } };
   const OPT = {
