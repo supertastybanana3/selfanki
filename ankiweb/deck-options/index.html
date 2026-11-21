@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+				<meta name="viewport" content="width=device-width, initial-scale=1" />
+		
+		<link rel="preload" as="script" crossorigin="anonymous" href="/_app/immutable/entry/start.D-fMnbFy.mjs">
+		<link rel="preload" as="script" crossorigin="anonymous" href="/_app/immutable/chunks/Dkmbe-G6.mjs">
+		<link rel="preload" as="script" crossorigin="anonymous" href="/_app/immutable/chunks/CAm1qXYJ.mjs">
+		<link rel="preload" as="script" crossorigin="anonymous" href="/_app/immutable/chunks/D0Kcqh4a.mjs">
+		<link rel="preload" as="script" crossorigin="anonymous" href="/_app/immutable/entry/app.qm-qTUP-.mjs">
+		<link rel="preload" as="script" crossorigin="anonymous" href="/_app/immutable/chunks/BbkoyQuY.mjs">
+		<link rel="preload" as="script" crossorigin="anonymous" href="/_app/immutable/chunks/8hkm7YIM.mjs">
+		<link rel="preload" as="script" crossorigin="anonymous" href="/_app/immutable/chunks/jkNgFhw5.mjs">
+		<link rel="preload" as="script" crossorigin="anonymous" href="/_app/immutable/chunks/Dm-VOW7A.mjs">
+	<script>
+// 自作アプリの中で Anki 本体の画面（統計など）を動かす。/_anki/… への問い合わせを親（アプリ）の ankiBackend に回す
+(function () {
+  var P = window.parent;
+  // 静的な置き場なので /deck-options/?did=… で開き、SvelteKit が読む前に /deck-options/<did> の形に直す
+  var qs = new URLSearchParams(location.search);
+  if (location.pathname === '/deck-options/' && qs.get('did')) history.replaceState(null, '', '/deck-options/' + qs.get('did') + location.search);
+  if (location.pathname === '/card-info/' && qs.get('cid')) history.replaceState(null, '', '/card-info/' + qs.get('cid') + location.search);
+  if (P && P !== window && P.ankiBackend) {
+    var of = window.fetch.bind(window);
+    window.fetch = async function (u, o) {
+      var s = typeof u === 'string' ? u : (u && u.url) || '';
+      var path = s.replace(location.origin, '');
+      if (path.indexOf('/_anki/') === 0) {
+        var body = o && o.body ? new Uint8Array(await new Response(o.body).arrayBuffer()) : new Uint8Array();
+        try { var out = await P.ankiBackend(path.slice(7), body, location.search); return new Response(out, { status: 200 }); }
+        catch (e) { return new Response(String(e && e.message || e), { status: 500 }); }
+      }
+      return of(u, o);
+    };
+    window.bridgeCommand = function (cmd, cb) { var r = P.ankiBridge ? P.ankiBridge(cmd) : undefined; if (cb) cb(r); };
+    if (P.ankiIsDark && P.ankiIsDark()) {
+      document.documentElement.classList.add('night-mode');
+      document.addEventListener('DOMContentLoaded', function () { document.body.classList.add('night-mode'); });
+      var st = document.createElement('style'); st.textContent = 'html.night-mode,html.night-mode body{background:#2c2c2c;color-scheme:dark}'; document.head.appendChild(st);
+    }
+  }
+})();
+</script>
+</head>
+	<body data-sveltekit-preload-data="hover">
+		<div style="display: contents">
+			<script>
+				{
+					__sveltekit_abs9w9 = {
+						base: ""
+					};
+
+					const element = document.currentScript.parentElement;
+
+					Promise.all([
+						import("/_app/immutable/entry/start.D-fMnbFy.mjs"),
+						import("/_app/immutable/entry/app.qm-qTUP-.mjs")
+					]).then(([kit, app]) => {
+						kit.start(app, element);
+					});
+				}
+			</script>
+		</div>
+	</body>
+</html>

@@ -1,0 +1,50 @@
+# iPad / iPhone 用の殻（ios/SelfAnki.swiftpm）を、署名なしの IPA に組む。できた IPA は Actions の成果物「SelfAnki-ipa」から落とし、
+# iloader などで自分の Apple ID で署名して入れる（README の「手順 7」）。
+# 使う前に: リポジトリの Settings → Secrets and variables → Actions → Variables に APP_HOST（例 myanki.pages.dev）を入れる
+name: build-ipa
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: macos-15-intel   # macos-latest（arm64）は混んでいて待たされることがあった。動かなければ macos-latest に変える
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Versions
+        run: |
+          sw_vers
+          xcodebuild -version
+      - name: Build
+        working-directory: ios/SelfAnki.swiftpm
+        env:
+          APP_HOST: ${{ vars.APP_HOST }}
+          APP_NAME: ${{ vars.APP_NAME }}
+          BUNDLE_ID: ${{ vars.BUNDLE_ID }}
+        run: |
+          set -e
+          test -n "$APP_HOST" || { echo "::error::リポジトリの変数 APP_HOST がありません（例 myanki.pages.dev）。README の手順 7"; exit 1; }
+          case "$APP_HOST" in http*|*/*) echo "::error::APP_HOST には https:// や / を付けない（例 myanki.pages.dev）"; exit 1;; esac
+          case "$APP_HOST" in example.*|*example.pages.dev) echo "::error::APP_HOST が例のままです。自分のサイトのホスト名にしてください"; exit 1;; esac
+          printf 'enum SelfAnkiConfig { static let host = "%s" }\n' "$APP_HOST" > Config.swift
+          # 合言葉は IPA に入れない（IPA を持っている人が取り出せるため）。殻は初回に番号の入力画面を出す
+          printf 'enum SelfAnkiSecret { static let token = "" }\n' > Secret.swift
+          xcodebuild -scheme SelfAnki -destination 'generic/platform=iOS' \
+            -configuration Release -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+          app=$(find "$RUNNER_TEMP/dd" -maxdepth 6 -type d -path "*Release-iphoneos/*.app" | head -1)
+          test -n "$app" || { echo "::error::.app が見つからない"; exit 1; }
+          P="$app/Info.plist"
+          # ホーム画面の名前（中のファイル名は英字のまま）
+          /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string ${APP_NAME:-暗記}" "$P" 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName ${APP_NAME:-暗記}" "$P"
+          if [ -n "$BUNDLE_ID" ]; then /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$P"; fi
+          # Service Worker（オフライン）を WKWebView で動かすためのドメイン指定（App-Bound Domains）
+          /usr/libexec/PlistBuddy -c "Delete :WKAppBoundDomains" "$P" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :WKAppBoundDomains array" -c "Add :WKAppBoundDomains:0 string $APP_HOST" "$P"
+          plutil -p "$P" | grep -E "CFBundleIdentifier|CFBundleDisplayName|WKAppBoundDomains" -A1
+          mkdir -p "$GITHUB_WORKSPACE/out" && cd "$RUNNER_TEMP" && rm -rf Payload && mkdir Payload && cp -R "$app" Payload/ && zip -qry "$GITHUB_WORKSPACE/out/SelfAnki.ipa" Payload
+          ls -la "$GITHUB_WORKSPACE/out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SelfAnki-ipa
+          path: out/SelfAnki.ipa
+          retention-days: 7

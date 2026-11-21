@@ -1,0 +1,191 @@
+# 暗記と同期（Anki のアドオン）
+# 「ツール」→「暗記」から、暗記（自分の Cloudflare に置いた selfanki）と学習の状態・記録をやり取りする。カードの中身は送らない
+# （カードを足したり直したりしたら、パソコンで python tools/export_anki.py と python tools/build_site.py --deploy）。
+# つなぐ先と合言葉はプロファイルごとに覚える（6桁の番号を入れてつなぐ。合言葉そのものは画面に出さない）。
+from __future__ import annotations
+
+import json
+import os
+
+from aqt import gui_hooks, mw
+from aqt.operations import CollectionOp, QueryOp
+from aqt.qt import QAction, QMenu
+from aqt.utils import askUser, getText, showInfo, showWarning, tooltip
+
+from . import core
+
+try:
+    from anki.lang import current_lang
+except ImportError:  # 古い Anki
+    current_lang = 'en'
+
+_JA = str(current_lang or '').startswith('ja')
+_T = {
+    'menu': ('暗記', 'selfanki'),
+    'sync': ('同期する', 'Sync'),
+    'dry': ('試す（数えるだけ・何も書かない）', 'Dry run (count only)'),
+    'connect': ('つなぐ（番号を入れる）…', 'Connect (enter code)…'),
+    'disconnect': ('つなぎを外す', 'Disconnect'),
+    'syncing': ('暗記と同期しています…', 'Syncing with selfanki…'),
+    'ask_url': ('暗記のサイトの住所（https://….pages.dev）', 'Address of your selfanki site (https://….pages.dev)'),
+    'ask_code': ('パソコンで python tools/pair_code.py を動かして出た6桁の番号', '6-digit code from python tools/pair_code.py'),
+    'connected': ('このプロファイル「{p}」を暗記につなぎました。', 'Connected this profile "{p}" to selfanki.'),
+    'not_connected': ('このプロファイルはまだ暗記につないでいません。「ツール」→「暗記」→「つなぐ」で番号を入れてください。', 'This profile is not connected yet. Use Tools > selfanki > Connect.'),
+    'disconnected': ('つなぎを外しました。', 'Disconnected.'),
+    'confirm_disconnect': ('このプロファイルの、暗記へのつなぎを外しますか？', 'Disconnect this profile from selfanki?'),
+    'done': ('暗記と同期しました。\n\nAnki に書いたカード {to_anki} 枚・記録 {rev_to_anki} 件\n暗記へ送ったカード {to_src} 枚・記録 {rev_to_srv} 件', 'Synced with selfanki.\n\nWritten to Anki: {to_anki} cards, {rev_to_anki} reviews\nSent to selfanki: {to_src} cards, {rev_to_srv} reviews'),
+    'dry_done': ('試しました（何も書いていません）。\n\nAnki に書くカード {to_anki} 枚・記録 {rev_to_anki} 件\n暗記へ送るカード {to_src} 枚・記録 {rev_to_srv} 件', 'Dry run (nothing written).\n\nTo Anki: {to_anki} cards, {rev_to_anki} reviews\nTo selfanki: {to_src} cards, {rev_to_srv} reviews'),
+    'nothing': ('暗記と同期しました（変わったものはありませんでした）', 'Synced with selfanki (nothing changed)'),
+    'warn_ng': ('\n\n書いた値が違うカードが {n} 枚ありました。Anki の「ファイル」→「バックアップから復元」で戻せます。', '\n\n{n} cards did not match after writing. You can restore from the backup made just before.'),
+    'warn_conf': ('\n\nデッキのオプションを書けませんでした: {e}', '\n\nCould not write deck options: {e}'),
+    'extra': ('\nマーク {marks} 件・デッキのオプション {conf} 件', '\nMarks: {marks}, deck options: {conf}'),
+    'busy': ('暗記との同期は、もう動いています。', 'A selfanki sync is already running.'),
+    'pairing': ('暗記につないでいます…', 'Connecting to selfanki…'),
+    'failed': ('暗記と同期できませんでした。\n\n{e}', 'Could not sync with selfanki.\n\n{e}'),
+}
+
+
+def t(k, **kw):
+    s = _T[k][0 if _JA else 1]
+    return s.format(**kw) if kw else s
+
+
+def _cfg():
+    return mw.addonManager.getConfig(__name__) or {}
+
+
+# ---------- つなぐ先（プロファイルごと。アドオンの user_files に置くので、アドオンを更新しても消えない） ----------
+def _links_path():
+    d = os.path.join(mw.addonManager.addonsFolder(mw.addonManager.addonFromModule(__name__)), 'user_files')
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, 'links.json')
+
+
+def _links():
+    try:
+        with open(_links_path(), encoding='utf-8') as f: return json.load(f)
+    except (OSError, ValueError): return {}
+
+
+def _save_links(d):
+    p = _links_path()
+    with open(p + '.tmp', 'w', encoding='utf-8') as f: json.dump(d, f, ensure_ascii=False)
+    os.replace(p + '.tmp', p)
+    try: os.chmod(p, 0o600)
+    except OSError: pass
+
+
+def connect():
+    url, ok = getText(t('ask_url'), parent=mw, default=(_links().get(mw.pm.name) or {}).get('site_url', 'https://'))
+    if not ok or not url.strip(): return
+    try: url = core.site_origin(url)   # …/pair を貼っても、サイトの住所だけにする
+    except core.SyncError as e: showWarning(str(e), parent=mw); return
+    code, ok = getText(t('ask_code'), parent=mw)
+    if not ok or not code.strip(): return
+    profile = mw.pm.name
+
+    def done(token):
+        links = _links(); links[profile] = {'site_url': url, 'token': token}; _save_links(links)
+        showInfo(t('connected', p=profile), parent=mw)
+
+    def failed(e):
+        showWarning(str(e) if isinstance(e, core.SyncError) else repr(e), parent=mw)
+    # 通信は裏で（つながらないときに Anki の画面が止まらないように）
+    QueryOp(parent=mw, op=lambda _col: core.pair(url, code), success=done).failure(failed).with_progress(t('pairing')).run_in_background()
+
+
+def disconnect():
+    links = _links()
+    if mw.pm.name in links and askUser(t('confirm_disconnect'), parent=mw):
+        del links[mw.pm.name]; _save_links(links); tooltip(t('disconnected'))
+
+
+# ---------- 同期 ----------
+def _message(s, dry):
+    s = {**s, 'to_src': s.get('to_srv', 0)}
+    marks = s.get('mark_add', 0) + s.get('mark_del', 0); conf = sum((s.get('conf') or {}).get(k, 0) for k in ('preset', 'new', 'deck'))
+    if not dry and not any(s.get(k) for k in ('to_anki', 'rev_to_anki', 'to_srv', 'rev_to_srv', 'verify_ng', 'conf_fail')) and not marks and not conf: return None
+    m = t('dry_done' if dry else 'done', **s)
+    if marks or conf: m += t('extra', marks=marks, conf=conf)
+    if s.get('verify_ng'): m += t('warn_ng', n=s['verify_ng'])
+    if s.get('conf_fail'): m += t('warn_conf', e=s['conf_fail'])
+    return m
+
+
+_running = False
+
+
+def sync(dry=False, auto=False):
+    global _running
+    link = _links().get(mw.pm.name)
+    if not link:
+        if not auto: showInfo(t('not_connected'), parent=mw)
+        return
+    if _running:   # 同期の途中でもう一度押した・Anki の同期のあとに続けたものと重なった
+        if not auto: tooltip(t('busy'))
+        return
+    _running = True
+    result = {}; profile = mw.pm.name
+
+    def work(col):
+        if mw.pm.name != profile: raise core.SyncError('プロファイルが切り替わったので止めました。')
+        if not dry:
+            # 書く前にバックアップを取る（Anki の「ファイル」→「バックアップから復元」で戻せる）
+            col.create_backup(backup_folder=mw.pm.backupFolder(), force=True, wait_for_completion=True)
+        result['s'] = core.run(col, link['site_url'], link['token'], dry=dry, log=lambda *a: print('[暗記と同期]', *a))
+
+    def done(*_):
+        global _running
+        _running = False
+        s = result.get('s') or {}
+        m = _message(s, dry)
+        if m is None: tooltip(t('nothing'))
+        elif auto and not s.get('verify_ng') and not s.get('conf_fail'): tooltip(m.replace('\n\n', '\n'), period=6000)
+        else: showInfo(m, parent=mw)
+
+    def failed(e):
+        global _running
+        _running = False
+        showWarning(t('failed', e=e if isinstance(e, core.SyncError) else repr(e)), parent=mw)
+
+    if dry:
+        QueryOp(parent=mw, op=work, success=done).failure(failed).with_progress(t('syncing')).run_in_background()
+    else:
+        from anki.collection import OpChanges
+
+        def op(col):
+            work(col)
+            # 画面（デッキ一覧・出題・ブラウザ）を読み直させる
+            return OpChanges(card=True, note=True, deck=True, tag=True, deck_config=True, browser_table=True, study_queues=True)
+        CollectionOp(parent=mw, op=op).success(done).failure(failed).run_in_background()
+
+
+def _after_anki_sync():
+    # Anki を閉じるとき（プロファイルを切り替えるときも）の自動同期のあとには続けない。閉じる流れはそのまま進んでコレクションを閉じるので、
+    # 続けると暗記との同期が途中で止まる。閉じる途中の Anki は、同期の前に画面を使えなくしている（aqt main.py unloadCollection）
+    if not mw.isEnabled() or mw.col is None or not _cfg().get('after_anki_sync'): return
+    sync(auto=True)
+
+
+def _setup_menu():
+    m = QMenu(t('menu'), mw)
+    for label, fn in (('sync', lambda: sync()), ('dry', lambda: sync(dry=True)), (None, None), ('connect', connect), ('disconnect', disconnect)):
+        if label is None: m.addSeparator(); continue
+        a = QAction(t(label), mw); a.triggered.connect(fn); m.addAction(a)
+    mw.form.menuTools.addMenu(m)
+
+
+_setup_menu()
+gui_hooks.sync_did_finish.append(_after_anki_sync)
+
+# 試験用: 環境変数 SELFANKI_ADDON_SELFTEST に結果を書くファイルの場所を入れると、プロファイルを開いたあと
+# メニューの「同期する」と同じ流れ（バックアップ→同期→結果の表示）を通し、表示の代わりにファイルへ書いて Anki を閉じる
+if os.environ.get('SELFANKI_ADDON_SELFTEST'):
+    def _selftest():
+        out = os.environ['SELFANKI_ADDON_SELFTEST']
+        def record(msg, *a, **k):
+            with open(out, 'w', encoding='utf-8') as f: f.write(str(msg))
+            mw.progress.timer(800, mw.close, False)
+        g = globals(); g['showInfo'] = g['showWarning'] = g['tooltip'] = record
+        sync(dry=os.environ.get('SELFANKI_ADDON_DRY') == '1')
+    gui_hooks.profile_did_open.append(lambda: mw.progress.timer(1500, _selftest, False))

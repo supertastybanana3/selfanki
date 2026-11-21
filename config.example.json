@@ -1,0 +1,16 @@
+{
+  "project_name": "<英小文字のプロジェクト名。例 myanki>",
+  "site_url": "",
+  "anki_collection": "<collection.anki2 の場所。例 C:/Users/あなた/AppData/Roaming/Anki2/User 1/collection.anki2>",
+  "anki_media_dir": "<collection.media の場所。例 C:/Users/あなた/AppData/Roaming/Anki2/User 1/collection.media>",
+  "language": "ja_JP",
+  "ankiconnect_url": "http://127.0.0.1:8765",
+  "ankiweb_sync": false,
+  "exclude_top_decks": [],
+  "exclude_underscore_decks": false,
+  "token_file": "~/.config/selfanki/token",
+  "extras": {
+    "pen_design": "",
+    "auto_sync": false
+  }
+}

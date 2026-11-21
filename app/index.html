@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" id="vp" content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>暗記</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#121212">
+<style>
+:root{--bg:#f6f5f1;--panel:#fff;--ink:#1d1d1b;--sub:#6b6a66;--line:#e3e1db;--new:#2f6fd0;--lrn:#d0342c;--rev:#1f8a4c;--accent:#2b5fab;--btn:#f1f0ec;--on:#e8eef7;--cardbg:#fff;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#141414;--panel:#1c1c1e;--ink:#e9e7e2;--sub:#9a978f;--line:#2e2e30;--new:#6ea1f0;--lrn:#f0716a;--rev:#5cc08a;--accent:#4a7fd0;--btn:#2a2a2c;--on:#26344a;--cardbg:#181818;color-scheme:dark}}
+:root[data-theme=dark]{--bg:#141414;--panel:#1c1c1e;--ink:#e9e7e2;--sub:#9a978f;--line:#2e2e30;--new:#6ea1f0;--lrn:#f0716a;--rev:#5cc08a;--accent:#4a7fd0;--btn:#2a2a2c;--on:#26344a;--cardbg:#181818;color-scheme:dark}
+#decks header{display:flex;align-items:center;gap:8px}
+#decks header h1{flex:1}
+#theme{height:36px;padding:0 12px;border-radius:18px;background:var(--btn);font-size:14px}
+.ico{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:-apple-system,"Hiragino Sans","Yu Gothic UI",system-ui,sans-serif}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+#status{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;font-size:18px;color:var(--sub);pointer-events:none}
+#status:empty{display:none}
+/* デッキ一覧（AnkiMobile の寸法と色に合わせた。AnkiMobile のスクリーンショットから実測） */
+:root{--br-sbar:#f2f2f7;--br-field:#e3e3e8;--br-row:#fff;--br-line:#c6c6c8;--br-susp:#ffffb2;--br-mark:#e8d8ff;--pop-bg:#fff;--pop-blue:#007aff;--pop-line:#c6c6c8;--am-bg:#f2f2f7;--am-group:#fff;--am-sep:#c6c6c8;--am-text:#000;--am-blue:color(display-p3 0.0000 0.4784 1.0000);--am-green:color(display-p3 0.0000 0.7333 0.0000);--am-zero:#afafaf;--am-chev:#c5c5c7;
+  --am-bar:#444444;--am-bar2:#444444;--am-bartext:color(display-p3 0.6941 0.8863 1.0000);--am-bartitle:#eeeeee;--am-barline:#a9a9ad}
+:root[data-bar=light]{--am-bar:#fbfbfcee;--am-bar2:#fbfbfcee;--am-bartext:color(display-p3 0.0000 0.4784 1.0000);--am-bartitle:#000}
+:root[data-bar=dark]{--am-bar:#222222;--am-bar2:#222222;--am-bartext:color(display-p3 0.4667 0.8000 1.0000);--am-bartitle:#fff}
+:root[data-bar=black]{--am-bar:#000;--am-bar2:#000;--am-bartext:color(display-p3 0.4667 0.8000 1.0000);--am-bartitle:#fff}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--br-sbar:#2c2c26;--br-field:#343434;--br-row:#1c1c1e;--br-line:#3e3e41;--br-susp:#aaaa33;--br-mark:#4a3a66;--pop-bg:#282829;--pop-blue:#4693ff;--pop-line:#676968;--am-bg:#000;--am-group:#1c1c1e;--am-sep:#3d3d41;--am-text:#fff;--am-blue:color(display-p3 0.4667 0.8000 1.0000);--am-green:color(display-p3 0.4863 0.9882 0.0000);--am-zero:#545454;--am-chev:#59595e;--am-bar:#121212;--am-bar2:#282829;--am-bartext:color(display-p3 0.4667 0.8000 1.0000);--am-bartitle:color(display-p3 0.4667 0.8000 1.0000);--am-barline:#262626;--am-barline2:#3e3e40}}
+:root[data-theme=dark]{--br-sbar:#2c2c26;--br-field:#343434;--br-row:#1c1c1e;--br-line:#3e3e41;--br-susp:#aaaa33;--br-mark:#4a3a66;--pop-bg:#282829;--pop-blue:#4693ff;--pop-line:#676968;--am-bg:#000;--am-group:#1c1c1e;--am-sep:#3d3d41;--am-text:#fff;--am-blue:color(display-p3 0.4667 0.8000 1.0000);--am-green:color(display-p3 0.4863 0.9882 0.0000);--am-zero:#545454;--am-chev:#59595e;--am-bar:#121212;--am-bar2:#282829;--am-bartext:color(display-p3 0.4667 0.8000 1.0000);--am-bartitle:color(display-p3 0.4667 0.8000 1.0000);--am-barline:#262626;--am-barline2:#3e3e40}
+@media (prefers-color-scheme:dark){:root[data-bard=black]:not([data-theme=light]){--am-bar:#000;--am-bar2:#000}}
+:root[data-theme=dark][data-bard=black]{--am-bar:#000;--am-bar2:#000}
+body[data-view=decks]{background:var(--am-bg)}
+body[data-view=decks],body[data-view=decks] #decks{touch-action:pan-y}
+#decks{min-height:100%;background:var(--am-bg);padding:calc(50.5px + env(safe-area-inset-top)) 0 calc(72px + env(safe-area-inset-bottom))}
+#navbar{position:fixed;top:0;left:0;right:0;z-index:5;height:calc(50.5px + env(safe-area-inset-top));padding-top:env(safe-area-inset-top);display:grid;grid-template-columns:1fr auto 1fr;align-items:center;background:var(--am-bar);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);border-bottom:.5px solid var(--am-barline)}
+#navbar .title{color:var(--am-bartitle);font-size:18px}
+#navbar .l,#navbar .r{display:flex;gap:30px;padding:0 16px;align-items:center} #navbar .r{justify-content:flex-end;gap:31.25px;padding-right:19.5px} #nav-search svg{width:23.8px;height:23.8px;flex:none}
+#navbar button{padding:0;width:22px;justify-content:center}
+#navbar .qmark{font-family:-apple-system,'SF Pro Display','Helvetica Neue',sans-serif;font-weight:700;font-size:26px;line-height:1}
+#navbar button{color:var(--am-bartext);height:44px;display:flex;align-items:center} #navbar svg{width:22px;height:22px}
+#decks .note{max-width:895px;margin:12px auto 0;padding:0 16px;font-size:13px;color:var(--am-zero)}
+#decklist{list-style:none;margin:0 auto;padding:19.5px 0 0;max-width:895px}
+#decklist .group{background:var(--am-group);border-radius:12px;margin:10px 1px 0;overflow:hidden;padding:0 14px 0 0}
+#decklist .row{display:grid;grid-template-columns:1fr auto 22px;align-items:center;min-height:49.5px;position:relative;padding-left:calc(55px + var(--depth) * 30px)}
+#decklist .row + .row::before{content:"";position:absolute;top:0;left:20px;right:0;height:.5px;background:var(--am-sep)}
+#decklist .tw{position:absolute;left:calc(22.5px + var(--depth) * 30px);top:0;bottom:0;width:30px;color:var(--am-blue);font-size:25px;transform:translateY(-1.25px);display:flex;align-items:center;justify-content:center}
+#decklist .dname{text-align:left;color:var(--am-text);font-size:17px;padding:13px 0;line-height:1.3;position:relative;top:-.5px}
+#decklist .dname.dyn{color:var(--am-blue)}
+#decklist .nums{display:flex;flex-direction:column;align-items:flex-end;font-size:16px;line-height:20px;font-variant-numeric:tabular-nums;padding-right:2px}
+#decklist .due{color:var(--am-green)} #decklist .newc{color:var(--am-blue)} #decklist .zero{color:var(--am-zero)}
+#decklist .chev{color:var(--am-chev);width:22px;height:44px;display:flex;align-items:center;justify-content:center}
+#bottomnav{position:fixed;left:0;right:0;bottom:0;z-index:5;height:calc(45px + env(safe-area-inset-bottom));padding:5px 14px env(safe-area-inset-bottom);display:flex;align-items:center;justify-content:space-between;background:var(--am-bar2);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);border-top:.5px solid var(--am-barline2,var(--am-barline))}
+body:not([data-view=decks]) #bottomnav,body:not([data-view=decks]) #navbar{display:none}
+#bottomnav button{color:var(--am-bartext);font-size:17.5px;height:40px}
+#bottomnav button:disabled{opacity:.4}
+#nav-sync.busy{opacity:.55} #nav-sync.err{color:#ff6961} #nav-sync:not([data-n=""])[data-n]::after{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:currentColor;margin-left:6px;vertical-align:middle}
+#browse{position:fixed;inset:0;z-index:24;background:var(--am-bg);display:flex;flex-direction:column} #browse[hidden],#bprev[hidden]{display:none}
+#browse .pnav{grid-template-columns:1fr auto 1fr} #browse .nl,#browse .nr{display:flex;align-items:center} #browse .nr{justify-content:flex-end;gap:35px;padding-right:22.5px}
+#browse .ic{color:var(--am-bartext);height:44px;display:flex;align-items:center;justify-content:center} #browse .ic:disabled{opacity:.4} #browse .nl .g{margin-left:19px} #browse .nl .e{margin-left:35px}
+#browse .sbar{flex:none;height:55px;padding:9.5px 9px;background:var(--br-sbar)} #browse .sfield{display:flex;align-items:center;gap:6px;height:36px;border-radius:10px;background:var(--br-field);padding:0 8px 0 11px;color:var(--am-zero)}
+#browse .sfield input{flex:1;min-width:0;height:100%;border:0;background:transparent;color:var(--am-text);font-size:17px;outline:none;-webkit-appearance:none;appearance:none} #browse .sfield input::-webkit-search-cancel-button{display:none}
+#browse .clr{width:22px;height:22px;border-radius:50%;background:var(--am-zero);color:var(--br-field);font-size:16px;line-height:22px;display:flex;align-items:center;justify-content:center}
+#blist{flex:1;overflow:auto;position:relative;-webkit-overflow-scrolling:touch} #blist .spacer{position:relative} #blist .br{position:absolute;left:0;right:0;height:30px;background:var(--br-row);border-bottom:.5px solid var(--br-line);font-size:16px;color:var(--am-text);white-space:nowrap}
+#blist .br span{position:absolute;top:0;line-height:29.5px;overflow:hidden} /* 列は窓を3等分（AnkiMobile と同じく、どの幅でも3等分） */
+#blist .br .c1{left:6px;width:calc(33.333% - 16px)} #blist .br .c2{left:calc(33.333% + 3.5px);width:calc(33.333% - 16px)} #blist .br .c3{left:66.667%;right:10px;text-align:center}
+#blist .br.susp{background:var(--br-susp)} #blist .br.f1{background:#7a3b39} #blist .br.f2{background:#7e5a2c} #blist .br.f3{background:#3d6b3a} #blist .br.f4{background:#2f4f7f} #blist .br.f5{background:#7a3d68} #blist .br.f6{background:#2f6b66} #blist .br.f7{background:#5a3f7f} #blist .br.mark{background:var(--br-mark)}
+#blist .empty{padding:24px;text-align:center;color:var(--am-zero);font-size:15px}
+#bprev{position:absolute;inset:0;z-index:2;background:var(--am-bg);display:flex;flex-direction:column} #bprev iframe{flex:1;width:100%;border:0;background:var(--st-card)}
+#awpage{position:fixed;inset:0;z-index:26;background:var(--am-bg);display:flex;flex-direction:column} #awpage[hidden]{display:none} #awpage iframe{flex:1;width:100%;border:0;background:var(--am-bg)}
+#addpop{position:fixed;inset:0;z-index:30}
+#addpop .pop{position:absolute;left:19px;bottom:calc(45px + env(safe-area-inset-bottom));width:304px;background:var(--pop-bg);border-radius:13px;display:flex;flex-direction:column}
+#addpop .ptl{height:60.5px;padding-top:15px;text-align:center;font-size:13px;font-weight:600;color:#8e8e93}
+#addpop button{height:57.5px;font-size:20px;color:var(--pop-blue);border-top:.5px solid var(--pop-line)} #addpop button:disabled{opacity:1;color:color-mix(in srgb,var(--pop-blue) 40%,transparent)}
+#addpop .arrow{position:absolute;left:calc(95px - 19px - 9px);bottom:-11px;width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-top:11px solid var(--pop-bg)}
+body.addopen #nav-add{color:#8e8e93}
+#prefs{position:fixed;inset:0;z-index:25;background:var(--am-bg);overflow:auto;-webkit-overflow-scrolling:touch}
+#prefs .pnav,#awpage .pnav,#browse .pnav{position:sticky;top:0;z-index:1;height:calc(50.5px + env(safe-area-inset-top));padding-top:env(safe-area-inset-top);display:grid;grid-template-columns:1fr auto 1fr;align-items:center;background:var(--am-bar);border-bottom:.5px solid var(--am-barline)}
+#prefs .back,#awpage .back,#browse .back{justify-self:start;display:flex;align-items:center;gap:6px;padding:0 0 0 12px;height:44px;color:var(--am-bartext);font-size:17px}
+#prefs .ptitle,#awpage .ptitle,#browse .ptitle{color:var(--am-text);font-size:17px;font-weight:600}
+#prefs .pbody{padding:34.5px 0 60px}
+#prefs .grp{background:var(--am-group);border-radius:12px;margin:0 1px 35px;overflow:hidden}
+#prefs .sec{font-size:11.5px;color:var(--am-zero);padding:0 21px;height:20.5px;margin-top:0;display:flex;align-items:flex-start}
+#prefs .it{display:flex;align-items:center;gap:8px;width:100%;min-height:45px;padding:0 22px 0 21px;position:relative;font-size:16px;color:var(--am-text);text-align:left}
+#prefs .it + .it::before{content:"";position:absolute;top:0;left:21px;right:0;height:.5px;background:var(--am-sep)}
+#prefs .it .lab{flex:1} #prefs .it .val{color:var(--am-blue)} #prefs .it .val.dim{color:var(--am-zero)} #prefs .it .chev{color:var(--am-chev);display:flex}
+#prefs .it.act .lab{color:var(--am-blue)} #prefs .it.off > *{opacity:.4} #prefs .it.tgr{min-height:53px} #prefs .it .ck{color:var(--am-blue);font-size:19px}
+#prefs .note{font-size:11.5px;line-height:1.5;color:var(--am-zero);padding:7px 21px 0;margin:-35px 0 35px}
+#prefs .about{padding:0 21px;font-size:15px;line-height:1.7;color:var(--am-text)} #prefs .about p{margin:0 0 12px}
+#prefs .tg{width:51px;height:31px;border-radius:16px;background:#39393d;position:relative;flex:none} #prefs .tg.on{background:var(--am-blue)} #prefs .tg::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;transition:left .2s} #prefs .tg.on::after{left:22px}
+/* 出題（AnkiMobile の出題画面を実測。ダーク: 上の帯#121212・カード#000・下の帯#141414・数字 青color(display-p3 0.4667 0.8000 1.0000)/橙color(display-p3 1.0000 0.5765 0.3569)/緑color(display-p3 0.4863 0.9882 0.0000)） */
+:root{--st-top:var(--am-bar);--st-bot:var(--am-bar2);--st-line:#c6c6c8;--st-card:#fff;--st-tab:var(--am-bartext);--st-new:color(display-p3 0.0000 0.4784 1.0000);--st-lrn:#ff7a1a;--st-rev:color(display-p3 0.0000 0.7333 0.0000);--st-plus:#000;--st-q:#e6e6e8;--st-qtext:#333;--st-done:#fff;--st-donetext:#111;--st-link:#2a6fd6;--st-menu:#f2f2f7;--st-mbtn:#fff;--st-mtext:#000}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--st-top:#121212;--st-bot:#141414;--st-line:#262626;--st-card:#000;--st-tab:color(display-p3 0.4667 0.8000 1.0000);--st-new:color(display-p3 0.4667 0.8000 1.0000);--st-lrn:color(display-p3 1.0000 0.5765 0.3569);--st-rev:color(display-p3 0.4863 0.9882 0.0000);--st-plus:#fff;--st-q:#242424;--st-qtext:#eee;--st-done:#2c2c2c;--st-donetext:#fcfcfc;--st-link:color(display-p3 0.7490 0.8588 0.9961);--st-menu:#141414;--st-mbtn:#1c1c1e;--st-mtext:#fff}}
+:root[data-theme=dark]{--st-top:#121212;--st-bot:#141414;--st-line:#262626;--st-card:#000;--st-tab:color(display-p3 0.4667 0.8000 1.0000);--st-new:color(display-p3 0.4667 0.8000 1.0000);--st-lrn:color(display-p3 1.0000 0.5765 0.3569);--st-rev:color(display-p3 0.4863 0.9882 0.0000);--st-plus:#fff;--st-q:#242424;--st-qtext:#eee;--st-done:#2c2c2c;--st-donetext:#fcfcfc;--st-link:color(display-p3 0.7490 0.8588 0.9961);--st-menu:#141414;--st-mbtn:#1c1c1e;--st-mtext:#fff}
+#study{display:none;position:fixed;inset:0;flex-direction:column;background:var(--st-card)}
+body[data-view=study] #study{display:flex} body[data-view=study] #decks{display:none}
+#tabs{flex:none;height:calc(50.5px + env(safe-area-inset-top));padding:env(safe-area-inset-top) 19.5px 0;display:grid;grid-template-columns:repeat(4,1fr);background:var(--st-top);border-bottom:.5px solid var(--st-line)}
+#tabs button{color:var(--st-tab);font-size:16px} #tabs button:disabled{opacity:.45}
+body.notopbar #tabs{display:none}
+body.nobottombar #bottom{display:none} body.nocounts #counts{visibility:hidden} body.noanswerbtn #answerbar{visibility:hidden} body.noivl #answerbar .rate span:first-child{display:none}
+#cardhost{position:relative;flex:1;min-height:0;background:var(--st-card)}
+#card{position:absolute;inset:0;width:100%;height:100%;border:0;background:var(--st-card)}
+.pen-layer{position:absolute;inset:0;pointer-events:none;z-index:2}
+.float{position:absolute;z-index:3}
+#ask{right:12px;top:12px;width:39px;height:39px;border-radius:50%;background:var(--st-q);color:var(--st-qtext);font-weight:700;font-size:19px}
+#marks{right:60px;top:16px;display:flex;gap:6px;font-size:22px;line-height:1;pointer-events:none} #marks .star{color:#f5c518}
+#toast{position:absolute;left:50%;bottom:24px;transform:translateX(-50%);z-index:40;padding:8px 14px;border-radius:10px;background:rgba(40,40,42,.92);color:#fff;font-size:15px;opacity:0;transition:opacity .2s;pointer-events:none;white-space:nowrap}
+#toast.show{opacity:1}
+#cardInfo{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center}
+#cardInfo.open{display:flex}
+#cardInfo .sheet{width:min(720px,calc(100% - 24px));max-height:calc(100% - 60px);overflow:auto;border-radius:14px;background:var(--st-menu);color:var(--st-mtext);padding:14px 16px}
+#cardInfo .ci-head{display:flex;align-items:center;margin-bottom:8px} #cardInfo .ci-head b{flex:1;font-size:17px}
+#cardInfo .close{padding:8px 12px;border-radius:9px;background:var(--st-mbtn);color:inherit}
+#cardInfo table{border-collapse:collapse;width:100%;font-size:14px} #cardInfo th,#cardInfo td{padding:5px 8px;text-align:left;border-bottom:1px solid color-mix(in srgb,currentColor 12%,transparent)}
+#cardInfo .ci-kv th{width:9em;font-weight:600;opacity:.75} #cardInfo .ci-log{margin-top:14px}
+#cardInfo .e1{color:#e8453c} #cardInfo .e2{color:#f39c26} #cardInfo .e3{color:#4caf50} #cardInfo .e4{color:#3d8bfd}
+#ask.has{background:var(--st-qtext);color:var(--st-q)}
+:root{--ask-bg:rgba(255,255,255,.97);--ask-fg:#111;--ask-sub:#666;--ask-line:rgba(0,0,0,.15);--ask-btn:rgba(0,0,0,.07);--ask-qbg:rgba(0,0,0,.05)}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--ask-bg:rgba(28,28,30,.97);--ask-fg:#eee;--ask-sub:#aaa;--ask-line:rgba(255,255,255,.2);--ask-btn:rgba(255,255,255,.14);--ask-qbg:rgba(255,255,255,.09)}}
+:root[data-theme=dark]{--ask-bg:rgba(28,28,30,.97);--ask-fg:#eee;--ask-sub:#aaa;--ask-line:rgba(255,255,255,.2);--ask-btn:rgba(255,255,255,.14);--ask-qbg:rgba(255,255,255,.09)}
+#askPanel{position:absolute;top:58px;right:10px;z-index:30;width:600px;max-width:calc(100% - 20px);max-height:calc(100% - 120px);display:flex;flex-direction:column;gap:8px;padding:10px 12px;border-radius:14px;box-shadow:0 4px 18px rgba(0,0,0,.3);font:17px/1.6 -apple-system,"Hiragino Sans",sans-serif;text-align:left;background:var(--ask-bg);color:var(--ask-fg);border:1px solid var(--ask-line);overflow:hidden}
+#askPanel>.ask-bar,#ask-q,#askPanel .ask-foot{flex-shrink:0}
+#askPanel .ask-bar{display:flex;align-items:center;gap:8px;margin:-10px -12px 0;padding:10px 12px 2px;cursor:move;touch-action:none;-webkit-user-select:none;user-select:none}
+#askPanel .ask-bar b{flex:1;font-size:15px} #askPanel .ask-grip{color:var(--ask-sub);font-size:16px;letter-spacing:-3px;margin-right:2px}
+#askPanel button{border-radius:10px;padding:9px 12px;font-size:14px;line-height:1;background:var(--ask-btn);color:inherit}
+#ask-log{overflow-y:auto;-webkit-overflow-scrolling:touch;max-height:45vh;min-height:0;flex:0 1 auto}
+/* ボタン・帯・一覧の文字は長押しで選べないように（答えの文章と入力欄は選べる・コピーできる） */
+button,.ask-bar,#ask-imgl,#bottom,#tabs,#pentools,#corner,#navbar,#bottomnav,#decklist,#menu,#customPage,#prefs,#browse,#donebox{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+#ask-log,#ask-q{-webkit-user-select:text;user-select:text}
+#ask-log .ask-sub,#ask-imgl{font-size:14px;color:var(--ask-sub)}
+#ask-log .ask-qb{margin:6px 0 4px;padding:6px 10px;border-radius:10px;background:var(--ask-qbg);font-size:15px;white-space:pre-wrap}
+#ask-log .ask-ab{margin:2px 2px 10px} #ask-log mjx-container[display="true"]{text-align:left!important;margin-left:0!important}
+#ask-q{width:100%;font:17px/1.5 -apple-system,sans-serif;padding:8px 10px;border-radius:10px;border:1px solid var(--ask-line);background:transparent;color:inherit;resize:none;-webkit-user-select:text;user-select:text}
+#askPanel .ask-foot{display:flex;align-items:center;gap:10px}
+#askPanel #ask-send{font-size:16px;font-weight:700;background:#2f6fde;color:#fff} #askPanel #ask-send.busy{opacity:.45}
+body.nopen .pen-layer{display:none}
+#corner{right:2.75px;bottom:2.75px;display:flex;flex-direction:column;align-items:flex-end;gap:0}
+#timer{color:var(--st-plus);font-size:14px;line-height:16px;font-variant-numeric:tabular-nums;padding-right:16.75px;min-height:16px;margin-bottom:-8.5px;position:relative;z-index:1}
+#gear{width:44px;height:44px;color:var(--st-tab);display:flex;align-items:center;justify-content:center} #gear svg{width:33px;height:33px}
+#bottom{flex:none;min-height:calc(55px + env(safe-area-inset-bottom));padding:6px 12px env(safe-area-inset-bottom);background:var(--st-bot);border-top:.5px solid var(--st-line);display:flex;align-items:center;justify-content:center}
+#counts{font-size:20px;position:relative;top:2.5px;color:var(--st-plus);font-family:-apple-system,'SF Pro Text','Helvetica Neue',sans-serif}
+#counts .c-new{color:var(--st-new)} #counts .c-lrn{color:var(--st-lrn)} #counts .c-rev{color:var(--st-rev)}
+#counts .cur{text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
+/* 答えの面のボタン（AnkiMobile 実測: もう一度color(display-p3 0.6157 0.2353 0.2235)・難しいcolor(display-p3 0.7529 0.4824 0.1765)・正解color(display-p3 0.2980 0.6549 0.1882)・簡単color(display-p3 0.1765 0.4196 0.9608)、高さ約51pt、すき間8pt） */
+#answerbar{display:flex;gap:8px;width:100%;position:relative;top:7.5px}
+#answerbar .rate{flex:1;height:51.5px;border-radius:7px;color:#fff;font-size:17px;line-height:1.25;display:flex;flex-direction:column;align-items:center;justify-content:center}
+#answerbar{touch-action:none}   /* 押したまま指をずらしてもブラウザがスクロールなどに取らない（app.mjs の pressButton） */
+#answerbar .again{background:#aa3333} #answerbar .hard{background:#cc7700} #answerbar .good{background:#00aa00} #answerbar .easy{background:#006cff}
+body:has(#answerbar:not([hidden])) #bottom{padding-left:8px;padding-right:8px;padding-top:3.5px}
+#donebox{position:absolute;inset:0;z-index:4;background:var(--st-done);display:none} #donebox iframe{width:100%;height:100%;border:0;background:var(--st-done)}
+#donebox.show{display:block} #donebox h2{font-size:36px;line-height:1.45;margin:0 0 18px;font-weight:600} #donebox p{font-size:17px;line-height:1.7;margin:0}
+#donebox a{color:var(--st-link);text-decoration:none}
+/* カスタム学習（AnkiMobile: 全画面・上に 戻る/題/完了、学習タイプの一覧に✓、オプション1行と注記） */
+#customPage{position:fixed;inset:0;z-index:40;display:none;flex-direction:column;background:var(--am-bg);color:var(--am-text)} #customPage.open{display:flex}
+.cp-nav{flex:none;height:calc(46px + env(safe-area-inset-top));padding:env(safe-area-inset-top) 12px 0;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;background:var(--st-top);border-bottom:.5px solid var(--st-line)}
+.cp-nav b{font-weight:600;font-size:17px;color:var(--am-text)} .cp-nav button{color:var(--st-tab);font-size:17px;height:44px} .cp-nav #cp-back{justify-self:start} .cp-nav #cp-done{justify-self:end}
+.cp-body{flex:1;overflow:auto;padding:18px 4px 40px}
+.cp-body h4{max-width:895px;margin:14px auto 6px;padding:0 20px;font-size:13px;font-weight:400;color:#8e8e93}
+.cp-group{list-style:none;margin:0 auto;padding:0;max-width:895px;background:var(--am-group);border-radius:12px;overflow:hidden}
+.cp-group li{position:relative;min-height:45px;padding:11px 54px 11px 20px;font-size:17px;display:flex;align-items:center}
+.cp-group li + li::before{content:"";position:absolute;top:0;left:20px;right:0;height:.5px;background:var(--am-sep)}
+.cp-group li.on::after{content:"";position:absolute;right:22px;top:50%;width:7px;height:14px;border:solid var(--am-blue);border-width:0 2.5px 2.5px 0;transform:translateY(-65%) rotate(40deg)}
+.cp-group li.off{opacity:.38}
+.cp-opt{justify-content:space-between;padding-right:20px!important}
+.cp-opt input{width:110px;text-align:right;border:0;background:transparent;color:var(--am-blue);font-size:17px;outline:none}
+.cp-foot{max-width:895px;margin:8px auto 0;padding:0 20px;font-size:13px;color:#8e8e93}
+/* 歯車のメニュー（AnkiMobile: パネル#1a1a1a・ボタン#1c1c1e・3列） */
+#menu{position:fixed;inset:0;z-index:30;display:none;background:#0008} #menu.open{display:block}
+#menu .panel{position:absolute;right:0;bottom:0;width:min(417px,100vw);max-height:min(484px,calc(100% - 20px));overflow:auto;background:var(--st-menu);color:var(--st-mtext);border-radius:14px 14px 0 0;padding:0 10px 10px}
+#menu .head{display:flex;align-items:center;justify-content:space-between;height:49px;padding:0 16.5px 0 11.5px}
+#menu .head #menu-deck{color:var(--st-tab);font-size:18px;font-weight:400;padding:0;height:49px}
+#menu .head .fs{display:flex;align-items:center;color:var(--st-tab)} #menu .head .fs i{font-style:normal} #menu .head .fs .s{font-size:13.5px} #menu .head .fs .v{font-size:16px;color:var(--st-mtext);margin:0 14px 0 20.5px} #menu .head .fs .b{font-size:17px}
+#menu h3{text-align:center;font-size:14px;line-height:16px;font-weight:400;margin:2.75px 0 10.75px} #menu .grid + h3{margin-top:22.25px}
+#menu .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px 20px}
+#menu .grid button{height:49px;border-radius:9px;background:var(--st-mbtn);color:var(--st-mtext);font-size:14px;padding:0 6px;line-height:1.3}
+#menu .grid button:disabled{opacity:.4} #menu .grid #menu-undo:disabled{opacity:1}
+/* スマホ（幅 600px 未満）: ペンは Pencil 専用なので道具を隠す・ボタンが下で切れないように・ブラウザは2列 */
+/* 狭い窓（AnkiMobile は幅が狭いと戻るボタンを「<」だけにする。境目は一定しないので 500pt で近似） */
+@media (max-width:499px){#browse .back .bl,#bprev .back .bl{display:none}}
+@media (max-width:599px){
+  #bottom{padding-bottom:max(env(safe-area-inset-bottom),12px)}
+  body:has(#answerbar:not([hidden])) #bottom{padding-bottom:max(env(safe-area-inset-bottom),14px)}
+  #answerbar{gap:6px} #answerbar .rate{font-size:16px}
+  #askPanel{width:auto;left:10px}
+}
+/* iOS の警告の小窓（AnkiMobile の Error と同じ: 幅270pt・背景#1e1e1e・見出し17pt太字・本文13pt/16pt中央・OK 44pt 青 rgb(70,147,255)・後ろは約半分の暗さ。実機で測った） */
+:root{--al-bg:#f2f2f2;--al-text:#000;--al-line:#c6c6c8;--al-blue:#007aff}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--al-bg:#1e1e1e;--al-text:#fff;--al-line:#616061;--al-blue:rgb(70,147,255)}}
+:root[data-theme=dark]{--al-bg:#1e1e1e;--al-text:#fff;--al-line:#616061;--al-blue:rgb(70,147,255)}
+#iosAlert{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.48);display:flex;align-items:center;justify-content:center}
+#iosAlert[hidden]{display:none}
+#iosAlert .box{width:270px;max-height:calc(100% - 40px);display:flex;flex-direction:column;border-radius:14px;background:var(--al-bg);color:var(--al-text);overflow:hidden;font-family:-apple-system,system-ui,sans-serif;-webkit-user-select:none;user-select:none}
+#iosAlert .t{font-size:17px;font-weight:600;text-align:center;padding:19px 16px 0;line-height:22px}
+#iosAlert .m{font-size:13px;line-height:16px;text-align:center;white-space:pre-wrap;padding:2px 16px 20px;overflow:auto;flex:1 1 auto;min-height:0}
+#iosAlert .t:has(+ .m[hidden]){padding-bottom:20px} /* 見出しだけの小窓（Anki の画面の alert） */
+#iosAlert .ok{flex:none;height:44px;border-top:.5px solid var(--al-line);color:var(--al-blue);font-size:17px}
+</style>
+</head>
+<body data-view="decks">
+<div id="status"></div>
+<nav id="navbar">
+  <div class="l">
+    <button id="nav-stats" title="統計"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="2" y="11" width="4.4" height="10.5" rx=".4"/><rect x="7.3" y="3.5" width="4.4" height="18" rx=".4"/><rect x="12.6" y="6.5" width="4.4" height="15" rx=".4"/><rect x="17.9" y="15" width="4.4" height="6.5" rx=".4"/></svg></button>
+  </div>
+  <span class="title">デッキ</span>
+  <div class="r">
+    <button id="nav-search" title="検索"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><circle cx="10.2" cy="10.2" r="7.6" stroke-width="1.9"/><path d="m15.9 15.9 5.6 5.6" stroke-width="2.3"/></svg></button>
+    <button id="nav-settings" title="設定"><svg viewBox="0 0 24 24"><path d="M9.866 4.290 L10.207 1.553 A10.6 10.6 0 0 1 13.793 1.553 L14.134 4.290 A8.0 8.0 0 0 1 15.943 5.039 L18.119 3.345 A10.6 10.6 0 0 1 20.655 5.881 L18.961 8.057 A8.0 8.0 0 0 1 19.710 9.866 L22.447 10.207 A10.6 10.6 0 0 1 22.447 13.793 L19.710 14.134 A8.0 8.0 0 0 1 18.961 15.943 L20.655 18.119 A10.6 10.6 0 0 1 18.119 20.655 L15.943 18.961 A8.0 8.0 0 0 1 14.134 19.710 L13.793 22.447 A10.6 10.6 0 0 1 10.207 22.447 L9.866 19.710 A8.0 8.0 0 0 1 8.057 18.961 L5.881 20.655 A10.6 10.6 0 0 1 3.345 18.119 L5.039 15.943 A8.0 8.0 0 0 1 4.290 14.134 L1.553 13.793 A10.6 10.6 0 0 1 1.553 10.207 L4.290 9.866 A8.0 8.0 0 0 1 5.039 8.057 L3.345 5.881 A10.6 10.6 0 0 1 5.881 3.345 L8.057 5.039 A8.0 8.0 0 0 1 9.866 4.290 Z M16.4 12 A4.4 4.4 0 1 0 7.6 12 A4.4 4.4 0 1 0 16.4 12 Z" fill="currentColor" fill-rule="evenodd" stroke="currentColor" stroke-width="1.0" stroke-linejoin="round"/></svg></button>
+  </div>
+</nav>
+<main id="decks">
+  <ul id="decklist"></ul>
+</main>
+<footer id="bottomnav"><button id="nav-add">追加/エクスポート</button><button id="nav-sync" disabled>同期</button></footer>
+<div id="addpop" hidden><div class="pop"><div class="ptl">追加/エクスポート</div><button disabled>共有デッキをダウンロード</button><button disabled>リンク先からダウンロード</button><button disabled>iTunesからインポート</button><button disabled>コレクションをエクスポート</button><button disabled>新しいデッキを作る</button><i class="arrow"></i></div></div>
+<div id="browse" hidden><nav class="pnav"><div class="nl"><button class="back"><svg viewBox="0 0 12 20" width="12" height="20" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2 2 10l8 8"/></svg><span class="bl">戻る</span></button><button class="ic g" disabled title="ブラウザの設定"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v2.6M12 18.9v2.6M21.5 12h-2.6M5.1 12H2.5M18.7 5.3l-1.8 1.8M7.1 16.9l-1.8 1.8M18.7 18.7l-1.8-1.8M7.1 7.1 5.3 5.3"/><circle cx="12" cy="12" r="7"/></svg></button><button class="ic e" disabled title="表示"><svg viewBox="0 0 28 20" width="28" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M1.5 10S6 2 14 2s12.5 8 12.5 8S22 18 14 18 1.5 10 1.5 10z"/><circle cx="14" cy="10" r="4"/></svg></button></div><span class="ptitle">ブラウザ</span><div class="nr"><button class="ic" disabled title="絞り込み"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="10.2"/><path d="M7 9h10M8.8 12.5h6.4M10.6 16h2.8"/></svg></button><button class="ic" disabled title="選択"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10.2"/><path d="m7.5 12.3 3 3 6-6.6"/></svg></button></div></nav><div class="sbar"><label class="sfield"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="10.2" cy="10.2" r="7"/><path d="m15.5 15.5 5.5 5.5"/></svg><input id="bq" type="search" enterkeyhint="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"><button class="clr" type="button" title="消す">×</button></label></div><div id="blist"><div class="spacer"></div></div><div id="bprev" hidden><nav class="pnav"><div class="nl"><button class="back"><svg viewBox="0 0 12 20" width="12" height="20" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2 2 10l8 8"/></svg><span class="bl">ブラウザ</span></button></div><span class="ptitle">プレビュー</span><span></span></nav><iframe id="bprevf" title="プレビュー"></iframe></div></div>
+<div id="awpage" hidden><nav class="pnav"><button class="back"><svg viewBox="0 0 12 20" width="12" height="20" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2 2 10l8 8"/></svg><span class="bl">戻る</span></button><span class="ptitle"></span><span></span></nav><iframe id="awframe" title="Anki"></iframe></div>
+<div id="prefs" hidden><nav class="pnav"><button class="back"><svg viewBox="0 0 12 20" width="12" height="20" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2 2 10l8 8"/></svg><span class="bl">戻る</span></button><span class="ptitle">設定</span><span></span></nav><div class="pbody"></div></div>
+<section id="study">
+  <nav id="tabs"><button id="tab-decks">デッキ</button><button disabled>追加</button><button disabled>編集</button><button id="tab-browse">ブラウザ</button></nav>
+  <div id="cardhost">
+    <iframe id="card" title="カード"></iframe>
+    <button id="ask" class="float" title="AI に質問">?</button>
+    <div id="marks" class="float"></div>
+    <div id="toast"></div>
+    <div id="askPanel" hidden>
+      <div class="ask-bar"><span class="ask-grip">⋮⋮</span><b>AI に質問</b><button id="ask-new">新しく</button><button id="ask-close">閉じる</button></div>
+      <div id="ask-log"></div>
+      <textarea id="ask-q" rows="2" placeholder="質問を書く（⌘+Enter でも送れる）"></textarea>
+      <div class="ask-foot"><label id="ask-imgl" hidden><input type="checkbox" id="ask-img" checked> 書き込みも送る</label><span style="flex:1"></span><button id="ask-send">送る</button></div>
+    </div>
+    <div id="corner" class="float"><span id="timer" lang="en"></span><button id="gear" title="メニュー"><svg viewBox="0 0 24 24"><path d="M9.866 4.290 L10.207 1.553 A10.6 10.6 0 0 1 13.793 1.553 L14.134 4.290 A8.0 8.0 0 0 1 15.943 5.039 L18.119 3.345 A10.6 10.6 0 0 1 20.655 5.881 L18.961 8.057 A8.0 8.0 0 0 1 19.710 9.866 L22.447 10.207 A10.6 10.6 0 0 1 22.447 13.793 L19.710 14.134 A8.0 8.0 0 0 1 18.961 15.943 L20.655 18.119 A10.6 10.6 0 0 1 18.119 20.655 L15.943 18.961 A8.0 8.0 0 0 1 14.134 19.710 L13.793 22.447 A10.6 10.6 0 0 1 10.207 22.447 L9.866 19.710 A8.0 8.0 0 0 1 8.057 18.961 L5.881 20.655 A10.6 10.6 0 0 1 3.345 18.119 L5.039 15.943 A8.0 8.0 0 0 1 4.290 14.134 L1.553 13.793 A10.6 10.6 0 0 1 1.553 10.207 L4.290 9.866 A8.0 8.0 0 0 1 5.039 8.057 L3.345 5.881 A10.6 10.6 0 0 1 5.881 3.345 L8.057 5.039 A8.0 8.0 0 0 1 9.866 4.290 Z M16.4 12 A4.4 4.4 0 1 0 7.6 12 A4.4 4.4 0 1 0 16.4 12 Z" fill="currentColor" fill-rule="evenodd" stroke="currentColor" stroke-width="1.0" stroke-linejoin="round"/></svg></button></div>
+    <div id="donebox"><iframe id="doneframe" title="課題を終えました"></iframe></div>
+  </div>
+  <footer id="bottom"><div id="counts" lang="en"></div><div id="answerbar" hidden></div></footer>
+</section>
+<section id="customPage">
+  <nav class="cp-nav"><button id="cp-back">‹ 戻る</button><b>カスタム学習</b><button id="cp-done">完了</button></nav>
+  <div class="cp-body">
+    <h4>学習タイプ</h4>
+    <ul class="cp-group" id="cp-types">
+      <li data-k="new">今日の新規カードの上限を上げる</li>
+      <li data-k="rev">今日の復習カードの上限を上げる</li>
+      <li data-k="forgot" class="off">忘却したカードを復習する</li>
+      <li data-k="ahead">先取りして復習する</li>
+      <li data-k="preview" class="off">新規カードをプレビューする</li>
+      <li data-k="tagnew" class="off">タグ付新規カードを学習</li>
+      <li data-k="tagdue" class="off">期日のタグ付カードを復習</li>
+      <li data-k="tagrev" class="off">復習済タグ付カードを詰込</li>
+      <li data-k="tagall" class="off">タグ付カードに目を通す</li>
+    </ul>
+    <h4>オプション</h4>
+    <ul class="cp-group"><li class="cp-opt"><span id="cp-label"></span><input id="cp-n" type="number" inputmode="numeric" min="1" max="9999"></li></ul>
+    <p class="cp-foot" id="cp-foot"></p>
+  </div>
+</section>
+<div id="iosAlert" hidden><div class="box"><div class="t"></div><div class="m"></div><button class="ok">OK</button></div></div>
+<div id="cardInfo"><div class="sheet"><div class="ci-head"><b>カード情報</b><button class="close">閉じる</button></div><div class="ci-body"></div></div></div>
+<div id="menu"><div class="panel">
+  <div class="head"><button id="menu-deck" data-act="decks">デッキ</button><span class="fs"><i class="s">Aa</i><i class="v">1.0x</i><i class="b">Aa</i></span></div>
+  <h3>よく使用するアクション</h3>
+  <div class="grid">
+    <button data-act="undo" id="menu-undo">元に戻す</button><button data-act="redo" disabled>やり直す</button><button data-act="options">オプション</button>
+    <button data-act="custom">カスタム学習</button><button data-act="stats">デッキの統計</button><button data-act="info">カード情報</button>
+    <button data-act="filter" disabled>フィルター / 詰め込み</button><button data-act="scratchpad" disabled>手書きパッド</button><button data-act="topbar">トップバー</button>
+    <button data-act="flag">フラグ1 (レッド)</button><button data-act="bury">ノートを今日は非表示</button><button data-act="suspend">カードを休止</button>
+  </div>
+  <h3>すべてのアクション</h3>
+  <div class="grid"><button disabled>User Action 1</button><button disabled>User Action 2</button><button disabled>User Action 3</button><button disabled>User Action 4</button><button disabled>User Action 5</button><button disabled>User Action 6</button><button disabled>User Action 7</button><button disabled>User Action 8</button></div>
+</div></div>
+<script type="module" src="./app.mjs"></script>
+</body>
+</html>

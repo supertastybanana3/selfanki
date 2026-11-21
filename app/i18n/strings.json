@@ -1,0 +1,991 @@
+[
+ {
+  "ja": "AI に質問",
+  "en": "Ask AI"
+ },
+ {
+  "ja": "Anki のカードと学習の記録をそのまま使う暗記アプリです。",
+  "en": "A flashcard app that uses your Anki cards and review history as they are."
+ },
+ {
+  "ja": "iTunesからインポート",
+  "en": "Import from iTunes"
+ },
+ {
+  "ja": "‹ 戻る",
+  "en": "‹ Back"
+ },
+ {
+  "ja": "「元に戻す」アイコンですべて消去",
+  "en": "Undo icon clears everything"
+ },
+ {
+  "ja": "か月",
+  "en": "mo"
+ },
+ {
+  "ja": "このアプリについて",
+  "en": "About"
+ },
+ {
+  "ja": "このアプリにはバックアップの機能がありません。パソコンの Anki に書き戻している場合は、Anki 側のバックアップに入ります。",
+  "en": "This app has no backup feature of its own. If you write back to Anki on your computer, Anki's backups cover it."
+ },
+ {
+  "ja": "このアプリ独自の機能",
+  "en": "Extra features"
+ },
+ {
+  "ja": "このカードについて質問できます。カードの中身（表・裏・デッキ名）は自動で添えます。",
+  "en": "Ask about this card. The card's front, back and deck name are sent with your question."
+ },
+ {
+  "ja": "この画面の機能はまだありません:",
+  "en": "Not available yet:"
+ },
+ {
+  "ja": "すべてのアクション",
+  "en": "All actions"
+ },
+ {
+  "ja": "もう一度",
+  "key": "studying-again"
+ },
+ {
+  "ja": "やり直す",
+  "key": "undo-redo"
+ },
+ {
+  "ja": "よく使用するアクション",
+  "en": "Frequent actions"
+ },
+ {
+  "ja": "アプリのアイコンに課題枚数を表示",
+  "en": "Show due count on app icon"
+ },
+ {
+  "ja": "エラー",
+  "key": "qt-misc-error"
+ },
+ {
+  "ja": "オフ",
+  "en": "Off"
+ },
+ {
+  "ja": "オフにすると本家と同じく、下の「同期」を押したときだけ送受信します。同期していない答えは、パソコンの Anki への書き戻しに入りません。",
+  "en": "When off, the app syncs only when you tap Sync, like Anki. Answers that haven't been synced are not written back to Anki."
+ },
+ {
+  "ja": "オプション",
+  "key": "actions-options"
+ },
+ {
+  "ja": "オプションを保存しました",
+  "en": "Options saved"
+ },
+ {
+  "ja": "オレンジ",
+  "key": "actions-flag-orange"
+ },
+ {
+  "ja": "オートコレクト",
+  "en": "Autocorrect"
+ },
+ {
+  "ja": "カスタム学習",
+  "key": "actions-custom-study"
+ },
+ {
+  "ja": "カスタム学習セッション",
+  "key": "custom-study-custom-study-session"
+ },
+ {
+  "ja": "カメラで撮影した写真をクロップ（切り出し）",
+  "en": "Crop photos taken with the camera"
+ },
+ {
+  "ja": "カメラで撮影する動画を高画質にする",
+  "en": "Record high-quality video"
+ },
+ {
+  "ja": "カード",
+  "key": "browsing-card"
+ },
+ {
+  "ja": "カード ID",
+  "key": "card-stats-card-id"
+ },
+ {
+  "ja": "カードの種類",
+  "en": "Card type"
+ },
+ {
+  "ja": "カードへの回答 を元に戻す",
+  "en": "Undo Answer Card"
+ },
+ {
+  "ja": "カードを今日は非表示",
+  "key": "studying-bury-card"
+ },
+ {
+  "ja": "カードを今日は非表示にしました",
+  "en": "Card buried"
+ },
+ {
+  "ja": "カードを休止",
+  "key": "actions-suspend-card"
+ },
+ {
+  "ja": "カードを休止しました",
+  "key": "studying-card-suspended"
+ },
+ {
+  "ja": "カード情報",
+  "key": "actions-card-info"
+ },
+ {
+  "ja": "クリップボード画像を PNG 形式で貼り付ける",
+  "en": "Paste clipboard images as PNG"
+ },
+ {
+  "ja": "グリッドを表示",
+  "en": "Show grid"
+ },
+ {
+  "ja": "グリーン",
+  "key": "actions-flag-green"
+ },
+ {
+  "ja": "グレー",
+  "en": "Gray"
+ },
+ {
+  "ja": "ゲームパッド",
+  "en": "Game controller"
+ },
+ {
+  "ja": "コレクションをエクスポート",
+  "en": "Export collection"
+ },
+ {
+  "ja": "サイレントモードでも音声を自動再生",
+  "en": "Play audio in silent mode"
+ },
+ {
+  "ja": "システムに従う",
+  "key": "preferences-theme-follow-system"
+ },
+ {
+  "ja": "スケジュール",
+  "key": "preferences-scheduling"
+ },
+ {
+  "ja": "スマート引用符とダッシュを自動変換",
+  "en": "Smart quotes and dashes"
+ },
+ {
+  "ja": "スワイプ",
+  "en": "Swipe"
+ },
+ {
+  "ja": "タグ付カードに目を通す",
+  "en": "Browse tagged cards"
+ },
+ {
+  "ja": "タグ付新規カードを学習",
+  "en": "Study tagged new cards"
+ },
+ {
+  "ja": "タップ",
+  "en": "Tap"
+ },
+ {
+  "ja": "ターコイズ",
+  "key": "actions-flag-turquoise"
+ },
+ {
+  "ja": "ダーク",
+  "key": "preferences-theme-dark"
+ },
+ {
+  "ja": "ダーク & 半透明",
+  "en": "Dark & translucent"
+ },
+ {
+  "ja": "ツールアイコンの配置",
+  "en": "Tool icon position"
+ },
+ {
+  "ja": "ツールアイコンを表示",
+  "en": "Show tool icons"
+ },
+ {
+  "ja": "テーマ",
+  "key": "preferences-theme"
+ },
+ {
+  "ja": "デッキ",
+  "key": "actions-decks"
+ },
+ {
+  "ja": "デッキの統計",
+  "en": "Deck stats"
+ },
+ {
+  "ja": "デフォルト",
+  "key": "deck-config-default-name"
+ },
+ {
+  "ja": "データベースをチェック",
+  "key": "database-check-title"
+ },
+ {
+  "ja": "トップバー",
+  "en": "Top bar"
+ },
+ {
+  "ja": "トップバーを表示",
+  "en": "Show top bar"
+ },
+ {
+  "ja": "ナイトモード",
+  "key": "card-templates-night-mode"
+ },
+ {
+  "ja": "ナイトモード（夜間モード）を使用すると、インターフェースが暗くなり、カードは黒い背景に白文字で表示されます。",
+  "en": "Night mode darkens the interface and shows cards as white text on a black background."
+ },
+ {
+  "ja": "ノート ID",
+  "key": "card-stats-note-id"
+ },
+ {
+  "ja": "ノートの種類",
+  "en": "Note type"
+ },
+ {
+  "ja": "ノートを今日は非表示",
+  "key": "studying-bury-note"
+ },
+ {
+  "ja": "ノートを今日は非表示にしました",
+  "en": "Note buried"
+ },
+ {
+  "ja": "ノートを休止",
+  "key": "studying-suspend-note"
+ },
+ {
+  "ja": "ノートを休止しました",
+  "en": "Note suspended"
+ },
+ {
+  "ja": "バックアップ",
+  "key": "preferences-backups"
+ },
+ {
+  "ja": "バーの外観",
+  "en": "Bar appearance"
+ },
+ {
+  "ja": "パッドの大きさ",
+  "en": "Pad size"
+ },
+ {
+  "ja": "パープル",
+  "key": "actions-flag-purple"
+ },
+ {
+  "ja": "ピンク",
+  "key": "actions-flag-pink"
+ },
+ {
+  "ja": "フィルター",
+  "key": "actions-filter"
+ },
+ {
+  "ja": "フィルター / 詰め込み",
+  "en": "Filter / Cram"
+ },
+ {
+  "ja": "フラグ",
+  "key": "browsing-sidebar-flags"
+ },
+ {
+  "ja": "フラグ1 (レッド)",
+  "en": "Flag 1 (Red)"
+ },
+ {
+  "ja": "フラグを外しました",
+  "en": "Flag removed"
+ },
+ {
+  "ja": "ブラウザ",
+  "key": "qt-misc-browse"
+ },
+ {
+  "ja": "ブラウザの設定",
+  "en": "Browser settings"
+ },
+ {
+  "ja": "ブラック",
+  "en": "Black"
+ },
+ {
+  "ja": "ブルー",
+  "key": "actions-flag-blue"
+ },
+ {
+  "ja": "プレビュー",
+  "key": "actions-preview"
+ },
+ {
+  "ja": "プロファイル",
+  "key": "profiles-profiles"
+ },
+ {
+  "ja": "ペンの太さ",
+  "en": "Pen width"
+ },
+ {
+  "ja": "ボタン",
+  "key": "statistics-answer-buttons-button-number"
+ },
+ {
+  "ja": "ボトムバー",
+  "en": "Bottom bar"
+ },
+ {
+  "ja": "ボトムバーのサイズ",
+  "en": "Bottom bar size"
+ },
+ {
+  "ja": "ボトムバーを表示",
+  "en": "Show bottom bar"
+ },
+ {
+  "ja": "マーク",
+  "en": "Mark"
+ },
+ {
+  "ja": "マークを付けました",
+  "en": "Note marked"
+ },
+ {
+  "ja": "マークを外しました",
+  "en": "Note unmarked"
+ },
+ {
+  "ja": "メディアをチェック",
+  "key": "media-check-window-title"
+ },
+ {
+  "ja": "メディア同期の進捗を表示",
+  "en": "Show media sync progress"
+ },
+ {
+  "ja": "メニュー",
+  "en": "Menu"
+ },
+ {
+  "ja": "ユーザー 1",
+  "key": "profiles-user-1"
+ },
+ {
+  "ja": "ライト",
+  "key": "preferences-theme-light"
+ },
+ {
+  "ja": "ライト & 半透明",
+  "en": "Light & translucent"
+ },
+ {
+  "ja": "リンク先からダウンロード",
+  "en": "Download from link"
+ },
+ {
+  "ja": "レッド",
+  "key": "actions-flag-red"
+ },
+ {
+  "ja": "一致するカードはありません",
+  "en": "No matching cards"
+ },
+ {
+  "ja": "上にスワイプ",
+  "en": "Swipe up"
+ },
+ {
+  "ja": "上乗せ可能な復習カード",
+  "en": "Review cards available"
+ },
+ {
+  "ja": "上乗せ可能な新規カード",
+  "en": "New cards available"
+ },
+ {
+  "ja": "下にスワイプ",
+  "en": "Swipe down"
+ },
+ {
+  "ja": "中央",
+  "key": "editing-center"
+ },
+ {
+  "ja": "中央上",
+  "en": "Top center"
+ },
+ {
+  "ja": "中央下",
+  "en": "Bottom center"
+ },
+ {
+  "ja": "今すぐ同期",
+  "en": "Sync now"
+ },
+ {
+  "ja": "今日の復習カードの上限に上乗せ",
+  "key": "custom-study-increase-todays-review-limit-by"
+ },
+ {
+  "ja": "今日の復習カードの上限を上げる",
+  "key": "custom-study-increase-todays-review-card-limit"
+ },
+ {
+  "ja": "今日の新規カードの上限に上乗せ",
+  "key": "custom-study-increase-todays-new-card-limit-by"
+ },
+ {
+  "ja": "今日の新規カードの上限を上げる",
+  "key": "custom-study-increase-todays-new-card-limit"
+ },
+ {
+  "ja": "他アプリの音（BGMなど）の音量を常に抑えめにする",
+  "en": "Always lower other apps' audio"
+ },
+ {
+  "ja": "元に戻しました",
+  "en": "Undone"
+ },
+ {
+  "ja": "元に戻す",
+  "key": "undo-undo"
+ },
+ {
+  "ja": "先取りして復習する",
+  "key": "custom-study-review-ahead"
+ },
+ {
+  "ja": "先取りする日数",
+  "key": "custom-study-review-ahead-by"
+ },
+ {
+  "ja": "共有デッキをダウンロード",
+  "key": "decks-get-shared"
+ },
+ {
+  "ja": "再スケジュール",
+  "en": "Rescheduled"
+ },
+ {
+  "ja": "再学習",
+  "en": "Relearn"
+ },
+ {
+  "ja": "分",
+  "key": "decks-minutes"
+ },
+ {
+  "ja": "動画をループ再生",
+  "en": "Loop videos"
+ },
+ {
+  "ja": "動画再生コントローラーを表示",
+  "en": "Show video controls"
+ },
+ {
+  "ja": "右にスワイプ",
+  "en": "Swipe right"
+ },
+ {
+  "ja": "右上",
+  "en": "Top right"
+ },
+ {
+  "ja": "右下",
+  "en": "Bottom right"
+ },
+ {
+  "ja": "右中央",
+  "en": "Middle right"
+ },
+ {
+  "ja": "右側",
+  "en": "Right side"
+ },
+ {
+  "ja": "各日代表のバックアップ保管数（何日分）",
+  "key": "preferences-daily-backups"
+ },
+ {
+  "ja": "各月代表のバックアップ保管数（何か月分）",
+  "key": "preferences-monthly-backups"
+ },
+ {
+  "ja": "各週代表のバックアップ保管数（何週分）",
+  "key": "preferences-weekly-backups"
+ },
+ {
+  "ja": "合計時間",
+  "key": "card-stats-total-time"
+ },
+ {
+  "ja": "同期",
+  "key": "preferences-tab-synchronisation"
+ },
+ {
+  "ja": "同期できません",
+  "en": "Can't sync"
+ },
+ {
+  "ja": "同期済み",
+  "en": "Synced"
+ },
+ {
+  "ja": "回答ボタン",
+  "key": "statistics-answer-buttons-title"
+ },
+ {
+  "ja": "回答確認用のマークを表示",
+  "en": "Show answer feedback mark"
+ },
+ {
+  "ja": "回答確認用マークの表示位置を種類別にする",
+  "en": "Position feedback mark by answer"
+ },
+ {
+  "ja": "失敗回数",
+  "en": "Lapses"
+ },
+ {
+  "ja": "学習",
+  "key": "decks-study"
+ },
+ {
+  "ja": "学習タイプ",
+  "en": "Study type"
+ },
+ {
+  "ja": "学習中",
+  "en": "Learning"
+ },
+ {
+  "ja": "安定度",
+  "key": "card-stats-fsrs-stability"
+ },
+ {
+  "ja": "完了",
+  "en": "Done"
+ },
+ {
+  "ja": "定時に、課題があれば枚数を通知",
+  "en": "Daily reminder with due count"
+ },
+ {
+  "ja": "左にスワイプ",
+  "en": "Swipe left"
+ },
+ {
+  "ja": "左上",
+  "en": "Top left"
+ },
+ {
+  "ja": "左下",
+  "en": "Bottom left"
+ },
+ {
+  "ja": "左中央",
+  "en": "Middle left"
+ },
+ {
+  "ja": "平均時間",
+  "key": "card-stats-average-time"
+ },
+ {
+  "ja": "年",
+  "en": "yr"
+ },
+ {
+  "ja": "強制オフ",
+  "en": "Always off"
+ },
+ {
+  "ja": "強制オン",
+  "en": "Always on"
+ },
+ {
+  "ja": "復習",
+  "key": "browsing-sidebar-card-state-review"
+ },
+ {
+  "ja": "復習の間隔の計算と出題の順番は、Anki のソースコード（AGPL）をもとに書き直したもので、Anki 本体と同じ結果になることを確かめています。",
+  "en": "Intervals and card order are ported from Anki's source code (AGPL) and checked to match Anki."
+ },
+ {
+  "ja": "復習回数",
+  "en": "Reviews"
+ },
+ {
+  "ja": "復習済タグ付カードを詰込",
+  "en": "Cram reviewed tagged cards"
+ },
+ {
+  "ja": "忘却したカードを復習する",
+  "key": "custom-study-review-forgotten-cards"
+ },
+ {
+  "ja": "想起確率",
+  "en": "Retrievability"
+ },
+ {
+  "ja": "戻る",
+  "en": "Back"
+ },
+ {
+  "ja": "手動",
+  "en": "Manual"
+ },
+ {
+  "ja": "手書きスクリーンで指での入力を無視",
+  "en": "Ignore finger input on scratchpad"
+ },
+ {
+  "ja": "手書きパッド",
+  "en": "Scratchpad"
+ },
+ {
+  "ja": "手書きパッドの透明度",
+  "en": "Scratchpad opacity"
+ },
+ {
+  "ja": "手書きパッドをボトムバーの下に表示",
+  "en": "Show scratchpad below bottom bar"
+ },
+ {
+  "ja": "指での入力を無視",
+  "en": "Ignore finger input"
+ },
+ {
+  "ja": "指定した条件に一致するカードはありませんでした。",
+  "key": "custom-study-no-cards-matched-the-criteria-you"
+ },
+ {
+  "ja": "新しいデッキを作る",
+  "en": "Create deck"
+ },
+ {
+  "ja": "新しく",
+  "en": "New"
+ },
+ {
+  "ja": "新規",
+  "key": "actions-new"
+ },
+ {
+  "ja": "新規 #",
+  "en": "New #"
+ },
+ {
+  "ja": "新規カードをプレビューする",
+  "key": "custom-study-preview-new-cards"
+ },
+ {
+  "ja": "日",
+  "key": "scheduling-days"
+ },
+ {
+  "ja": "日時",
+  "en": "Date"
+ },
+ {
+  "ja": "時間",
+  "key": "card-stats-review-log-time-taken"
+ },
+ {
+  "ja": "書き込みも送る",
+  "en": "Include handwriting"
+ },
+ {
+  "ja": "書き込み（Apple Pencil でカードに直接書く）",
+  "en": "Handwriting (write on cards with Apple Pencil)"
+ },
+ {
+  "ja": "最初の復習",
+  "en": "First review"
+ },
+ {
+  "ja": "最大画像サイズ（長辺）",
+  "en": "Max image size (long side)"
+ },
+ {
+  "ja": "最新の復習",
+  "en": "Latest review"
+ },
+ {
+  "ja": "期日",
+  "key": "statistics-due-date"
+ },
+ {
+  "ja": "期日のタグ付カードを復習",
+  "en": "Review due tagged cards"
+ },
+ {
+  "ja": "未送信",
+  "en": "Unsent"
+ },
+ {
+  "ja": "枚",
+  "key": "custom-study-cards"
+ },
+ {
+  "ja": "検索",
+  "key": "actions-search"
+ },
+ {
+  "ja": "標準",
+  "key": "deck-config-easy-days-normal"
+ },
+ {
+  "ja": "次回の学習までの間隔",
+  "en": "Interval"
+ },
+ {
+  "ja": "正解",
+  "key": "studying-good"
+ },
+ {
+  "ja": "残りのカード枚数",
+  "en": "Cards left"
+ },
+ {
+  "ja": "消す",
+  "en": "Clear"
+ },
+ {
+  "ja": "白紙カード",
+  "key": "actions-empty-cards"
+ },
+ {
+  "ja": "秒",
+  "key": "scheduling-seconds"
+ },
+ {
+  "ja": "種類",
+  "key": "card-stats-review-log-type"
+ },
+ {
+  "ja": "答えた記録をパソコンの Anki に書き戻せば、Anki や AnkiMobile と並行して使えます。",
+  "en": "If you write your answers back to Anki on your computer, you can use this alongside Anki and AnkiMobile."
+ },
+ {
+  "ja": "答えるたびに自動で同期",
+  "en": "Sync after every answer"
+ },
+ {
+  "ja": "簡単",
+  "key": "studying-easy"
+ },
+ {
+  "ja": "終了",
+  "key": "profiles-quit"
+ },
+ {
+  "ja": "絞り込み",
+  "en": "Filter"
+ },
+ {
+  "ja": "統計",
+  "key": "qt-misc-stats"
+ },
+ {
+  "ja": "編集",
+  "key": "preferences-editing"
+ },
+ {
+  "ja": "自動",
+  "en": "Auto"
+ },
+ {
+  "ja": "自動バックアップの間隔（分）",
+  "key": "preferences-minutes-between-backups"
+ },
+ {
+  "ja": "英字入力時に文頭を自動で大文字にする",
+  "en": "Auto-capitalize"
+ },
+ {
+  "ja": "表示",
+  "key": "importing-show"
+ },
+ {
+  "ja": "解答を表示",
+  "key": "deck-config-question-action-show-answer"
+ },
+ {
+  "ja": "解答側",
+  "en": "Answer side"
+ },
+ {
+  "ja": "解答側も表示されているとき",
+  "en": "When the answer is shown"
+ },
+ {
+  "ja": "設定",
+  "key": "preferences-preferences"
+ },
+ {
+  "ja": "評価",
+  "key": "card-stats-review-log-rating"
+ },
+ {
+  "ja": "読み込みに失敗:",
+  "en": "Failed to load:"
+ },
+ {
+  "ja": "読み込み中…",
+  "key": "qt-misc-loading"
+ },
+ {
+  "ja": "課題を終えました",
+  "en": "Congratulations"
+ },
+ {
+  "ja": "貼り付けの際にリサイズ",
+  "en": "Resize when pasting"
+ },
+ {
+  "ja": "質問の音声・動画の再生を解答表示で停止",
+  "en": "Stop question audio when showing answer"
+ },
+ {
+  "ja": "質問を書く（⌘+Enter でも送れる）",
+  "en": "Type a question (⌘+Enter to send)"
+ },
+ {
+  "ja": "質問側",
+  "en": "Question side"
+ },
+ {
+  "ja": "質問側だけが表示されているとき",
+  "en": "When only the question is shown"
+ },
+ {
+  "ja": "追加",
+  "key": "actions-add"
+ },
+ {
+  "ja": "追加/エクスポート",
+  "en": "Add/Export"
+ },
+ {
+  "ja": "追加日",
+  "en": "Added"
+ },
+ {
+  "ja": "送る",
+  "en": "Send"
+ },
+ {
+  "ja": "透明（少）",
+  "en": "Slightly transparent"
+ },
+ {
+  "ja": "通知",
+  "en": "Notifications"
+ },
+ {
+  "ja": "通知時刻",
+  "en": "Notification time"
+ },
+ {
+  "ja": "選択",
+  "key": "actions-choose"
+ },
+ {
+  "ja": "閉じる",
+  "key": "actions-close"
+ },
+ {
+  "ja": "間隔",
+  "key": "card-stats-interval"
+ },
+ {
+  "ja": "難しい",
+  "key": "studying-hard"
+ },
+ {
+  "ja": "難易度",
+  "en": "Difficulty"
+ },
+ {
+  "ja": "非表示のカードを戻しました",
+  "en": "Unburied cards"
+ },
+ {
+  "ja": "非表示を戻す",
+  "en": "Unbury"
+ },
+ {
+  "ja": "音声と画像を同期",
+  "en": "Sync audio and images"
+ },
+ {
+  "ja": "音声再生ボタンを表示",
+  "en": "Show replay buttons"
+ },
+ {
+  "ja": "（AI の API キーがまだ設定されていません）",
+  "en": "(No AI API key set)"
+ },
+ {
+  "ja": "（中継の合言葉がサーバーに入っていません）",
+  "en": "(Relay token not set on the server)"
+ },
+ {
+  "ja": "（中継の合言葉が違います）",
+  "en": "(Wrong relay token)"
+ },
+ {
+  "ja": "（今日の上限回数に達しました）",
+  "en": "(Daily limit reached)"
+ },
+ {
+  "ja": "（今日は非表示）",
+  "en": "(Buried)"
+ },
+ {
+  "ja": "（休止中）",
+  "en": "(Suspended)"
+ },
+ {
+  "ja": "（答えを最後まで受け取れませんでした。もう一度聞いてください）",
+  "en": "(The answer was cut off. Please ask again.)"
+ },
+ {
+  "ja": "（質問が空です）",
+  "en": "(Empty question)"
+ },
+ {
+  "ja": "サーバーなし",
+  "en": "No server"
+ },
+ {
+  "ja": "回答したカードは「leech」（苦戦、忘却多発）のカードです。",
+  "key": "studying-card-was-a-leech",
+  "en": "Card was a leech."
+ },
+ {
+  "ja": "回答したカードは「leech」（苦戦、忘却多発）のカードです。 カードを休止しました",
+  "en": "Card was a leech. Card suspended."
+ }
+]

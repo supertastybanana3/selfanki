@@ -1,0 +1,25 @@
+[package]
+name = "selfanki_resign"
+version = "0.1.0"
+license = "AGPL-3.0-or-later"
+edition = "2024"
+description = "暗記（iOS の殻）の無料署名を、期限の前にパソコンから Wi-Fi か USB で入れ直す"
+
+[dependencies]
+# 版は iloader 2.4.2 と同じ（Cargo.lock も iloader のものから始めている）
+isideload = { version = "0.5.2", features = ["fs-storage"] }
+idevice = { version = "0.1.68", features = ["usbmuxd"] }
+keyring = { version = "3.6.3", features = ["windows-native"] }
+rootcause = "*"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "chrono"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = "0.4"
+base64 = "0.22"
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Credentials"] }
+
+[profile.release]
+opt-level = 3

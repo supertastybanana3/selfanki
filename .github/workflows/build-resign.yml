@@ -1,0 +1,28 @@
+# iOS の殻の無料署名（7日で切れる）を、パソコンから自動で入れ直すプログラム（resign/）を Windows 用に組む。
+# できた exe は Actions の成果物「selfanki_resign-windows」から落とす（README の手順 7-3）。
+name: build-resign
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        working-directory: resign
+        run: |
+          rustc --version
+          cargo build --release --locked
+      - name: Pack
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item resign/target/release/selfanki_resign.exe out/
+          Copy-Item resign/register_task.ps1 out/
+          Get-ChildItem out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: selfanki_resign-windows
+          path: out/
+          retention-days: 7
