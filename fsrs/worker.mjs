@@ -9,7 +9,7 @@ const F = Math.fround;
 self.onmessage = e => {
   const m = e.data, id = m.id;
   let last = 0;
-  const progress = (cur, total) => { const now = Date.now(); if (now - last < 80 && cur < total) return; last = now; self.postMessage({ id, progress: [cur, total] }); };
+  const progress = (cur, total, reviews) => { const now = Date.now(); if (now - last < 80 && cur < total) return; last = now; self.postMessage({ id, progress: reviews == null ? [cur, total] : [cur, total, reviews] }); };
   try {
     let result;
     switch (m.op) {

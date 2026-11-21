@@ -502,6 +502,7 @@ function nextMemory(w, st, g, daysElapsed) { return model32(w).step(st, g, daysE
 export function computeParams({ revlogs, nextDayAt, ignoreBeforeMs = 0, currentParams = [], numRelearningSteps = 1, healthCheck = false, onProgress, shouldAbort }) {
   const { items, reviewCount } = itemsForTraining(revlogs, nextDayAt, ignoreBeforeMs);
   if (!items.length) return { params: currentParams.slice(), fsrsItems: 0, reviewCount };
+  if (onProgress) onProgress(0, 0, reviewCount);   // rslib は学習の前から記録の数を知らせる
   let params = computeParameters(items, { numRelearningSteps, onProgress, shouldAbort });
   const cur = fillParams(currentParams);
   if (cur) {
@@ -532,6 +533,7 @@ export function computeParams({ revlogs, nextDayAt, ignoreBeforeMs = 0, currentP
 }
 // rslib evaluate_params_legacy
 export function evaluateParamsLegacy({ revlogs, nextDayAt, ignoreBeforeMs = 0, params, onProgress }) {
-  const { items } = itemsForTraining(revlogs, nextDayAt, ignoreBeforeMs);
+  const { items, reviewCount } = itemsForTraining(revlogs, nextDayAt, ignoreBeforeMs);
+  if (onProgress) onProgress(0, 0, reviewCount);
   return evaluate(items, params, onProgress);
 }

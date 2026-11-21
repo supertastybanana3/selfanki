@@ -99,7 +99,7 @@ export async function computeFsrsParams(S, did, q, { preset = 1, presets = 1 } =
   const cards = await find(S, q.search, did);
   const args = { revlogs: revlogsFor(S, cards), nextDayAt: t.nextDayAt, ignoreBeforeMs: q.ignoreBeforeMs, currentParams: q.currentParams, numRelearningSteps: q.numRelearningSteps, healthCheck: q.healthCheck };
   progress = { kind: 'computeParams', current: 0, total: 0, reviews: 0, currentPreset: preset, totalPresets: presets };
-  const onProgress = (cur, total) => { progress = { ...progress, current: cur, total }; };
+  const onProgress = (cur, total, reviews) => { progress = { ...progress, current: cur, total, ...(reviews != null ? { reviews } : {}) }; };
   if (!canWork()) return computeParams({ ...args, onProgress });
   return withWorkers(1, async ([w]) => {
     const r = await w.call({ op: 'computeParams', args }, onProgress);
@@ -112,7 +112,7 @@ export async function evaluateParams(S, did, q) {
   const cards = await find(S, q.search, did);
   const args = { revlogs: revlogsFor(S, cards), nextDayAt: t.nextDayAt, ignoreBeforeMs: q.ignoreBeforeMs, params: q.params };
   progress = { kind: 'computeParams', current: 0, total: 0, reviews: 0, currentPreset: 0, totalPresets: 0 };
-  const onProgress = (cur, total) => { progress = { ...progress, current: cur, total }; };
+  const onProgress = (cur, total, reviews) => { progress = { ...progress, current: cur, total, ...(reviews != null ? { reviews } : {}) }; };
   if (!canWork()) return evaluateParamsLegacy({ ...args, onProgress });
   return withWorkers(1, ([w]) => w.call({ op: 'evaluate', args }, onProgress));
 }

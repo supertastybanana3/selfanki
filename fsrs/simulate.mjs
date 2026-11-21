@@ -117,6 +117,9 @@ export function defaultConfig() {
 }
 
 // ---------- 優先度つきの並び（priority-queue 2.5.0。一番大きい優先度が先頭） ----------
+// この PQ の部分は priority-queue 2.5.0（Copyright Gianmarco Garrisi）を写したもので、Mozilla Public License 2.0 に従う。
+// This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed
+// with this file, You can obtain one at https://mozilla.org/MPL/2.0/ （LICENSES/priority-queue-MPL-2.0.txt）
 // 優先度は Reverse((期日 as i32, 新規か, 並びの値))。小さい組ほど先に出る。配列3本に持つ（組を作らない）
 class PQ {
   constructor(n) { this.keys = []; this.p0 = []; this.p1 = []; this.p2 = []; this.where = new Int32Array(n).fill(-1); this.heap = []; this.qp = []; }
