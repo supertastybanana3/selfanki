@@ -213,9 +213,22 @@ function scheduleSync(ms = 4000) {
 // この端末でまだ一度も同期していなければ、最初の1回だけは自動でする（本家でも、使い始めに同期する）
 const autoSyncOn = () => !!FEAT.autoSync && pref('autoSync');
 const syncNeverDone = () => { try { return !localStorage.getItem('syncedOnce'); } catch { return false; } };
-async function runSync() {
+// 手で同期したときの小窓（AnkiMobile 25.09 の実機と同じ「同期中... 追加/変更: N↑ N↓ 削除: N↑ N↓」）。キャンセルは小窓を閉じるだけ（同期は続く）
+async function runSync(manual = false) {
   const btn = $('#nav-sync'); btn.classList.add('busy');
-  const got = await sync.syncNow();
+  let dlg = null;
+  if (manual) {
+    const ops = (await store.outbox()).map(x => x.op);
+    const up = ops.filter(o => o.t !== 'undo').length, upDel = ops.filter(o => o.t === 'undo').length;
+    dlg = document.createElement('div'); dlg.id = 'syncdlg';
+    dlg.innerHTML = `<div class="box"><b>同期中...</b><p>追加/変更： ${up}↑ <span class="dn">0</span>↓<br>削除：${upDel}↑ <span class="dd">0</span>↓</p><svg class="spin" viewBox="0 0 36 36"><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.25" transform="rotate(0 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.36" transform="rotate(45 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.46" transform="rotate(90 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.57" transform="rotate(135 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.68" transform="rotate(180 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.79" transform="rotate(225 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.89" transform="rotate(270 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="1.00" transform="rotate(315 18 18)"/></svg><button>キャンセル</button></div>`;
+    dlg.querySelector('button').onclick = () => dlg.remove(); document.body.append(dlg);
+  }
+  const t0 = Date.now(), got = await sync.syncNow();
+  if (dlg) {
+    if (got) { dlg.querySelector('.dn').textContent = got.cards.length + got.revlog.filter(r => !r.del).length; dlg.querySelector('.dd').textContent = got.revlog.filter(r => r.del).length; }
+    setTimeout(() => dlg.remove(), Math.max(0, 600 - (Date.now() - t0)));
+  }
   btn.classList.remove('busy');
   if (sync.state.online) { try { localStorage.setItem('syncedOnce', '1'); } catch {} }
   if (got && (got.cards.length || got.revlog.length || got.conf?.length)) {
@@ -234,7 +247,7 @@ async function paintSync() {
   btn.title = sync.state.serverless ? 'サーバーなし' : sync.state.online === false ? `同期できません: ${sync.state.lastError}` : n ? `未送信 ${n}` : '同期済み';
 }
 function startSyncLoop() {
-  const btn = $('#nav-sync'); btn.disabled = false; btn.onclick = () => runSync();
+  const btn = $('#nav-sync'); btn.disabled = false; btn.onclick = () => runSync(true);
   const auto = autoSyncOn;
   window.addEventListener('online', () => { if (auto()) scheduleSync(500); });
   document.addEventListener('visibilitychange', () => { if (!auto()) return; if (!document.hidden) scheduleSync(500); else runSync(); });
@@ -1149,7 +1162,7 @@ const ACTIONS = [
   ['scrollDown', '下にスクロール', () => scrollCard(1)],
   ['undo', '元に戻す', () => undoAnswer()],
   ['rebuild', '再構築', null],
-  ['sync', '同期', () => runSync()],
+  ['sync', '同期', () => runSync(true)],
   ['again', '回答 (もう一度)', () => answerBy(1)],
   ['good', '回答 (正解)', () => answerBy(3)],
   ['easy', '回答 (簡単)', () => answerBy(4)],
@@ -1344,7 +1357,7 @@ function setupTools() {
     about: () => ({ title: 'このアプリについて', about: ['Anki のカードと学習の記録をそのまま使う暗記アプリです。', '復習の間隔の計算と出題の順番は、Anki のソースコード（AGPL）をもとに書き直したもので、Anki 本体と同じ結果になることを確かめています。', '答えた記録をパソコンの Anki に書き戻せば、Anki や AnkiMobile と並行して使えます。'] }),
     sync: () => ({ title: '同期', groups: [
       [{ t: '音声と画像を同期', tg: true, off: 1 }, { t: 'メディア同期の進捗を表示', tg: true, off: 1 }],
-      [{ t: '今すぐ同期', act: 1, run: () => { closePrefs(); runSync(); } }]] }),
+      [{ t: '今すぐ同期', act: 1, run: () => { closePrefs(); runSync(true); } }]] }),
   };
   // 割り当てを選ぶページ（AnkiMobile と同じく全アクションの一覧。まだ写していないものは薄く出して選べない）
   const SWIPES = [['left', '左にスワイプ'], ['right', '右にスワイプ'], ['up', '上にスワイプ'], ['down', '下にスワイプ']];

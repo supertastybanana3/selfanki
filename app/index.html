@@ -55,6 +55,13 @@ body:not([data-view=decks]) #bottomnav,body:not([data-view=decks]) #navbar{displ
 #bottomnav button{color:var(--am-bartext);font-size:17.5px;height:40px}
 #bottomnav button:disabled{opacity:.4}
 #nav-sync.busy{opacity:.55} #nav-sync.err{color:#ff6961} #nav-sync:not([data-n=""])[data-n]{color:#ff9230}
+#syncdlg{position:fixed;inset:0;z-index:60;background:rgba(127,127,127,.4);display:flex;align-items:center;justify-content:center}
+#syncdlg .box{width:340px;height:272px;border-radius:20px;background:#555;color:#fff;display:flex;flex-direction:column;align-items:center;text-align:center;-webkit-user-select:none;user-select:none}
+#syncdlg b{margin-top:43px;font-size:17px;font-weight:600}
+#syncdlg p{margin:21px 0 0;font-size:15.5px;line-height:22px}
+#syncdlg .spin{margin-top:22px;width:36px;height:36px;animation:sdspin .8s steps(8) infinite}
+@keyframes sdspin{to{transform:rotate(360deg)}}
+#syncdlg button{margin-top:auto;margin-bottom:41px;color:#0091ff;font-size:15.5px;background:none;border:0}
 #tick{right:5.5px;top:12.5px;width:30px;height:30px;pointer-events:none;opacity:0;z-index:4}
 body.notools #gear{display:none} body.toolsleft #corner{right:auto;left:2.75px;align-items:flex-start}
 #timer{display:none}
