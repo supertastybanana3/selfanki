@@ -1153,7 +1153,7 @@ function playAv(list) {
       avWait = { id: my, step };
       try {
         if (it.sound) { const buf = await (await fetch(MEDIA + encodeURIComponent(it.sound))).arrayBuffer(); if (my !== avSeq) return; n.postMessage({ audio: 'play', data: b64(buf), id: my }); }
-        else if (it.tts) n.postMessage({ audio: 'speak', text: it.tts.replace(/<[^>]+>/g, ''), lang: (it.lang || 'ja_JP').replace('_', '-'), id: my });
+        else if (it.tts) n.postMessage({ audio: 'speak', text: it.tts.replace(/<[^>]+>/g, ''), lang: (it.lang || 'ja_JP').replace('_', '-'), rate: +it.speed || 1, voices: it.voices || [], id: my });
         else step();
       } catch { step(); }
       return;
@@ -1164,7 +1164,14 @@ function playAv(list) {
       if (my !== avSeq) return;
       audio = new Audio(url); audio.onended = step; audio.play().catch(() => {});
     }
-    else if (it.tts) { const u = new SpeechSynthesisUtterance(it.tts.replace(/<[^>]+>/g, '')); u.lang = (it.lang || 'ja_JP').replace('_', '-'); u.onend = step; speechSynthesis.speak(u); }
+    else if (it.tts) {
+      // {{tts 言語 voices=… speed=…:欄}} の声と速さ（Anki と同じく、声は書いた順に、端末にあるものを選ぶ。名前は「Apple_Kyoko」のように会社_名前でもよい）
+      const u = new SpeechSynthesisUtterance(it.tts.replace(/<[^>]+>/g, '')); u.lang = (it.lang || 'ja_JP').replace('_', '-'); u.rate = Math.min(10, Math.max(0.1, +it.speed || 1));
+      const vs = speechSynthesis.getVoices(), want = (it.voices || []).map(v => String(v).toLowerCase());
+      const hit = want.map(w => vs.find(v => v.name.toLowerCase() === w || v.name.toLowerCase() === w.split('_').pop() || v.voiceURI.toLowerCase().includes(w.split('_').pop()))).find(Boolean);
+      if (hit) u.voice = hit;
+      u.onend = step; speechSynthesis.speak(u);
+    }
   };
   step();
 }
