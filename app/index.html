@@ -54,7 +54,10 @@ body[data-view=decks],body[data-view=decks] #decks{touch-action:pan-y}
 body:not([data-view=decks]) #bottomnav,body:not([data-view=decks]) #navbar{display:none}
 #bottomnav button{color:var(--am-bartext);font-size:17.5px;height:40px}
 #bottomnav button:disabled{opacity:.4}
-#nav-sync.busy{opacity:.55} #nav-sync.err{color:#ff6961} #nav-sync:not([data-n=""])[data-n]::after{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:currentColor;margin-left:6px;vertical-align:middle}
+#nav-sync.busy{opacity:.55} #nav-sync.err{color:#ff6961} #nav-sync:not([data-n=""])[data-n]{color:#ff9230}
+#tick{right:5.5px;top:12.5px;width:30px;height:30px;pointer-events:none;opacity:0;z-index:4}
+body.notools #gear{display:none} body.toolsleft #corner{right:auto;left:2.75px;align-items:flex-start}
+#timer{display:none}
 #browse{position:fixed;inset:0;z-index:24;background:var(--am-bg);display:flex;flex-direction:column} #browse[hidden],#bprev[hidden]{display:none}
 #browse .pnav{grid-template-columns:1fr auto 1fr} #browse .nl,#browse .nr{display:flex;align-items:center} #browse .nr{justify-content:flex-end;gap:35px;padding-right:22.5px}
 #browse .ic{color:var(--am-bartext);height:44px;display:flex;align-items:center;justify-content:center} #browse .ic:disabled{opacity:.4} #browse .nl .g{margin-left:19px} #browse .nl .e{margin-left:35px}
@@ -205,6 +208,7 @@ body:has(#answerbar:not([hidden])) #bottom{padding-left:8px;padding-right:8px;pa
 <div id="status"></div>
 <nav id="navbar">
   <div class="l">
+    <button id="nav-help" class="qmark" title="ヘルプ">?</button>
     <button id="nav-stats" title="統計"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="2" y="11" width="4.4" height="10.5" rx=".4"/><rect x="7.3" y="3.5" width="4.4" height="18" rx=".4"/><rect x="12.6" y="6.5" width="4.4" height="15" rx=".4"/><rect x="17.9" y="15" width="4.4" height="6.5" rx=".4"/></svg></button>
   </div>
   <span class="title">デッキ</span>
