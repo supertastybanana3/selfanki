@@ -30,7 +30,7 @@ const barDark = () => { try { return localStorage.getItem('barDark') || 'translu
 // 入れた機能は「設定」→「このアプリ独自の機能」で端末ごとに切れる
 const FEAT = { pen: '', autoSync: false, lang: 'ja' };   // lang … 画面の言語（Anki の言語の番号の形 ja・de-DE など。tools/build_site.py が config.json の language から入れる）
 let DESIGN = null;   // 読み込んだ書き込みのデザイン（mount の返り値）
-const PREF_DEFAULT = { neverType: false, replayBtn: true, stopQAudio: true, topbar: true, bottombar: true, counts: true, answerBtn: true, ivl: true, pen: true, autoSync: false };
+const PREF_DEFAULT = { neverType: false, replayBtn: true, stopQAudio: true, topbar: true, bottombar: true, counts: true, answerBtn: true, ivl: true, pen: true, autoSync: false, ticks: true, toolsBtn: true, noPad: false, extLinks: true };
 // autoSync: 既定は本家の Anki と同じく、下の「同期」を押したときだけ送受信する。オンにすると、答えるたびに数秒後に送り、開いたとき・戻ったとき・5分ごとにも同期する（このアプリ独自の方式）
 const pref = k => { try { const v = localStorage.getItem('pref:' + k); return v == null ? PREF_DEFAULT[k] : v === '1'; } catch { return PREF_DEFAULT[k]; } };
 // 学習の設定を画面に映す（トップバー・ボトムバー・残り枚数・回答ボタン・次回までの間隔）
@@ -40,6 +40,35 @@ function applyPrefs() {
   c.toggle('nocounts', !pref('counts')); c.toggle('noanswerbtn', !pref('answerBtn')); c.toggle('noivl', !pref('ivl'));
   const penOn = !!DESIGN && pref('pen');
   c.toggle('nopen', !penOn); if (typeof pen !== 'undefined' && pen) pen.setEnabled(penOn);
+  // ツールアイコン（歯車）を出すか・左右どちらか（設定＞学習）。左に置くときは、手書きパッドの元に戻すは右へ
+  c.toggle('notools', !pref('toolsBtn')); c.toggle('toolsleft', toolsLeft());
+  if (typeof sp !== 'undefined' && sp) sp.refresh();
+}
+const toolsLeft = () => { try { return localStorage.getItem('toolsPos') === 'left'; } catch { return false; } };
+// 回答確認用のマーク（AnkiMobile 25.09 の実機で測った: カードの右上、上の帯の下 27.5pt・右から 20.5pt を中心に、
+// 「もう一度」は赤い×（25pt）、それ以外は緑のチェック（30×25pt）。出てすぐ約 0.53 秒かけて同じ速さで消える）
+function flashTick(g) {
+  if (!pref('ticks')) return;
+  let el = $('#tick'); if (!el) { el = document.createElement('div'); el.id = 'tick'; el.className = 'float'; $('#cardhost').append(el); }
+  el.innerHTML = g === 1
+    ? '<svg viewBox="0 0 30 30" width="30" height="30"><path d="M8 8 22 22M22 8 8 22" stroke="#2e2e2e" stroke-width="6.6" stroke-linecap="square"/><path d="M8 8 22 22M22 8 8 22" stroke="rgb(255,78,78)" stroke-width="5" stroke-linecap="square"/></svg>'
+    : '<svg viewBox="0 0 30 30" width="30" height="30"><path d="M4 16.5 11.2 23.5 26.5 7.5" fill="none" stroke="#2e2e2e" stroke-width="6.6" stroke-linejoin="miter" stroke-linecap="square"/><path d="M4 16.5 11.2 23.5 26.5 7.5" fill="none" stroke="rgb(0,255,0)" stroke-width="5" stroke-linejoin="miter" stroke-linecap="square"/></svg>';
+  el.style.transition = 'none'; el.style.opacity = '1'; void el.offsetWidth;
+  el.style.transition = 'opacity 530ms linear'; el.style.opacity = '0';
+}
+// ダブルタップ防止（設定＞学習）。標準は実機で 0.15 秒を無視・0.3 秒を受け付けた。短い・長いは測っていない（目安）
+const DTP = { short: ['短い', 120], normal: ['標準', 250], long: ['長い', 450] };
+const dtpKey = () => { try { const v = localStorage.getItem('dtp'); return DTP[v] ? v : 'normal'; } catch { return 'normal'; } };
+// シェイク（端末を振る）。既定は「元に戻す」（マニュアル）。iPhone・iPad の Safari は、設定で選んだときに動きの使用を許可してもらう
+function setupShake() {
+  let last = 0, hits = [];
+  window.addEventListener('devicemotion', e => {
+    const a = e.acceleration; if (!a || a.x == null) return;
+    const m = Math.hypot(a.x, a.y, a.z), now = Date.now();
+    if (m < 14) return;
+    hits = hits.filter(t => now - t < 600); hits.push(now);
+    if (hits.length >= 2 && now - last > 1200) { last = now; hits = []; const k = shakeAct(); if (k !== 'off') runAction(k); }
+  });
 }
 function applyTheme() {
   const t = theme();
@@ -185,9 +214,22 @@ function scheduleSync(ms = 4000) {
 // この端末でまだ一度も同期していなければ、最初の1回だけは自動でする（本家でも、使い始めに同期する）
 const autoSyncOn = () => !!FEAT.autoSync && pref('autoSync');
 const syncNeverDone = () => { try { return !localStorage.getItem('syncedOnce'); } catch { return false; } };
-async function runSync() {
+// 手で同期したときの小窓（AnkiMobile 25.09 の実機と同じ「同期中... 追加/変更: N↑ N↓ 削除: N↑ N↓」）。キャンセルは小窓を閉じるだけ（同期は続く）
+async function runSync(manual = false) {
   const btn = $('#nav-sync'); btn.classList.add('busy');
-  const got = await sync.syncNow();
+  let dlg = null;
+  if (manual) {
+    const ops = (await store.outbox()).map(x => x.op);
+    const up = ops.filter(o => o.t !== 'undo').length, upDel = ops.filter(o => o.t === 'undo').length;
+    dlg = document.createElement('div'); dlg.id = 'syncdlg';
+    dlg.innerHTML = `<div class="box"><b>同期中...</b><p>追加/変更： ${up}↑ <span class="dn">0</span>↓<br>削除：${upDel}↑ <span class="dd">0</span>↓</p><svg class="spin" viewBox="0 0 36 36"><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.25" transform="rotate(0 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.36" transform="rotate(45 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.46" transform="rotate(90 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.57" transform="rotate(135 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.68" transform="rotate(180 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.79" transform="rotate(225 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.89" transform="rotate(270 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="1.00" transform="rotate(315 18 18)"/></svg><button>キャンセル</button></div>`;
+    dlg.querySelector('button').onclick = () => dlg.remove(); document.body.append(dlg);
+  }
+  const t0 = Date.now(), got = await sync.syncNow();
+  if (dlg) {
+    if (got) { dlg.querySelector('.dn').textContent = got.cards.length + got.revlog.filter(r => !r.del).length; dlg.querySelector('.dd').textContent = got.revlog.filter(r => r.del).length; }
+    setTimeout(() => dlg.remove(), Math.max(0, 600 - (Date.now() - t0)));
+  }
   btn.classList.remove('busy');
   if (sync.state.online) { try { localStorage.setItem('syncedOnce', '1'); } catch {} }
   if (got && (got.cards.length || got.revlog.length || got.conf?.length)) {
@@ -206,7 +248,7 @@ async function paintSync() {
   btn.title = sync.state.serverless ? 'サーバーなし' : sync.state.online === false ? `同期できません: ${sync.state.lastError}` : n ? `未送信 ${n}` : '同期済み';
 }
 function startSyncLoop() {
-  const btn = $('#nav-sync'); btn.disabled = false; btn.onclick = () => runSync();
+  const btn = $('#nav-sync'); btn.disabled = false; btn.onclick = () => runSync(true);
   const auto = autoSyncOn;
   window.addEventListener('online', () => { if (auto()) scheduleSync(500); });
   document.addEventListener('visibilitychange', () => { if (!auto()) return; if (!document.hidden) scheduleSync(500); else runSync(); });
@@ -369,7 +411,7 @@ function rebuildLB() {
   for (const [due, conf, nid] of S.meta.lbExtra || []) cards.push({ due, conf, nid });
   S.lb = buildLoadBalancer(cards, t.daysElapsed, t.nextDayAt, S.meta.presets);
 }
-function startStudy(did) { if (typeof did === 'number') { S.lastDeck = did; try { localStorage.setItem('lastDeck', String(did)); } catch {} } S.deck = did; S.mainQ = null; S.auto = false; autoClear(); document.body.dataset.view = 'study'; rebuildLB(); startTimer(); advance(); }
+function startStudy(did) { if (typeof did === 'number') { S.lastDeck = did; try { localStorage.setItem('lastDeck', String(did)); } catch {} } S.deck = did; S.mainQ = null; S.auto = false; autoClear(); document.body.dataset.view = 'study'; rebuildLB(); advance(); }
 // 下の帯の「新規 + 学習中 + 復習」。今のカードの種類に下線（AnkiMobile と同じ）
 function paintCounts(c, card) {
   const cur = !card ? null : card.queue === 0 ? 'new' : (card.queue === 1 || card.queue === 3) ? 'lrn' : 'rev';
@@ -455,7 +497,7 @@ async function rateInner(g) {
   const prev = structuredClone(S.card);
   const maxMs = (presetOf(S.card.did).maxTaken || 60) * 1000;   // 解答時間の上限（デッキのオプション。既定 60 秒）
   const res = answer(S.card, g, ctxFor(S.card), Math.min(maxMs, Math.round(performance.now() - S.shownAt)), Date.now());
-  const c = S.byId.get(prev.id); Object.assign(c, res.card); c.rev = res.revlog.id; addRev(res.revlog);
+  const c = S.byId.get(prev.id); Object.assign(c, res.card); c.rev = res.revlog.id; addRev(res.revlog); flashTick(g);
   if (res.card.leeched && res.card.lapses !== prev.lapses) toast(c.queue === -1 ? '回答したカードは「leech」（苦戦、忘却多発）のカードです。 カードを休止しました' : '回答したカードは「leech」（苦戦、忘却多発）のカードです。');
   if (c.queue === 2 && S.lb && S.deck !== 'session' && !c.inDyn) lbAdd(S.lb, c.nid, S.decksById.get(c.did)?.conf, c.ivl); // 復習になったら負荷分散の数に足す（answer_card_inner）
   if (S.deck === 'session') leaveSessionIfDone(c);
@@ -744,13 +786,14 @@ function cardDoc() {
         if (hasSel()) return;   // ドラッグで文字を選んだ（パソコンのマウス）。選んだまま残す
         const a = e.target.closest && e.target.closest('a');
         if (a && a.classList.contains('replay-button')) { e.preventDefault(); const [s, i] = a.dataset.av.split(':'); playAv([(s === 'q' ? S.card.qav : S.card.aav)[+i]]); return; }
+        if (a && /^(https?|mailto):/i.test(a.getAttribute('href') || '') && !a.closest('.replay-button')) { e.preventDefault(); window.open(a.href, '_blank', 'noopener'); return; }   // リンクはこのアプリの外で開く（AnkiMobile の既定）
         if (a && a.getAttribute('href')) e.preventDefault(); // カードの中のリンクで iframe が別のページへ行かないように
         if (pen.recentlyUsed()) return;
         const hint = e.target.closest && e.target.closest('a.hint');
         if (hint) { e.preventDefault(); hint.style.display = 'none'; const d = hint.nextElementSibling; if (d && d.classList.contains('hint')) d.style.display = 'block'; return; }
         if (isCtl(e.target)) return;   // カードの中のボタン・リンク・入力欄
         // ダブルタップ防止（AnkiMobile の「標準」: 前のタップから 0.15 秒は無視、0.3 秒なら受け付けた＝実機で測った）
-        const now = performance.now(); if (now - lastTapAt < TAP_GUARD) return; lastTapAt = now;
+        const now = performance.now(); if (now - lastTapAt < DTP[dtpKey()][1]) return; lastTapAt = now;
         const w = doc.documentElement.clientWidth || 1, hh = doc.documentElement.clientHeight || 1;
         const zone = (e.clientY < hh / 3 ? 0 : e.clientY < 2 * hh / 3 ? 3 : 6) + (e.clientX < w / 3 ? 0 : e.clientX < 2 * w / 3 ? 1 : 2);   // 左上〜右下の9区画
         if (S.side === 'q') { if (!kbdActive()) runAction(tapAct('q', zone)); return; }   // 表: 既定はどこを押しても答えを出す
@@ -1204,7 +1247,7 @@ const ACTIONS = [
   ['scrollDown', '下にスクロール', () => scrollCard(1)],
   ['undo', '元に戻す', () => undoAnswer()],
   ['rebuild', '再構築', null],
-  ['sync', '同期', () => runSync()],
+  ['sync', '同期', () => runSync(true)],
   ['again', '回答 (もう一度)', () => answerBy(1)],
   ['good', '回答 (正解)', () => answerBy(3)],
   ['easy', '回答 (簡単)', () => answerBy(4)],
@@ -1238,6 +1281,7 @@ function avSeek(d) { if (nativeAudio()) nativeAudio().postMessage({ audio: 'seek
 const ZONE_N = 9;
 const TAP_DEF = { q: Array(ZONE_N).fill('show'), a: ['again', 'off', 'good', 'again', 'off', 'good', 'again', 'off', 'good'] };
 const SWIPE_DEF = { left: 'tools', right: 'decks', up: 'off', down: 'off' };
+const shakeAct = () => lsGet('shake', 'undo');
 const TOP_DEF = ['decks', 'add', 'edit', 'browse', 'off', 'off', 'off', 'off', 'off'];
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v != null && ACT.has(v) ? v : d; } catch { return d; } };
 const tapAct = (side, i) => lsGet(`tap:${side}:${i}`, TAP_DEF[side][i]);
@@ -1309,7 +1353,8 @@ function setupTools() {
   // 「すべてのアクション」は AnkiMobile と同じ並びで全部出す（まだ写していないものは薄く）
   { const g = $('#menu-all'); g.innerHTML = ''; for (const [k, t, fn] of ACTIONS) { if (k === 'off') continue; const b = document.createElement('button'); b.textContent = t; b.dataset.all = k; if (!fn) b.disabled = true; b.onclick = () => { closeMenu(); runAction(k); }; g.append(b); } }
   $('#menu .fs .s').onclick = e => { e.stopPropagation(); aaStep(-1); }; $('#menu .fs .b').onclick = e => { e.stopPropagation(); aaStep(1); };
-  applyAa(); renderTopbar();
+  applyAa(); renderTopbar(); setupShake();
+  $('#nav-help').onclick = () => window.open('https://docs.ankiweb.net/ankimobile/intro', '_blank', 'noopener');   // 「？」＝AnkiMobile のマニュアル（実機と同じページ）
   document.querySelectorAll('#menu [data-act]').forEach(b => b.onclick = () => {
     const a = b.dataset.act; closeMenu();
     if (a === 'undo') undoAnswer();
@@ -1353,13 +1398,17 @@ function setupTools() {
       : Object.entries(BAR_L).map(([k, t]) => ({ t, ck: barStyle() === k, run: () => { setLS('bar', k); applyTheme(); } }))] }),
     study: () => ({ title: '学習', groups: [
       [{ t: 'スケジュール', go: 'x', off: 1 }, { t: '通知', go: 'notify' }, { t: 'トップバー', go: 'topbar' }, { t: 'ボトムバー', go: 'bottombar' }, { t: 'タップ', go: 'tap' }, { t: 'スワイプ', go: 'swipe' }, { t: '手書きパッド', go: 'pad' }, { t: 'ゲームパッド', go: 'x', off: 1 }],
-      [{ t: 'ツールアイコンを表示', tg: true, off: 1 }, { t: 'ツールアイコンの配置', v: '右側', go: 'x', off: 1 }],
-      [{ t: '回答確認用のマークを表示', tg: true, off: 1 }, { t: '回答確認用マークの表示位置を種類別にする', tg: false, off: 1 }],
+      [tgl('ツールアイコンを表示', 'toolsBtn', applyPrefs), { t: 'ツールアイコンの配置', v: toolsLeft() ? '左側' : '右側', go: 'toolspos' }],
+      [tgl('回答確認用のマークを表示', 'ticks'), { t: '回答確認用マークの表示位置を種類別にする', tg: false, off: 1 }],
       [tgl('音声再生ボタンを表示', 'replayBtn', () => { if (S.card) setFrame(cardHtml(S.card, S.side), S.card.mid, S.card.ord, S.side === 'a'); }),
        tgl('質問の音声・動画の再生を解答表示で停止', 'stopQAudio'),
        { t: 'サイレントモードでも音声を自動再生', tg: true, off: 1 }, { t: '他アプリの音（BGMなど）の音量を常に抑えめにする', tg: false, off: 1 }],
       [{ t: '動画をループ再生', tg: false, off: 1 }, { t: '動画再生コントローラーを表示', tg: true, off: 1 }],
-      [tgl('文字入力で解答しない', 'neverType', () => { if (S.card && S.side === 'q') setFrame(cardHtml(S.card, 'q'), S.card.mid, S.card.ord); })]] }),
+      [tgl('文字入力で解答しない', 'neverType', () => { if (S.card && S.side === 'q') setFrame(cardHtml(S.card, 'q'), S.card.mid, S.card.ord); }),
+       tgl('手書きパッドを表示しない', 'noPad', () => sp.refresh())],
+      [{ t: 'シェイクアクション', v: actName(shakeAct()), go: 'shake' }, { t: 'ダブルタップ防止', v: DTP[dtpKey()][0], go: 'dtp' }, tgl('リンクをこのアプリの外部で開く', 'extLinks')]] }),
+    toolspos: () => ({ title: 'ツールアイコンの配置', groups: [[['left', '左側'], ['right', '右側']].map(([k, t]) => ({ t, ck: (toolsLeft() ? 'left' : 'right') === k, run: () => { setLS('toolsPos', k); applyPrefs(); } }))] }),
+    dtp: () => ({ title: 'ダブルタップ防止', groups: [Object.entries(DTP).map(([k, [t]]) => ({ t, ck: dtpKey() === k, run: () => setLS('dtp', k) }))] }),
     notify: () => ({ title: '通知', groups: [
       [{ t: 'アプリのアイコンに課題枚数を表示', tg: false, off: 1 }],
       [{ t: '定時に、課題があれば枚数を通知', tg: false, off: 1 }, { t: '通知時刻', v: '10:00', go: 'x', off: 1 }]] }),
@@ -1394,7 +1443,7 @@ function setupTools() {
     about: () => ({ title: 'このアプリについて', about: ['Anki のカードと学習の記録をそのまま使う暗記アプリです。', '復習の間隔の計算と出題の順番は、Anki のソースコード（AGPL）をもとに書き直したもので、Anki 本体と同じ結果になることを確かめています。', '答えた記録をパソコンの Anki に書き戻せば、Anki や AnkiMobile と並行して使えます。'] }),
     sync: () => ({ title: '同期', groups: [
       [{ t: '音声と画像を同期', tg: true, off: 1 }, { t: 'メディア同期の進捗を表示', tg: true, off: 1 }],
-      [{ t: '今すぐ同期', act: 1, run: () => { closePrefs(); runSync(); } }]] }),
+      [{ t: '今すぐ同期', act: 1, run: () => { closePrefs(); runSync(true); } }]] }),
   };
   // 割り当てを選ぶページ（AnkiMobile と同じく全アクションの一覧。まだ写していないものは薄く出して選べない）
   const SWIPES = [['left', '左にスワイプ'], ['right', '右にスワイプ'], ['up', '上にスワイプ'], ['down', '下にスワイプ']];
@@ -1402,6 +1451,7 @@ function setupTools() {
   for (const side of ['q', 'a']) for (let i = 0; i < ZONES.length; i++) PAGES['tap' + side + i] = picker(ZONES[i], () => tapAct(side, i), `tap:${side}:${i}`);
   for (const [d, t] of SWIPES) PAGES['sw_' + d] = picker(t, () => swipeAct(d), 'swipe:' + d);
   for (let i = 0; i < TOP_DEF.length; i++) PAGES['tb' + i] = picker(`ボタン${i + 1}`, () => topAct(i), 'top:' + i);
+  PAGES.shake = () => { const pg = picker('シェイクアクション', shakeAct, 'shake')(); for (const it of pg.groups[0]) { const run = it.run; it.run = () => { run(); try { DeviceMotionEvent.requestPermission?.(); } catch {} }; } return pg; };
   let stack = [];
   const closePrefs = () => { $('#prefs').hidden = true; stack = []; };
   const renderPrefs = () => {

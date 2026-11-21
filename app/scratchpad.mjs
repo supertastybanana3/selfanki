@@ -47,6 +47,7 @@ export function createScratchpad({ study, host, bottom, corner, isDark }) {
     wrap.style.height = h + 'px';
     const lift = spPref.flag('below') ? 0 : h;   // 帯の上に重ねるときは、元に戻すと歯車をパッドの上へ
     undo.style.bottom = `calc(${lift}px + 2.75px)`; corner.style.bottom = `calc(${lift}px + 2.75px)`;
+    const left = get('toolsPos', 'right') === 'left'; undo.style.left = left ? 'auto' : ''; undo.style.right = left ? '2.75px' : '';   // 歯車を左に置いたら、元に戻すは右へ
     redraw();
   }
   function redraw() {
@@ -106,12 +107,12 @@ export function createScratchpad({ study, host, bottom, corner, isDark }) {
     setCard(card) {
       if (!card) { on = false; mid = null; cardId = null; strokes = []; cur = null; layout(); return; }
       if (card.id !== cardId) { strokes = []; cur = null; }
-      cardId = card.id; mid = card.mid; on = get(onKey(mid), '0') === '1'; layout();
+      cardId = card.id; mid = card.mid; on = get(onKey(mid), '0') === '1' && get('pref:noPad', '0') !== '1'; layout();   // 「手書きパッドを表示しない」なら出さない
     },
-    toggle() { if (mid == null) return; on = !on; put(onKey(mid), on ? '1' : '0'); layout(); },
+    toggle() { if (mid == null || get('pref:noPad', '0') === '1') return; on = !on; put(onKey(mid), on ? '1' : '0'); layout(); },
     // アクション「手書きサイズ」: 25% → 50% → 75% → 25%（実機。ほかの大きさのときは 25% へ）
     cycleSize() { const n = spPref.size(); spPref.set('size', n === 25 ? 50 : n === 50 ? 75 : 25); layout(); },
-    refresh() { layout(); },
+    refresh() { if (get('pref:noPad', '0') === '1') on = false; else if (mid != null) on = get(onKey(mid), '0') === '1'; layout(); },
     get on() { return on; },
   };
 }
