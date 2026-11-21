@@ -9,6 +9,7 @@ import { createPen } from './pen.mjs';
 import { createAsk } from './ask.mjs';
 import { typeQuestion, typeAnswer } from './typeans.mjs';
 import { createScratchpad, spPref, SP_WIDTH, SP_SIZE, SP_ALPHA } from './scratchpad.mjs';
+import { repositionNew } from '../fsrs/reposition.mjs';
 
 const BUNDLE = new URL('../bundle/', location.href).href;
 const MEDIA = BUNDLE + 'media/';
@@ -375,7 +376,7 @@ const BROWSE_ACTIONS = [
   ['flag', 'フラグを変更', cs => pickFlag(cs)],
   ['suspend', '休止 / 休止解除', cs => { const un = cs.length && cs[0].queue === -1; return changeCards(cs, c => { c.queue = un ? (c.type === 0 ? 0 : c.type === 2 ? 2 : (c.due > 1e9 ? 1 : 3)) : -1; }, un ? `${cs.length}枚の休止を解除しました` : `${cs.length}枚を休止しました`, '休止 / 休止解除', false); }],
   ['due', '期日を指定', cs => manualMany(cs, 'due')],
-  ['reposition', '並び替える', null],
+  ['reposition', '並び替える', cs => repositionAction(cs)],
   ['reset', 'カードをリセット', cs => manualMany(cs, 'reset')],
   ['replace', '検索して置換', null],
   ['tagAdd', 'タグを追加', null],
@@ -400,6 +401,23 @@ function openBrowseActions() {
   // 「アクション」の真下に、中心をそろえて出す（画面からはみ出さないように）
   const r = $('#browse > .pnav .sel-act').getBoundingClientRect();
   pop.style.left = Math.max(8, Math.min(innerWidth - 312, r.left + r.width / 2 - 152)) + 'px';
+}
+// 「並び替える」（新規カードの位置を変える。Anki の「位置（新規カード番号）を変更」の小窓と同じ項目・既定。rslib sort_cards と同じ結果）
+async function repositionAction(cs) {
+  const news = S.all.filter(c => c.type === 0 && !c.inDyn).map(c => c.due);
+  const minP = Math.max(news.length ? Math.min(...news) : 0, 0), maxP = news.length ? Math.max(...news) : 0;
+  const lsb = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v === '1'; } catch { return d; } };
+  const r = await iosPrompt({ title: '位置（新規カード番号）を変更', message: `先頭: ${minP}\n最後: ${maxP}`,
+    numbers: [{ label: '開始位置:', value: 0, min: 0, max: 1000000 }, { label: '間隔:', value: 1, min: 1, max: 10000 }],
+    toggles: [{ label: 'ランダムに並べ替える', on: lsb('randomOrderReposition', !!S.meta.config.randomOrderReposition) }, { label: '既存のカードの順序を移動する', on: lsb('shiftPositionOfExistingCards', !!S.meta.config.shiftPositionOfExistingCards) }] });
+  if (!r) return;
+  const clampN = (v, lo, hi, d) => { const n = Math.trunc(+v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
+  const start = clampN(r.numbers[0], 0, 1000000, 0), step = clampN(r.numbers[1], 1, 10000, 1), [random, shift] = r.toggles;
+  try { localStorage.setItem('randomOrderReposition', random ? '1' : '0'); localStorage.setItem('shiftPositionOfExistingCards', shift ? '1' : '0'); } catch {}
+  const { changes, count } = repositionNew(cs, S.all, { start, step, random, shift });
+  const touched = S.all.filter(c => changes.has(c.id));
+  if (!touched.length) { toast(`新規カードの位置を${count}枚変更しました。`); return; }
+  await changeCards(touched, c => Object.assign(c, changes.get(c.id)), `新規カードの位置を${count}枚変更しました。`, '並び替える', false);
 }
 // 「フラグを変更」の小窓（実機: フラグ1 (レッド)〜フラグ7 (パープル)・フラグを消去・キャンセル）
 function pickFlag(cs) {
@@ -705,7 +723,7 @@ function checkModified(card) {
 }
 // iOS の警告の小窓（AnkiMobile のエラー表示と同じ見た目: 幅270pt・見出し太字・本文13pt中央・区切り線の下に OK）
 // iOS の確認の小窓（見出し・説明・入力欄かスイッチ・キャンセル／OK）。OK なら { value, toggles }、キャンセルなら null
-function iosPrompt({ title, message = '', input = null, toggles = [] }) {
+function iosPrompt({ title, message = '', input = null, toggles = [], numbers = [] }) {
   let el = $('#iosDialog');
   if (!el) {
     const st = document.createElement('style');
@@ -717,6 +735,7 @@ function iosPrompt({ title, message = '', input = null, toggles = [] }) {
 #iosDialog .m:empty{display:none}
 #iosDialog input[type=text]{margin:0 16px 16px;height:26px;border:.5px solid var(--al-line);border-radius:7px;padding:0 6px;font-size:13px;background:var(--al-bg);color:var(--al-text)}
 #iosDialog label{display:flex;align-items:center;gap:8px;font-size:13px;padding:0 16px 12px}
+#iosDialog .num{display:flex;align-items:center;gap:8px;font-size:13px;padding:0 16px 10px} #iosDialog .num span{flex:1} #iosDialog .num input{width:90px;height:26px;border:.5px solid var(--al-line);border-radius:7px;padding:0 6px;font-size:13px;background:var(--al-bg);color:var(--al-text);text-align:right}
 #iosDialog .bt{display:flex;border-top:.5px solid var(--al-line)} #iosDialog .bt button{flex:1;height:44px;font-size:17px;color:var(--al-blue)}
 #iosDialog .bt button+button{border-left:.5px solid var(--al-line);font-weight:600}`;
     document.head.append(st);
@@ -726,12 +745,13 @@ function iosPrompt({ title, message = '', input = null, toggles = [] }) {
   }
   el.querySelector('.t').textContent = title; el.querySelector('.m').textContent = message;
   const f = el.querySelector('.f'); f.innerHTML = '';
-  let inp = null; const tgs = [];
+  let inp = null; const tgs = [], nums = [];
+  for (const n of numbers) { const l = document.createElement('div'); l.className = 'num'; const s = document.createElement('span'); s.textContent = n.label; const c = document.createElement('input'); c.type = 'number'; c.inputMode = 'numeric'; c.value = n.value; if (n.min != null) c.min = n.min; if (n.max != null) c.max = n.max; l.append(s, c); f.append(l); nums.push(c); }
   if (input != null) { inp = document.createElement('input'); inp.type = 'text'; inp.value = input; inp.setAttribute('inputmode', 'text'); f.append(inp); }
   for (const t of toggles) { const l = document.createElement('label'); const c = document.createElement('input'); c.type = 'checkbox'; c.checked = !!t.on; l.append(c, document.createTextNode(t.label)); f.append(l); tgs.push(c); }
-  el.hidden = false; if (inp) setTimeout(() => { inp.focus(); inp.select(); }, 0);
+  el.hidden = false; const first = inp || nums[0]; if (first) setTimeout(() => { first.focus(); first.select(); }, 0);
   return new Promise(res => {
-    const done = ok => { el.hidden = true; el.onkeydown = null; res(ok ? { value: inp ? inp.value : null, toggles: tgs.map(c => c.checked) } : null); };
+    const done = ok => { el.hidden = true; el.onkeydown = null; res(ok ? { value: inp ? inp.value : null, toggles: tgs.map(c => c.checked), numbers: nums.map(c => c.value) } : null); };
     el.querySelector('.no').onclick = () => done(false); el.querySelector('.yes').onclick = () => done(true);
     el.onkeydown = e => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); done(true); } else if (e.key === 'Escape') { e.preventDefault(); done(false); } };
   });
@@ -809,28 +829,11 @@ function iosAlert(title, msg) {
   el.querySelector('.m').scrollTop = 0;
 }
 // ---------- カード情報（PC 版の i） ----------
-const TYPE_NAME = ['新規', '学習中', '復習', '再学習'], REV_KIND = ['学習', '復習', '再学習', 'フィルター', '手動', '再スケジュール'];
-const EASE_NAME = ['', 'もう一度', '難しい', '正解', '簡単'];
-function fmtDate(ms) { const d = new Date(ms); return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`; }
-function fmtTime(ms) { const d = new Date(ms); return `${fmtDate(ms)} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`; }
-function fmtDays(ivl) { if (ivl < 0) return fmtIvl(-ivl); return fmtIvl(ivl * 86400); }
+// カード情報は Anki 本体の画面（/card-info/。数字は ankiweb.mjs の cardStatsData が rslib stats/card.rs と同じ計算で返す）
 function cardInfo(c) {
   if (!c) return;
-  const revs = S.revlog.filter(r => r.cid === c.id).sort((a, b) => b.id - a.id);
-  const t = timingToday(nowSecs(), S.meta);
-  const d = c.data || {}, nt = S.meta.notetypes[c.mid];
-  const due = c.queue === -1 ? '（休止中）' : c.queue < -1 ? '（今日は非表示）' : c.type === 0 ? `新規 #${c.due}` : c.queue === 1 ? fmtTime(c.due * 1000) : fmtDate((t.nextDayAt - 86400 + (c.due - t.daysElapsed) * 86400) * 1000);
-  let R = '';
-  if (d.s && d.lrt) { const decay = d.decay || 0.5, f = Math.pow(0.9, -1 / decay) - 1, el = (nowSecs() - d.lrt) / 86400; R = (100 * Math.pow(1 + f * el / d.s, -decay)).toFixed(0) + '%'; }
-  const sum = revs.reduce((a, r) => a + r.time, 0);
-  const rows = [['追加日', fmtDate(c.nid)], ['最初の復習', revs.length ? fmtDate(revs[revs.length - 1].id) : '—'], ['最新の復習', revs.length ? fmtDate(revs[0].id) : '—'],
-    ['期日', due], ['間隔', c.type === 2 || c.type === 3 ? fmtDays(c.ivl) : '—'], ['難易度', d.d ? Math.round((d.d - 1) / 9 * 100) + '%' : '—'], ['安定度', d.s ? fmtDays(Math.round(d.s)) : '—'], ['想起確率', R || '—'],
-    ['復習回数', c.reps], ['失敗回数', c.lapses], ['平均時間', revs.length ? (sum / revs.length / 1000).toFixed(1) + '秒' : '—'], ['合計時間', (sum / 1000 / 60).toFixed(1) + '分'],
-    ['カードの種類', TYPE_NAME[c.type] ?? c.type], ['ノートの種類', nt?.name || ''], ['デッキ', S.decksById.get(c.did)?.name || ''], ['カード ID', c.id], ['ノート ID', c.nid]];
-  const log = revs.map(r => `<tr><td>${fmtTime(r.id)}</td><td>${REV_KIND[r.type] ?? r.type}</td><td class="e${r.ease}">${EASE_NAME[r.ease] || r.ease}</td><td>${r.ivl ? fmtDays(r.ivl) : '—'}</td><td>${r.factor ? (r.factor / 10).toFixed(0) + '%' : '—'}</td><td>${(r.time / 1000).toFixed(1)}秒</td></tr>`).join('');
-  $('#cardInfo .ci-body').innerHTML = `<table class="ci-kv">${rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')}</table>`
-    + (revs.length ? `<table class="ci-log"><tr><th>日時</th><th>種類</th><th>評価</th><th>間隔</th><th>難易度</th><th>時間</th></tr>${log}</table>` : '');
-  $('#cardInfo').classList.add('open');
+  $('#awpage .ptitle').textContent = 'カード情報'; $('#awframe').src = `/card-info/?cid=${c.id}`;
+  $('#awpage').hidden = false;
 }
 
 // ---------- カードの表示 ----------

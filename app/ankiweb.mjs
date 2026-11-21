@@ -3,6 +3,7 @@
 // 画面が /_anki/<名前> に送る問い合わせ（protobuf）を、ここで端末の中のデータから答える。
 // 統計の計算は rslib/src/stats/graphs/*.rs（AGPL-3.0）を JavaScript に写したもの。
 import { timingToday } from '../fsrs/sched.mjs';
+import { historicalStates, retrievability, FSRS5_DEFAULT_DECAY } from '../fsrs/history.mjs';
 import { searchCards, loadNotes, displayText } from './search.mjs';
 
 // ---------- protobuf（必要な分だけ） ----------
@@ -261,6 +262,71 @@ const PREF_KEY = 'graphPrefs';
 function getPrefs() { try { return JSON.parse(localStorage.getItem(PREF_KEY)) || {}; } catch { return {}; } }
 
 let i18nCache = null;
+// ---------- カード情報（rslib stats/card.rs の card_stats → CardStatsResponse） ----------
+const presetParams = p => (p?.fsrsParams6?.length ? p.fsrsParams6 : p?.fsrsParams5?.length ? p.fsrsParams5 : p?.fsrsWeights || []);
+function ignoreBeforeMs(p) { const s = p?.ignoreRevlogsBeforeDate || ''; if (!s) return 0; const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : 0; }
+export function cardStatsData(S, cid, nowSecs = Math.floor(Date.now() / 1000)) {
+  const F = Math.fround;
+  const c = S.byId.get(cid); if (!c) throw new Error('card not found: ' + cid);
+  const nt = S.meta.notetypes[c.mid] || {}, home = S.decksById.get(c.did);
+  const preset = S.meta.presets[home?.conf] || S.meta.presets[1] || {};
+  const revs = S.revlog.filter(r => r.cid === cid).sort((a, b) => a.id - b.id)
+    .map(r => ({ id: r.id, button: r.ease, ivl: r.ivl, factor: r.factor, time: r.time, type: r.type }));
+  const t = timingToday(nowSecs, S.meta), d = c.data || {};
+  // 平均・合計の時間（f32 で足す）
+  let total = 0; for (const r of revs) total = F(total + F(r.time / 1000));
+  const n = revs.filter(r => r.button > 0).length;
+  const [avg, tot] = n === 0 || total === 0 ? [0, 0] : [F(total / n), total];
+  // 最後に答えた時刻（カードに無ければ記録から: 評価 1〜4・詰め込みを除く）
+  let lrt = d.lrt;
+  if (lrt == null) { let last = null; for (const r of revs) if (r.button >= 1 && r.button <= 4 && (r.type !== 3 || r.factor !== 0)) last = Math.trunc(r.id / 1000); lrt = last ?? 0; }
+  const secs = Number(BigInt.asUintN(32, BigInt(nowSecs - lrt)));
+  const ms = d.s != null && d.d != null ? { s: F(d.s), d: F(d.d) } : null;
+  // 期日・位置（フィルターデッキの中なら、元の期日。無ければそのデッキの期日）
+  let dueDate = null;
+  if (c.type !== 0) {
+    const due = c.inDyn ? (c.due || c.dynDue || 0) : c.due;
+    dueDate = due > 1e9 ? due : nowSecs + (due - t.daysElapsed) * 86400;
+  }
+  const position = d.pos != null ? d.pos : c.type === 0 ? (c.inDyn ? (c.dynDue ?? c.due) : c.due) : null;
+  // 記録ごとの記憶の値
+  const hist = historicalStates(presetParams(preset), revs, t.nextDayAt, F(preset.sm2Retention ?? 0.9), ignoreBeforeMs(preset));
+  const rows = revs.map(e => ({ e, ms: undefined }));
+  if (hist) {
+    let i = 0; const st = hist.states, fl = hist.filtered;
+    for (const r of rows) {
+      if (i >= st.length) r.ms = st[st.length - 1];
+      else if (r.e.id === fl[i].id) { i++; r.ms = st[i - 1]; }
+      else if (i === 0) r.ms = null;
+      else r.ms = st[i];
+    }
+  }
+  const tmpl = (nt.type === 1 ? nt.templates?.[0] : nt.templates?.find(x => x.ord === c.ord) ?? nt.templates?.[c.ord]) || {};
+  return {
+    revlog: rows.reverse().map(({ e, ms }) => ({ time: Math.trunc(e.id / 1000), reviewKind: e.type, buttonChosen: e.button, interval: e.ivl > 0 ? e.ivl * 86400 : -e.ivl, ease: e.factor, takenSecs: F(e.time / 1000), memoryState: ms || null })),
+    cardId: c.id, noteId: c.nid, deck: c.inDyn && c.dynName ? c.dynName : home?.name || '',
+    added: Math.trunc(c.id / 1000), firstReview: revs.length ? Math.trunc(revs[0].id / 1000) : null, latestReview: revs.length ? Math.trunc(revs[revs.length - 1].id / 1000) : null,
+    dueDate, duePosition: position, interval: c.ivl, ease: c.factor, reviews: c.reps, lapses: c.lapses, averageSecs: avg, totalSecs: tot,
+    cardType: tmpl.name || c.tname || '', notetype: nt.name || '', memoryState: ms,
+    fsrsRetrievability: ms ? retrievability(ms.s, secs, F(d.decay ?? FSRS5_DEFAULT_DECAY)) : null,
+    customData: d.cd || '', preset: preset.name || '', originalDeck: c.inDyn && c.dynName ? home?.name || '' : null,
+    desiredRetention: d.dr != null ? F(d.dr) : null, fsrsParams: presetParams(preset).map(F),
+  };
+}
+export function cardStatsBytes(x) {
+  const w = new W();
+  const msg = (ww, f, m) => ww.msg(f, y => { y.f32(1, m.s); y.f32(2, m.d); });
+  for (const r of x.revlog) w.msg(1, y => { y.i32(1, r.time); y.i32(2, r.reviewKind); y.u32(3, r.buttonChosen); y.u32(4, r.interval); y.u32(5, r.ease); y.f32(6, r.takenSecs); if (r.memoryState) msg(y, 7, r.memoryState); });
+  w.i32(2, x.cardId); w.i32(3, x.noteId); w.str(4, x.deck); w.i32(5, x.added);
+  if (x.firstReview != null) w.u32o(6, x.firstReview); if (x.latestReview != null) w.u32o(7, x.latestReview);
+  if (x.dueDate != null) w.u32o(8, x.dueDate); if (x.duePosition != null) w.u32o(9, x.duePosition);
+  w.u32(10, x.interval); w.u32(11, x.ease); w.u32(12, x.reviews); w.u32(13, x.lapses); w.f32(14, x.averageSecs); w.f32(15, x.totalSecs);
+  w.str(16, x.cardType); w.str(17, x.notetype); if (x.memoryState) msg(w, 18, x.memoryState);
+  if (x.fsrsRetrievability != null) w.f32o(19, x.fsrsRetrievability); w.str(20, x.customData); w.str(21, x.preset);
+  if (x.originalDeck != null) w.str(22, x.originalDeck); if (x.desiredRetention != null) w.f32o(23, x.desiredRetention); w.floats(24, x.fsrsParams);
+  return w.done();
+}
+
 export function installAnkiBackend(getS, currentDid, hooks = {}) {
   window.ankiBackend = async (method, body, query) => {
     body = Uint8Array.from(body || []); // 画面（iframe）側で作られた配列は instanceof が効かないので、こちらの側で作り直す
@@ -269,6 +335,7 @@ export function installAnkiBackend(getS, currentDid, hooks = {}) {
     const did = q.get('did') === 'session' ? 'session' : q.get('did') ? +q.get('did') : currentDid();
     if (method === 'graphs') { const m = read(body); const q = str(m[1]?.[0]); if (q.trim()) await loadNotes(S, new URL('../bundle/', location.href).href); return graphs(S, q, m[2]?.[0] || 0, did); }
     if (method === 'congratsInfo') return congrats(S, did);
+    if (method === 'cardStats') { const m = read(body); return cardStatsBytes(cardStatsData(S, f1(m, 1))); }
     if (method === 'getGraphPreferences') {
       const p = getPrefs(); const w = new W();
       w.i32(1, p.firstDay ?? 0); w.bool(2, !!p.separateInactive); w.bool(3, false); w.bool(4, p.showBacklog ?? true); return w.done();
