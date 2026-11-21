@@ -10,6 +10,7 @@
 |---|---|---|
 | `fsrs/queue.mjs`・`fsrs/sched.mjs`・`fsrs/schedule.mjs`・`app/search.mjs`・`app/ankiweb.mjs` の計算部分 | Anki 25.09.4 の rslib（scheduler・search・stats）を、このリポジトリの作者が 2026 年に JavaScript へ書き写し、手を加えたもの。元のソースは <https://github.com/ankitects/anki>（タグ `25.09.4`） | Copyright Ankitects Pty Ltd and contributors。AGPL-3.0-or-later（`LICENSES/anki-LICENSE.txt`） |
 | `ankiweb/_app/` | Anki 25.9.4 の Python パッケージ `aqt` に入っている SvelteKit の組み上がり（`_aqt/data/web/sveltekit/_app`）そのもの。対応するソースは同じリポジトリのタグ `25.09.4` の `ts/` | Copyright Ankitects Pty Ltd and contributors。AGPL-3.0-or-later。組み上がりに含まれるライブラリのライセンスは Anki のリポジトリに従う |
+| `ankiweb/js/reviewer.js` | Anki 25.9.4 の Python パッケージ `aqt` に入っている学習画面のスクリプト（`_aqt/data/web/js/reviewer.js`）そのもの。画像穴埋めの表示（`anki.imageOcclusion.setup()`）に使う。対応するソースは同じリポジトリのタグ `25.09.4` の `ts/` | Copyright Ankitects Pty Ltd and contributors。AGPL-3.0-or-later |
 | `ankiweb/*/index.html` | 同じく `aqt` の `index.html` に、問い合わせをアプリに回す起動文を足したもの（2026 年） | 同上 |
 | `ankiweb/i18n_ja.json`、組み立てのときに作る `i18n_anki.json` | Anki 25.9.4 の翻訳（Python の anki パッケージで書き出したもの） | Anki のライセンスの説明では、翻訳は BSD とパブリックドメインの混在（`LICENSES/anki-LICENSE.txt`） |
 | `fsrs/fsrs6.mjs` | Anki が使う FSRS-6 の式（fsrs-rs）を 2026 年に JavaScript へ書き写したもの。<https://github.com/open-spaced-repetition/fsrs-rs> | Copyright (c) 2023, Open Spaced Repetition。BSD-3-Clause（`LICENSES/fsrs-rs-BSD-3-Clause.txt`） |

@@ -26,7 +26,14 @@ final class AudioBridge: NSObject, AVAudioPlayerDelegate, AVSpeechSynthesizerDel
         case "speak":
             stop(); session(); token = d["id"] as? Int ?? 0
             let u = AVSpeechUtterance(string: d["text"] as? String ?? "")
-            u.voice = AVSpeechSynthesisVoice(language: d["lang"] as? String ?? "ja-JP")
+            let lang = d["lang"] as? String ?? "ja-JP"
+            // {{tts … voices=… speed=…}}: 書いた順に端末にある声を選び（「Apple_Kyoko」のように会社_名前でもよい）、速さは標準の何倍か
+            let want = (d["voices"] as? [String] ?? []).map { $0.lowercased() }
+            let all = AVSpeechSynthesisVoice.speechVoices()
+            u.voice = want.lazy.compactMap { w in all.first { $0.name.lowercased() == w || $0.name.lowercased() == (w.split(separator: "_").last.map(String.init) ?? w) } }.first
+                ?? AVSpeechSynthesisVoice(language: lang)
+            let rate = (d["rate"] as? Double) ?? 1
+            u.rate = min(AVSpeechUtteranceMaximumSpeechRate, max(AVSpeechUtteranceMinimumSpeechRate, AVSpeechUtteranceDefaultSpeechRate * Float(rate)))
             synth.speak(u)
         case "stop": stop()
         case "pause":
