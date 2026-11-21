@@ -25,7 +25,7 @@ def dump(obj): return json.dumps(obj, ensure_ascii=False, separators=(',', ':'))
 def card_rev(c, last_rev):
     return max(c['mod'] * 1000, last_rev.get(c['id'], 0))
 STATE_KEYS = ['type', 'queue', 'due', 'ivl', 'factor', 'reps', 'lapses', 'left', 'data']
-CONTENT_KEYS = ['id', 'nid', 'did', 'mid', 'ord', 'flags', 'tags', 'q', 'a', 'qav', 'aav', 'sfld', 'tname', 'inDyn', 'typ']
+CONTENT_KEYS = ['id', 'nid', 'did', 'mid', 'ord', 'flags', 'tags', 'q', 'a', 'qav', 'aav', 'sfld', 'tname', 'inDyn', 'dynName', 'dynDue', 'typ']
 
 def ensure_media(names, log=print):
     """足りない画像・音声を cloud/media に揃える。config.json の anki_media_dir（Anki の collection.media）があればそこから写し、
