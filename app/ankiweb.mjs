@@ -246,20 +246,24 @@ function graphs(S, search, days, currentDid) {
 
 // ---------- 課題を終えた画面（rslib scheduler/congrats.rs と storage/card/congrats.sql） ----------
 function congrats(S, did) {
-  const deck = S.decksById.get(did);
-  const ids = deck ? new Set(S.meta.decks.filter(d => d.name === deck.name || d.name.startsWith(deck.name + '::')).map(d => d.id)) : null;
-  const cards = ids ? S.cards.filter(c => ids.has(c.did)) : [];
+  // フィルターデッキ（S.fdecks）なら、中のカードを中での期日・種類で数える。ふつうのデッキでは、フィルターデッキに入っているカードは数えない
+  const fdeck = S.fdecks?.get(did), isF = !!fdeck && !fdeck.removed;
+  const inF = c => { const f = c.data?.flt; if (!f) return null; const d = S.fdecks?.get(f.d); return d && !d.removed ? f : null; };
+  const deck = isF ? fdeck : S.decksById.get(did);
+  const ids = deck && !isF ? new Set(S.meta.decks.filter(d => d.name === deck.name || d.name.startsWith(deck.name + '::')).map(d => d.id)) : null;
+  const cards = isF ? S.cards.filter(c => inF(c)?.d === did).map(c => ({ queue: c.queue < 0 ? c.queue : c.data.flt.q, due: c.data.flt.due }))
+    : ids ? S.cards.filter(c => ids.has(c.did) && !inF(c)) : [];
   const t = timingToday(Math.floor(Date.now() / 1000), S.meta);
   let review = 0, nw = 0, sb = 0, ub = 0, learn = 0, firstLearn = null;
   for (const c of cards) {
     if ((c.queue === 2 || c.queue === 3) && c.due <= t.daysElapsed) review++;
     if (c.queue === 0) nw++; if (c.queue === -2) sb++; if (c.queue === -3) ub++;
-    if (c.queue === 1) { learn++; if (firstLearn == null || c.due < firstLearn) firstLearn = c.due; }
+    if (c.queue === 1 || c.queue === 4) { learn++; if (firstLearn == null || c.due < firstLearn) firstLearn = c.due; }
   }
   const nextDue = Math.max(0, firstLearn ?? 0);
   const secsUntil = nextDue === 0 ? 86400 : Math.max(60, Math.trunc(nextDue - (S.meta.config.collapseTime ?? 1200) - Date.now() / 1000));
   const w = new W();
-  w.u32(1, learn); w.u32(2, secsUntil); w.bool(3, review > 0); w.bool(4, nw > 0); w.bool(5, sb > 0); w.bool(6, ub > 0); w.bool(7, did === 'session'); w.bool(8, true); w.str(9, deck?.desc || '');
+  w.u32(1, learn); w.u32(2, secsUntil); w.bool(3, review > 0); w.bool(4, nw > 0); w.bool(5, sb > 0); w.bool(6, ub > 0); w.bool(7, isF); w.bool(8, true); w.str(9, deck?.desc || '');
   return w.done();
 }
 
@@ -289,12 +293,13 @@ export function cardStatsData(S, cid, nowSecs = Math.floor(Date.now() / 1000)) {
   const secs = Number(BigInt.asUintN(32, BigInt(nowSecs - lrt)));
   const ms = d.s != null && d.d != null ? { s: F(d.s), d: F(d.d) } : null;
   // 期日・位置（フィルターデッキの中なら、元の期日。無ければそのデッキの期日）
+  const flt = (() => { const f = c.data?.flt; if (!f) return null; const x = S.fdecks?.get(f.d); return x && !x.removed ? { ...f, name: x.name } : null; })();
   let dueDate = null;
   if (c.type !== 0) {
-    const due = c.inDyn ? (c.due || c.dynDue || 0) : c.due;
+    const due = flt ? (c.due || flt.due || 0) : c.due;
     dueDate = due > 1e9 ? due : nowSecs + (due - t.daysElapsed) * 86400;
   }
-  const position = d.pos != null ? d.pos : c.type === 0 ? (c.inDyn ? (c.dynDue ?? c.due) : c.due) : null;
+  const position = d.pos != null ? d.pos : c.type === 0 ? (flt ? (flt.due ?? c.due) : c.due) : null;
   // 記録ごとの記憶の値
   const hist = historicalStates(presetParams(preset), revs, t.nextDayAt, F(preset.sm2Retention ?? 0.9), ignoreBeforeMs(preset));
   const rows = revs.map(e => ({ e, ms: undefined }));
@@ -310,12 +315,12 @@ export function cardStatsData(S, cid, nowSecs = Math.floor(Date.now() / 1000)) {
   const tmpl = (nt.type === 1 ? nt.templates?.[0] : nt.templates?.find(x => x.ord === c.ord) ?? nt.templates?.[c.ord]) || {};
   return {
     revlog: rows.reverse().map(({ e, ms }) => ({ time: Math.trunc(e.id / 1000), reviewKind: e.type, buttonChosen: e.button, interval: e.ivl > 0 ? e.ivl * 86400 : -e.ivl, ease: e.factor, takenSecs: F(e.time / 1000), memoryState: ms || null })),
-    cardId: c.id, noteId: c.nid, deck: c.inDyn && c.dynName ? c.dynName : home?.name || '',
+    cardId: c.id, noteId: c.nid, deck: flt ? flt.name : home?.name || '',
     added: Math.trunc(c.id / 1000), firstReview: revs.length ? Math.trunc(revs[0].id / 1000) : null, latestReview: revs.length ? Math.trunc(revs[revs.length - 1].id / 1000) : null,
     dueDate, duePosition: position, interval: c.ivl, ease: c.factor, reviews: c.reps, lapses: c.lapses, averageSecs: avg, totalSecs: tot,
     cardType: tmpl.name || c.tname || '', notetype: nt.name || '', memoryState: ms,
     fsrsRetrievability: ms ? retrievability(ms.s, secs, F(d.decay ?? FSRS5_DEFAULT_DECAY)) : null,
-    customData: d.cd || '', preset: preset.name || '', originalDeck: c.inDyn && c.dynName ? home?.name || '' : null,
+    customData: d.cd || '', preset: preset.name || '', originalDeck: flt ? home?.name || '' : null,
     desiredRetention: d.dr != null ? F(d.dr) : null, fsrsParams: presetParams(preset).map(F),
   };
 }
@@ -355,7 +360,7 @@ export function installAnkiBackend(getS, currentDid, hooks = {}) {
     body = Uint8Array.from(body || []); // 画面（iframe）側で作られた配列は instanceof が効かないので、こちらの側で作り直す
     const S = getS();
     const q = new URLSearchParams(query || '');
-    const did = q.get('did') === 'session' ? 'session' : q.get('did') ? +q.get('did') : currentDid();
+    const did = q.get('did') ? +q.get('did') : currentDid();
     if (method === 'graphs') { const m = read(body); const q = str(m[1]?.[0]); if (q.trim()) await loadNotes(S, new URL('../bundle/', location.href).href); return graphs(S, q, m[2]?.[0] || 0, did); }
     if (method === 'congratsInfo') return congrats(S, did);
     if (method === 'cardStats') { const m = read(body); return cardStatsBytes(cardStatsData(S, f1(m, 1))); }

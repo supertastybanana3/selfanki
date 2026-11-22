@@ -2,6 +2,7 @@
 // rslib の Collection 側（検索して記録を集める・記憶の値の無いカードを補う・進み具合 LatestProgress・中止 SetWantsAbort）にあたる部分
 import { searchCards, loadNotes } from './search.mjs';
 import { timingToday } from '../fsrs/sched.mjs';
+import { fltIn } from '../fsrs/filtered.mjs';
 import { historicalStates } from '../fsrs/history.mjs';
 import { computeParams, evaluateParamsLegacy } from '../fsrs/optimize.mjs';
 import * as simlib from '../fsrs/simulate.mjs';
@@ -71,14 +72,16 @@ export function memoryFromRevlog(S, c, revs, nextDayAt) {
   const h = historicalStates(w, entries, nextDayAt, F(p.sm2Retention ?? 0.9), ignoreBeforeMs(p));
   return h && h.states.length ? h.states[h.states.length - 1] : null;
 }
-const isIncluded = c => c.queue !== -1 && c.queue !== 4 && c.type !== 0;
-const slim = c => ({ id: c.id, queue: c.queue, type: c.type, due: c.due, ivl: c.ivl, factor: c.factor, lapses: c.lapses, inDyn: c.inDyn ? 1 : 0, dynDue: c.dynDue });
+// フィルターデッキの中のカードは、Anki と同じくその中での queue（休止・非表示ならそれ）と期日で見る（印は data.flt。fsrs/filtered.mjs）
+const ankiSide = (S, c) => { const f = fltIn(S.fdecks, c); return f ? { queue: c.queue < 0 ? c.queue : f.q, inDyn: 1, dynDue: f.due } : { queue: c.queue, inDyn: 0, dynDue: undefined }; };
+const isIncluded = (S, c) => { const q = ankiSide(S, c).queue; return q !== -1 && q !== 4 && c.type !== 0; };
+const slim = (S, c) => { const v = ankiSide(S, c); return { id: c.id, queue: v.queue, type: c.type, due: c.due, ivl: c.ivl, factor: c.factor, lapses: c.lapses, inDyn: v.inDyn, dynDue: v.dynDue }; };
 function memsFor(S, cards, nextDayAt, computeMissing) {
   const mems = {}; let by = null;
   for (const c of cards) {
     const d = c.data || {};
     if (d.s != null && d.d != null) { mems[c.id] = [d.s, d.d]; continue; }
-    if (!computeMissing || !isIncluded(c)) continue;
+    if (!computeMissing || !isIncluded(S, c)) continue;
     by ||= revsByCard(S);
     const m = memoryFromRevlog(S, c, by.get(c.id), nextDayAt); if (m) mems[c.id] = [m.s, m.d];
   }
@@ -89,7 +92,7 @@ async function simCtx(S, req, did) {
   const cards = await find(S, req.search, did);
   const intro = searchCards(S, `${req.search} introduced:1`, did).length;
   // 記録から作る設定（押した時間・評価の割合）はここで作り、Worker には記録を送らない
-  return { cards: cards.map(slim), extracted: simlib.extractSimulatorConfig(revlogsFor(S, cards), t.nextDayAt, true), daysElapsed: t.daysElapsed, nextDayAt: t.nextDayAt, introducedToday: intro,
+  return { cards: cards.map(c => slim(S, c)), extracted: simlib.extractSimulatorConfig(revlogsFor(S, cards), t.nextDayAt, true), daysElapsed: t.daysElapsed, nextDayAt: t.nextDayAt, introducedToday: intro,
     loadBalancer: S.meta.config?.loadBalancerEnabled !== false, mems: memsFor(S, cards, t.nextDayAt, true) };
 }
 
@@ -162,7 +165,7 @@ export async function computeOptimalRetention(S, did, req) {
 export async function getRetentionWorkload(S, did, w, search) {
   const t = timingToday(Math.floor(Date.now() / 1000), S.meta);
   const cards = await find(S, search, did);
-  const ctx = { cards: cards.map(slim), extracted: simlib.extractSimulatorConfig(revlogsFor(S, cards), t.nextDayAt, true), daysElapsed: t.daysElapsed, nextDayAt: t.nextDayAt, mems: memsFor(S, cards, t.nextDayAt, false) };
+  const ctx = { cards: cards.map(c => slim(S, c)), extracted: simlib.extractSimulatorConfig(revlogsFor(S, cards), t.nextDayAt, true), daysElapsed: t.daysElapsed, nextDayAt: t.nextDayAt, mems: memsFor(S, cards, t.nextDayAt, false) };
   const drs = []; for (let dr = 70; dr <= 99; dr++) drs.push(dr);
   if (!canWork()) return simlib.retentionWorkload(w, ctx);
   return withWorkers(Math.min(poolSize(), drs.length), async ws => {

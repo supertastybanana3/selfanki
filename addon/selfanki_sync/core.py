@@ -103,6 +103,18 @@ def server_view(srv):
 
 
 # ---------- Anki ----------
+def home_state(ctype, queue, due, odid, odue, data, did):
+    """フィルターデッキに入っているカードは、元のデッキでの queue・due（空にしたときの値）を状態に、フィルターデッキの中での
+    due・queue を data.flt に入れる（tools/export_anki.py の home_state と同じ。アプリはこの印でフィルターデッキに出す）"""
+    d = json.loads(data) if data else {}
+    if not odid: return queue, due, d
+    hdue = odue if odue != 0 else due
+    hq = queue
+    if queue >= 0: hq = 0 if ctype == 0 else 2 if ctype == 2 else (1 if hdue > 1_000_000_000 else 3)
+    d['flt'] = {'d': did, 'due': due, 'q': queue}
+    return hq, hdue, d
+
+
 def anki_view(col, ids):
     """Anki 側の今の状態（サーバーが知っているカードだけ）。フィルターデッキに入っているカードは元のデッキの期日で見る"""
     notes = {nid: (tags, mod) for nid, tags, mod in col.db.all('select id, tags, mod from notes')}
@@ -113,8 +125,9 @@ def anki_view(col, ids):
         if cid not in ids: continue
         tags, nmod = notes.get(nid, ('', 0))
         tl = [t.lower() for t in tags.split()]
-        st = {'type': ctype, 'queue': queue, 'due': odue if odid else due, 'ivl': ivl, 'factor': factor, 'reps': reps, 'lapses': lapses,
-              'left': left, 'data': json.loads(data) if data else {}, 'flags': flags, 'mark': int('marked' in tl)}
+        hq, hdue, d = home_state(ctype, queue, due, odid, odue, data, did)
+        st = {'type': ctype, 'queue': hq, 'due': hdue, 'ivl': ivl, 'factor': factor, 'reps': reps, 'lapses': lapses,
+              'left': left, 'data': d, 'flags': flags, 'mark': int('marked' in tl)}
         out[cid] = {'st': st, 'nid': nid, 'odid': odid, 'nmod': nmod, 'leech': 'leech' in tl, 'ver': max(mod * 1000, last.get(cid) or 0)}
     return out
 
