@@ -66,7 +66,13 @@ export function setupExchange(ctx) {
     return m;
   }
   const mediaNames = async () => [...(await mediaIndex()).keys()];
-  const fetchMedia = async name => { const r = await fetch(ctx.MEDIA + encodeURIComponent(name)); if (!r.ok) return null; const ct = r.headers.get('content-type') || ''; if (ct.includes('text/html') && !/\.html?$/i.test(name)) return null; return r.blob(); };
+  // 中身を取る: 端末の控え（読み込んだばかりでまだ送っていないものも）→ ネット
+  const fetchMedia = async name => {
+    const u = ctx.MEDIA + encodeURIComponent(name);
+    try { const hit = await (await caches.open(MEDIA_CACHE)).match(u); if (hit) return hit.blob(); } catch {}
+    if (uploadBytes.has(name)) return new Blob([uploadBytes.get(name)]);
+    const r = await fetch(u); if (!r.ok) return null; const ct = r.headers.get('content-type') || ''; if (ct.includes('text/html') && !/\.html?$/i.test(name)) return null; return r.blob();
+  };
 
   // ---------- 進み具合（画面の真ん中の小窓） ----------
   let hud = null;

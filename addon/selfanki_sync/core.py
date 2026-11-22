@@ -564,10 +564,20 @@ def apply_conf(col, srv, conf_rows, log, dry=False, mods0=None):
     for k, v, rev, src, _ in conf_rows:
         if not k.startswith('deck:'): continue
         did = int(k[5:]); v = json.loads(v); d = col.decks.get(did, default=False)
-        if not d or d.get('dyn') or 'conf' not in v: continue
+        if not d or d.get('dyn'): continue
+        newer = src == 'app' and rev > (mods0 or {}).get(did, d.get('mod', 0)) * 1000
+        # デッキの説明（.apkg から読み込んだデッキ。rslib update_normal_with_other と同じく、空でなければ）
+        if newer and v.get('desc') and (d.get('desc', '') != v['desc'] or bool(d.get('md')) != bool(v.get('md'))):
+            if not dry:
+                d['desc'] = v['desc']
+                if v.get('md'): d['md'] = True
+                else: d.pop('md', None)
+                col.decks.save(d); d = col.decks.get(did)
+            n['desc'] = n.get('desc', 0) + 1
+        if 'conf' not in v: continue
         conf = remap.get(v['conf'], v['conf'])
         if conf != v['conf']: push.append({'t': 'conf', 'src': 'anki', 'k': k, 'v': {**v, 'conf': conf}, 'rev': now})
-        if src == 'app' and d.get('conf') != conf and rev > (mods0 or {}).get(did, d.get('mod', 0)) * 1000 and (conf in presets or conf in remap.values() or dry):
+        if newer and d.get('conf') != conf and (conf in presets or conf in remap.values() or dry):
             if not dry: d['conf'] = conf; col.decks.save(d)
             n['deck'] += 1
     if push and not dry: srv.push(push)
