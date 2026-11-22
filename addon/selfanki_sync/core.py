@@ -126,7 +126,7 @@ def anki_view(col, ids):
         tags, nmod = notes.get(nid, ('', 0))
         tl = [t.lower() for t in tags.split()]
         hq, hdue, d = home_state(ctype, queue, due, odid, odue, data, did)
-        st = {'type': ctype, 'queue': hq, 'due': hdue, 'ivl': ivl, 'factor': factor, 'reps': reps, 'lapses': lapses,
+        st = {'did': odid or did, 'type': ctype, 'queue': hq, 'due': hdue, 'ivl': ivl, 'factor': factor, 'reps': reps, 'lapses': lapses,
               'left': left, 'data': d, 'flags': flags, 'mark': int('marked' in tl)}
         out[cid] = {'st': st, 'nid': nid, 'odid': odid, 'nmod': nmod, 'leech': 'leech' in tl, 'ver': max(mod * 1000, last.get(cid) or 0)}
     return out
@@ -136,6 +136,7 @@ def same(a, b):
     """a＝サーバー側、b＝Anki 側。間隔・期日・記憶の値に加えて、サーバー側にフラグがあればフラグも比べる（マークは別に比べる）"""
     for k in ('type', 'queue', 'due', 'ivl', 'factor', 'reps', 'lapses', 'left'):
         if a.get(k) != b.get(k): return False
+    if 'did' in a and 'did' in b and a['did'] != b['did']: return False   # 端末の「デッキの変更」で動かしたカード（サーバー側に did があるときだけ比べる）
     if 'flags' in a and (a['flags'] & 7) != (b.get('flags', 0) & 7): return False
     da, db = a.get('data') or {}, b.get('data') or {}
     for k, tol in (('s', 2e-4), ('d', 2e-3)):
@@ -192,6 +193,7 @@ def write_card(col, cid, st):
     c = col.get_card(cid)
     for k in ('type', 'queue', 'due', 'ivl', 'factor', 'reps', 'lapses', 'left'): setattr(c, k, st[k])
     if c.odid: c.did, c.odid, c.odue = c.odid, 0, 0
+    if st.get('did') and col.decks.get(st['did'], default=False) and not col.decks.get(st['did'])['dyn']: c.did = st['did']   # 端末でデッキを変えたカード
     d = st.get('data') or {}
     c.memory_state = FSRSMemoryState(stability=d['s'], difficulty=d['d']) if d.get('s') is not None and d.get('d') is not None else None
     c.desired_retention = d.get('dr'); c.decay = d.get('decay'); c.last_review_time = d.get('lrt')
