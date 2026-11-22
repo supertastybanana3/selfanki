@@ -579,9 +579,9 @@ const BROWSE_ACTIONS = [
   ['due', '期日を指定', cs => manualMany(cs, 'due')],
   ['reposition', '並び替える', cs => repositionAction(cs)],
   ['reset', 'カードをリセット', cs => manualMany(cs, 'reset')],
-  ['replace', '検索して置換', null],
-  ['tagAdd', 'タグを追加', null],
-  ['tagDel', 'タグを解除', null],
+  ['replace', '検索して置換', cs => findReplace(cs)],
+  ['tagAdd', 'タグを追加', cs => editTags(cs, true)],
+  ['tagDel', 'タグを解除', cs => editTags(cs, false)],
   ['notetype', 'ノートタイプを変更', null],
   ['delete', 'ノートを削除する', cs => notes.deleteBrowse(cs)],
 ];
@@ -619,6 +619,57 @@ async function repositionAction(cs) {
   const touched = S.all.filter(c => changes.has(c.id));
   if (!touched.length) { toast(`新規カードの位置を${count}枚変更しました。`); return; }
   await changeCards(touched, c => Object.assign(c, changes.get(c.id)), `新規カードの位置を${count}枚変更しました。`, '並び替える', false);
+}
+// 声を録る（発音を録って、すぐ聞き比べる。録ったものは端末の中だけで、次のカードに進むと消える）
+const REC = { mr: null, chunks: [], url: null, card: null };
+async function recToggle() {
+  if (REC.mr && REC.mr.state === 'recording') { REC.mr.stop(); return; }
+  let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { iosAlert('声を録音', 'マイクを使えません（' + (e?.message || e) + '）'); return; }
+  REC.chunks = []; REC.card = S.card?.id ?? null;
+  const mr = new MediaRecorder(stream); REC.mr = mr;
+  mr.ondataavailable = e => { if (e.data.size) REC.chunks.push(e.data); };
+  mr.onstop = () => { stream.getTracks().forEach(t => t.stop()); if (REC.url) URL.revokeObjectURL(REC.url); REC.url = URL.createObjectURL(new Blob(REC.chunks, { type: mr.mimeType || 'audio/mp4' })); toast('録音を止めました'); };
+  mr.start(); toast('録音しています（もう一度で止める）');
+}
+function recPlay() {
+  if (!REC.url || REC.card !== (S.card?.id ?? null)) { toast('このカードで録った声はありません'); return; }
+  stopAv(); const a = new Audio(REC.url); a.play().catch(() => {});
+}
+function recMenu() {
+  const recording = REC.mr && REC.mr.state === 'recording';
+  const d = document.createElement('div'); d.id = 'flagdlg'; d.innerHTML = '<div class="box"><b>録音</b></div>';
+  const add = (t, fn, cls) => { const b = document.createElement('button'); b.textContent = t; if (cls) b.className = cls; b.onclick = () => { d.remove(); fn && fn(); }; d.firstChild.append(b); };
+  add(recording ? '録音を止める' : '声を録音', recToggle); add('録音した声を再生', recPlay); add('キャンセル', null, 'cancel');
+  document.body.append(d);
+}
+// 「タグを追加」「タグを解除」（rslib add_tags_to_notes・remove_tags_from_notes と同じ: 大文字小文字を区別しない。外すほうは * が使え、子のタグ（親::子）も外れる）
+async function editTags(cs, add) {
+  const r = await iosPrompt({ title: add ? 'タグを追加' : 'タグを解除', message: '空白で区切って複数書けます', input: '' });
+  const words = (r?.value || '').split(/\s+/).filter(Boolean); if (!words.length) return;
+  const nids = [...new Set(cs.map(c => c.nid))];
+  const re = words.map(w => new RegExp('^' + w.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '(::.*)?$', 'i'));
+  const n = await notes.bulkEdit(nids, c0 => {
+    const tags = c0.tags.split(/\s+/).filter(Boolean);
+    if (add) { for (const w of words) if (!tags.some(t => t.toLowerCase() === w.toLowerCase())) tags.push(w); }
+    else { for (let i = tags.length - 1; i >= 0; i--) if (re.some(x => x.test(tags[i]))) tags.splice(i, 1); }
+    return { flds: c0.flds, tags: tags.join(' ') };
+  }, add ? 'タグを追加' : 'タグを解除');
+  toast(`${n}件のノートを更新しました。`);
+}
+// 「検索して置換」（rslib find_and_replace と同じ: 正規表現でなければ文字どおり、大文字小文字は区別しないのが既定。フィールドを空にするとすべて、「tags」でタグ）
+async function findReplace(cs) {
+  const r = await iosPrompt({ title: '検索して置換', texts: [{ label: '検索' }, { label: '置換' }, { label: 'フィールド（空ならすべて）' }], toggles: [{ label: '正規表現として扱う', on: false }, { label: '大文字小文字を区別する', on: false }] });
+  if (!r || !r.texts[0]) return;
+  const [find, repl, field] = r.texts, [isRe, matchCase] = r.toggles;
+  let rx; try { rx = new RegExp(isRe ? find : find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), matchCase ? 'g' : 'gi'); } catch (e) { iosAlert('Error', String(e.message)); return; }
+  const rep = isRe ? repl.replace(/\$\{(\w+)\}/g, '$<$1>') : repl.replace(/\$/g, '$$$$');
+  const nids = [...new Set(cs.map(c => c.nid))];
+  const n = await notes.bulkEdit(nids, (c0, t) => {
+    if (field.trim().toLowerCase() === 'tags') return { flds: c0.flds, tags: c0.tags.replace(rx, rep) };
+    const idx = field.trim() ? t.flds.findIndex(f => f.name === field.trim()) : -1;
+    return { flds: c0.flds.map((v, i) => (field.trim() && i !== idx) ? v : v.replace(rx, rep)), tags: c0.tags };
+  }, '検索して置換');
+  toast(`${n}件のノートを更新しました。`);
 }
 // 「フラグを変更」の小窓（実機: フラグ1 (レッド)〜フラグ7 (パープル)・フラグを消去・キャンセル）
 function pickFlag(cs) {
@@ -729,6 +780,7 @@ function advance(force = null) {
     return;
   }
   S.card = nx.card; S.side = 'q'; S.shownAt = performance.now(); S.shownState = curState(S.card, nowSecs()); sp?.setCard(S.card);
+  if (REC.card != null && REC.card !== S.card.id) { if (REC.url) URL.revokeObjectURL(REC.url); REC.url = null; REC.card = null; }   // 録った声は次のカードで消える
   pen.clear(); penSide('q'); paintCounts(c, S.card); ask.onCard(S.card); paintMarks();
   S.typed = null; setFrame(cardHtml(S.card, 'q'), S.card.mid, S.card.ord); setButtons('q'); if (autoplay(S.card)) playAv(S.card.qav);
   autoArm();
@@ -943,7 +995,7 @@ function checkModified(card) {
 }
 // iOS の警告の小窓（AnkiMobile のエラー表示と同じ見た目: 幅270pt・見出し太字・本文13pt中央・区切り線の下に OK）
 // iOS の確認の小窓（見出し・説明・入力欄かスイッチ・キャンセル／OK）。OK なら { value, toggles }、キャンセルなら null
-function iosPrompt({ title, message = '', input = null, toggles = [], numbers = [], ok = 'OK', cancel = 'キャンセル', danger = false }) {
+function iosPrompt({ title, message = '', input = null, toggles = [], numbers = [], texts = [], ok = 'OK', cancel = 'キャンセル', danger = false }) {
   let el = $('#iosDialog');
   if (!el) {
     const st = document.createElement('style');
@@ -955,6 +1007,7 @@ function iosPrompt({ title, message = '', input = null, toggles = [], numbers = 
 #iosDialog .m:empty{display:none}
 #iosDialog input[type=text]{margin:0 16px 16px;height:26px;border:.5px solid var(--al-line);border-radius:7px;padding:0 6px;font-size:13px;background:var(--al-bg);color:var(--al-text)}
 #iosDialog label{display:flex;align-items:center;gap:8px;font-size:13px;padding:0 16px 12px}
+#iosDialog .txl{font-size:12px;color:var(--al-sub,#8e8e93);padding:0 16px 3px}
 #iosDialog .num{display:flex;align-items:center;gap:8px;font-size:13px;padding:0 16px 10px} #iosDialog .num span{flex:1} #iosDialog .num input{width:90px;height:26px;border:.5px solid var(--al-line);border-radius:7px;padding:0 6px;font-size:13px;background:var(--al-bg);color:var(--al-text);text-align:right}
 #iosDialog .bt{display:flex;border-top:.5px solid var(--al-line)} #iosDialog .bt button{flex:1;height:44px;font-size:17px;color:var(--al-blue)}
 #iosDialog .bt button+button{border-left:.5px solid var(--al-line);font-weight:600} #iosDialog .bt button.danger{color:#ff3b30}`;
@@ -966,13 +1019,14 @@ function iosPrompt({ title, message = '', input = null, toggles = [], numbers = 
   el.querySelector('.t').textContent = title; el.querySelector('.m').textContent = message;
   el.querySelector('.no').textContent = cancel; el.querySelector('.yes').textContent = ok; el.querySelector('.yes').classList.toggle('danger', danger);
   const f = el.querySelector('.f'); f.innerHTML = '';
-  let inp = null; const tgs = [], nums = [];
+  let inp = null; const tgs = [], nums = [], txs = [];
+  for (const t of texts) { const l = document.createElement('div'); l.className = 'txl'; l.textContent = t.label; const c = document.createElement('input'); c.type = 'text'; c.value = t.value ?? ''; c.placeholder = t.placeholder ?? ''; f.append(l, c); txs.push(c); }
   for (const n of numbers) { const l = document.createElement('div'); l.className = 'num'; const s = document.createElement('span'); s.textContent = n.label; const c = document.createElement('input'); c.type = 'number'; c.inputMode = 'numeric'; c.value = n.value; if (n.min != null) c.min = n.min; if (n.max != null) c.max = n.max; l.append(s, c); f.append(l); nums.push(c); }
   if (input != null) { inp = document.createElement('input'); inp.type = 'text'; inp.value = input; inp.setAttribute('inputmode', 'text'); f.append(inp); }
   for (const t of toggles) { const l = document.createElement('label'); const c = document.createElement('input'); c.type = 'checkbox'; c.checked = !!t.on; l.append(c, document.createTextNode(t.label)); f.append(l); tgs.push(c); }
-  el.hidden = false; const first = inp || nums[0]; if (first) setTimeout(() => { first.focus(); first.select(); }, 0);
+  el.hidden = false; const first = inp || txs[0] || nums[0]; if (first) setTimeout(() => { first.focus(); first.select(); }, 0);
   return new Promise(res => {
-    const done = ok => { el.hidden = true; el.onkeydown = null; res(ok ? { value: inp ? inp.value : null, toggles: tgs.map(c => c.checked), numbers: nums.map(c => c.value) } : null); };
+    const done = ok => { el.hidden = true; el.onkeydown = null; res(ok ? { value: inp ? inp.value : null, toggles: tgs.map(c => c.checked), numbers: nums.map(c => c.value), texts: txs.map(c => c.value) } : null); };
     el.querySelector('.no').onclick = () => done(false); el.querySelector('.yes').onclick = () => done(true);
     el.onkeydown = e => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); done(true); } else if (e.key === 'Escape') { e.preventDefault(); done(false); } };
   });
@@ -1615,7 +1669,7 @@ const ACTIONS = [
   ['good', '回答 (正解)', () => answerBy(3)],
   ['easy', '回答 (簡単)', () => answerBy(4)],
   ['hard', '回答 (難しい)', () => answerBy(2)],
-  ['record', '声を録音', null],
+  ['record', '声を録音', () => recToggle()],
   ['spSize', '手書きサイズ', () => sp.cycleSize()],
   ['scratchpad', '手書きパッド', () => sp.toggle()],
   ['due', '期日を指定', () => dueAction()],
@@ -1624,8 +1678,8 @@ const ACTIONS = [
   ['show', '解答を表示', () => { if (S.side === 'q') showAnswer(); }],
   ['showGood', '解答を表示 / 回答 (正解)', () => { if (S.side === 'q') showAnswer(); else answerBy(3); }],
   ['add', '追加', () => notes.openAdd({ did: S.decksById.has(S.deck) ? S.deck : null })],   // フィルターデッキにはノートを足せない
-  ['playRec', '録音した声を再生', null],
-  ['recMenu', '録音メニュー', null],
+  ['playRec', '録音した声を再生', () => recPlay()],
+  ['recMenu', '録音メニュー', () => recMenu()],
   ['fwd5', '音声 +5秒', () => avSeek(5)],
   ['back5', '音声 -5秒', () => avSeek(-5)],
   ['pause', '音声を一時停止/再開', () => avPause()],

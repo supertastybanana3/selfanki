@@ -159,6 +159,25 @@ export function createNotes(env) {
     const marked = tagsArr(tags).some(x => x.toLowerCase() === 'marked');
     for (const c of cardsOf(nid)) if (c.mark !== undefined) c.mark = marked;
   }
+  // まとめて直す（ブラウザの「タグを追加」「タグを解除」「検索して置換」）。fn(今の中身, ノートタイプ) が { flds, tags } を返す。中身が変わったノートだけ送り、元に戻すは1回で全部
+  async function bulkEdit(nids, fn, label) {
+    if (!ready()) { say('この束にはテンプレートが入っていません。手順 9 で書き出し直してください。'); return 0; }
+    const recs = [], items = [];
+    for (const nid of nids) {
+      const c0 = await content(nid); if (!c0) continue; const t = nt(c0.mid); if (!t) continue;
+      const live = liveCards(nid); if (!live.length) continue;
+      const out = fn({ flds: c0.flds.slice(), tags: c0.tags }, t);
+      if (JSON.stringify(out.flds) === JSON.stringify(c0.flds) && out.tags === c0.tags) continue;
+      const req = cardsRequired(t, out.flds, new Set(live.map(c => c.ord)), true);
+      const decks = new Set(live.map(c => c.did)), exDeck = decks.size === 1 ? [...decks][0] : null, exNew = live.find(c => c.type === 0);
+      const ids = freshCardIds(req.length); let pos = null;
+      const add = req.map((r, i) => { const d = deckForAdding(r.did ?? exDeck); if (exNew) return [ids[i], r.ord, d, exNew.due]; pos = pos || takePosition(); return [ids[i], r.ord, d, isRandom(d) ? pos.r : pos.p]; });
+      recs.push({ id: nid, mid: c0.mid, flds: out.flds, tags: out.tags, did: exDeck ?? live[0]?.did ?? 1, cards: [...live.map(cardRow), ...add], rev: newRev(nid), del: 0, added: c0.added });
+      items.push({ nid, prev: { ...c0, did: exDeck ?? live[0]?.did ?? 1 } });
+    }
+    if (recs.length) await commit(recs, { kind: 'note', label, items });
+    return recs.length;
+  }
   async function deleteNotes(nids, label = 'ノートを削除') {
     const recs = [], items = [];
     for (const nid of nids) {
@@ -395,5 +414,5 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
     const n = await deleteNotes(nids, 'ノートを削除する');
     if (n) env.toast(`${nids.length}件のノートを削除しました（カード${n}枚）`);
   }
-  return { ready, apply, reset, openAdd, openEdit, deleteFrom, deleteBrowse, undo, isOpen: () => !!ed, close, element: build };
+  return { ready, apply, reset, openAdd, openEdit, deleteFrom, deleteBrowse, undo, bulkEdit, isOpen: () => !!ed, close, element: build };
 }
