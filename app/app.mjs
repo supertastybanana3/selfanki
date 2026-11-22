@@ -7,11 +7,14 @@ import { compileSearch, loadNotes, displayText } from './search.mjs';
 import * as store from './store.mjs';
 import * as sync from './sync.mjs';
 import { createPen } from './pen.mjs';
+import { cardsRequired as tmplCardsRequired } from './template.mjs';
 import { createAsk } from './ask.mjs';
 import { typeQuestion, typeAnswer } from './typeans.mjs';
 import { createScratchpad, spPref, SP_WIDTH, SP_SIZE, SP_ALPHA } from './scratchpad.mjs';
 import { repositionNew } from '../fsrs/reposition.mjs';
 import { createNotes } from './notes.mjs';
+import { updateMemoryState, Rescheduler } from '../fsrs/memory.mjs';
+import * as fsrsJobs from './fsrsjobs.mjs';
 
 const BUNDLE = new URL('../bundle/', location.href).href;
 const MEDIA = BUNDLE + 'media/';
@@ -121,7 +124,7 @@ function applyOp(op) {
   const c = S.byId.get(op.c?.id); if (!c) return;
   if (op.t === 'ans') { applyState(c, op.c.st, op.c.rev); addRev(op.r); }
   else if (op.t === 'undo') { applyState(c, op.c.st, op.c.rev); delRev(op.rid); }
-  else if (op.t === 'set') applyState(c, op.c.st, op.c.rev);   // 休止・非表示・フラグ・マーク・元に戻す
+  else if (op.t === 'set') { applyState(c, op.c.st, op.c.rev); if (op.r) addRev(op.r); }   // 休止・非表示・フラグ・マーク・元に戻す・記憶の値の計算し直し（期日の付け直しは記録も）
 }
 // ---------- デッキのオプション（サーバーの conf 表）。Anki 側（配った中身）より新しいものだけ重ねる ----------
 function applyConf(rows) {
@@ -145,6 +148,12 @@ function applyConf(rows) {
 async function saveConf(k, v, rev) { applyConf([{ k, v, rev }]); await store.addOp({ t: 'conf', k, v, rev }); }
 // Anki の「デッキのオプション」画面で保存したとき（rslib deckconfig/update.rs と同じ考え方）
 async function updateDeckConfigs(req) {
+  // 保存の前の、デッキごとのパラメータ・望ましい保持率・楽な日（rslib update_deck_configs_inner。変わったデッキの記憶の値を計算し直す）
+  const before = new Map(), fsrsBefore = !!S.meta.config.fsrs;
+  for (const d of S.meta.decks) if (!d.dyn) { const p = S.meta.presets[d.conf]; before.set(d.id, { params: JSON.stringify(fsrsJobs.presetParams(p).map(Math.fround)), dr: d.desiredRetention ?? p?.desiredRetention ?? null, easy: JSON.stringify(p?.easyDaysPercentages || []) }); }
+  if (req.mode === 2) await computeAllParams(req);   // 「すべてのプリセットを最適化」
+  // FSRS-6 のパラメータを空にしたら、古い形のパラメータも消す（空のときに古いものへ戻らないように）
+  for (const p of req.configs) if (!(p.fsrsParams6 || []).length) { p.fsrsParams5 = []; p.fsrsWeights = []; }
   const rev = Date.now(), today = timingToday(nowSecs(), S.meta).daysElapsed; let lastId = null, n = 0;
   for (const p of req.configs) { const id = p.id || rev + n++; await saveConf('preset:' + id, { ...p, id }, rev); lastId = id; }
   for (const id of req.removed) if (id !== 1) await saveConf('preset:' + id, { removed: true }, rev);
@@ -159,10 +168,67 @@ async function updateDeckConfigs(req) {
     await saveConf('deck:' + deck.id, dv, rev);
     if (req.mode === 1 && lastId != null) for (const d of S.meta.decks) if (d.name.startsWith(deck.name + '::') && !d.dyn) await saveConf('deck:' + d.id, { conf: lastId }, rev);
   }
-  await saveConf('global', { fsrs: req.fsrs, applyAllParentLimits: req.applyAllParentLimits, newCardsIgnoreReviewLimit: req.newCardsIgnoreReviewLimit }, rev);
+  await saveConf('global', { fsrs: req.fsrs, applyAllParentLimits: req.applyAllParentLimits, newCardsIgnoreReviewLimit: req.newCardsIgnoreReviewLimit, fsrsHealthCheck: req.fsrsHealthCheck, ...(req.mode === 2 ? { lastFsrsOptimize: today } : {}) }, rev);
+  const nMem = await recomputeMemory(before, fsrsBefore, req);
   scheduleSync(500);
   if (document.body.dataset.view === 'decks') showDecks(); else if (S.card) { const { c } = countsFor(S.deck); paintCounts(c, S.card); }
-  toast('オプションを保存しました');
+  toast(nMem ? `オプションを保存しました（${nMem}枚の記憶の値を計算し直しました）` : 'オプションを保存しました');
+}
+// 「すべてのプリセットを最適化」（rslib compute_all_params）。送られてこなかったプリセットも足し、今のプリセットを最後に
+async function computeAllParams(req) {
+  if (!req.fsrs) throw new Error('FSRS must be enabled');
+  const ids = new Set(req.configs.map(p => p.id)), last = req.configs.pop();
+  for (const p of Object.values(S.meta.presets)) if (!ids.has(p.id)) req.configs.push(structuredClone(p));
+  req.configs.push(last);
+  const total = req.configs.length;
+  for (const [i, p] of req.configs.entries()) {
+    const search = (p.paramSearch ?? p.weightSearch ?? '').trim() ? (p.paramSearch ?? p.weightSearch) : `preset:"${String(p.name).replace(/["\\]/g, m => '\\' + m)}" -is:suspended`;
+    try {
+      const r = await fsrsJobs.computeFsrsParams(S, req.target, { search, currentParams: fsrsJobs.presetParams(p), ignoreBeforeMs: fsrsJobs.ignoreBeforeMs(p), numRelearningSteps: (p.lapse?.delays || []).length, healthCheck: false }, { preset: i + 1, presets: total });
+      p.fsrsParams6 = r.params;
+    } catch (e) { if (String(e.message) === 'Interrupted') throw e; console.warn(p.name, e); }
+  }
+}
+// 保存のあと: パラメータ・望ましい保持率（・付け直すなら楽な日）が変わったデッキのカードの記憶の値を計算し直し、'set' で送る（rslib update_memory_state）
+async function recomputeMemory(before, fsrsBefore, req) {
+  const t = timingToday(nowSecs(), S.meta), toggled = fsrsBefore !== !!req.fsrs;
+  const groups = new Map();   // プリセット → デッキ
+  for (const d of S.meta.decks) {
+    if (d.dyn) continue;
+    const p = S.meta.presets[d.conf], b = before.get(d.id);
+    const cur = { params: JSON.stringify(fsrsJobs.presetParams(p).map(Math.fround)), dr: d.desiredRetention ?? p?.desiredRetention ?? null, easy: JSON.stringify(p?.easyDaysPercentages || []) };
+    if (toggled || !b || b.params !== cur.params || b.dr !== cur.dr || (req.fsrsReschedule && b.easy !== cur.easy)) { if (!groups.has(d.conf)) groups.set(d.conf, []); groups.get(d.conf).push(d.id); }
+  }
+  if (!groups.size) return 0;
+  const deckDr = new Map(); for (const d of S.meta.decks) if (!d.dyn && d.desiredRetention != null) deckDr.set(d.id, d.desiredRetention);
+  const byCard = new Map(); for (const r of S.revlog) { let a = byCard.get(r.cid); if (!a) byCard.set(r.cid, a = []); a.push(r); }
+  for (const a of byCard.values()) a.sort((x, y) => x.id - y.id);
+  const confOf = did => S.decksById.get(did)?.conf;
+  const lbOn = S.meta.config.loadBalancerEnabled !== false;
+  const now = Date.now(), ops = [];
+  let ms = now; while (S.revIds.has(ms)) ms++;
+  for (const [conf, dids] of groups) {
+    const p = S.meta.presets[conf] || {}, set = new Set(dids);
+    const cards = S.cards.filter(c => set.has(c.did) && c.type !== 0).sort((a, b) => a.id - b.id);
+    const ereq = req.fsrs ? { params: fsrsJobs.presetParams(p), presetDr: p.desiredRetention ?? 0.9, deckDr, historicalRetention: p.sm2Retention ?? 0.9, maxInterval: p.rev?.maxIvl ?? 36500, reschedule: !!req.fsrsReschedule } : null;
+    const resch = ereq?.reschedule && lbOn ? new Rescheduler({ cards: S.cards, revlog: S.revlog, decksById: S.decksById, presets: S.meta.presets, today: t.daysElapsed, nextDayAt: t.nextDayAt, extra: (S.meta.lbExtra || []).map(([due, c]) => [due, c]) }) : null;
+    const base = lastRevIds(cards.map(c => c.id));
+    fsrsJobs.setProgress({ kind: 'computeMemory', current: 0, total: cards.length, label: '' });
+    const changes = updateMemoryState({ cards, req: ereq, ignoreBefore: fsrsJobs.ignoreBeforeMs(p) }, { revsOf: id => byCard.get(id), nextDayAt: t.nextDayAt, today: t.daysElapsed, rescheduler: resch, confOf, nowMs: ms,
+      onProgress: (i, n) => fsrsJobs.setProgress({ kind: 'computeMemory', current: i, total: n, label: '' }) });
+    for (const ch of changes) {
+      const c = S.byId.get(ch.id);
+      c.data = ch.data; if (ch.due != null) { c.due = ch.due; c.ivl = ch.ivl; }
+      c.rev = now;
+      const op = { t: 'set', c: { id: c.id, st: pickState(c), rev: now }, base: base.get(c.id) || 0 };
+      if (ch.revlog) { while (S.revIds.has(ch.revlog.id)) ch.revlog.id++; op.r = ch.revlog; addRev(ch.revlog); ms = Math.max(ms, ch.revlog.id + 1); }
+      ops.push(op);
+    }
+  }
+  fsrsJobs.setProgress(null);
+  await store.addOps(ops);
+  if (ops.length) { S.mainQ = null; if (S.lb) rebuildLB(); }
+  return ops.length;
 }
 function applyServer(cards, revlog) {
   for (const row of cards) { const c = S.byId.get(row.id); if (c) applyState(c, row.st, row.rev); }
@@ -249,7 +315,7 @@ async function runSync(manual = false) {
     setTimeout(() => dlg.remove(), Math.max(0, 600 - (Date.now() - t0)));
   }
   btn.classList.remove('busy');
-  if (sync.state.online) { try { localStorage.setItem('syncedOnce', '1'); } catch {} }
+  if (sync.state.online) { try { localStorage.setItem('syncedOnce', '1'); } catch {} remoteDirty = false; remoteAt = Date.now(); }
   if (got && (got.cards.length || got.revlog.length || got.conf?.length || got.notes?.length)) {
     const nids = new Set(); for (const n of got.notes || []) if (notes.apply(n)) nids.add(n.id);
     applyServer(got.cards, got.revlog);
@@ -261,8 +327,16 @@ async function runSync(manual = false) {
   }
   paintSync();
 }
+// サーバー側の変更の有無（一覧を出したとき・前に出てきたときに、1分に1回まで問い合わせる）
+let remoteAt = 0, remoteDirty = false;
+async function checkRemote(force = false) {
+  if (!force && Date.now() - remoteAt < 60000) return; remoteAt = Date.now();
+  try { remoteDirty = await sync.remoteHasChanges(); } catch { remoteDirty = false; }
+  paintSync();
+}
 async function paintSync() {
   const btn = $('#nav-sync'); const n = await sync.pendingCount();
+  btn.dataset.r = remoteDirty ? '1' : '';
   btn.classList.toggle('err', sync.state.online === false && !sync.state.serverless);
   btn.dataset.n = n ? String(n) : '';
   btn.title = sync.state.serverless ? 'サーバーなし' : sync.state.online === false ? `同期できません: ${sync.state.lastError}` : n ? `未送信 ${n}` : '同期済み';
@@ -271,7 +345,7 @@ function startSyncLoop() {
   const btn = $('#nav-sync'); btn.disabled = false; btn.onclick = () => runSync(true);
   const auto = autoSyncOn;
   window.addEventListener('online', () => { if (auto()) scheduleSync(500); });
-  document.addEventListener('visibilitychange', () => { if (!auto()) return; if (!document.hidden) scheduleSync(500); else runSync(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && document.body.dataset.view === 'decks') checkRemote(true); if (!auto()) return; if (!document.hidden) scheduleSync(500); else runSync(); });
   setInterval(() => { if (auto() && !document.hidden) runSync(); }, 5 * 60 * 1000);
   scheduleSync(300); paintSync();
 }
@@ -415,7 +489,7 @@ function openTools() {
 function showDecks() {
   if (ask) ask.onCard(null);
   if (typeof stopAv === 'function') stopAv();
-  S.deck = null; document.body.dataset.view = 'decks'; sp?.setCard(null); S.auto = false; autoClear();
+  S.deck = null; document.body.dataset.view = 'decks'; sp?.setCard(null); S.auto = false; autoClear(); checkRemote();
   checkDay();
   // フィルターデッキも名前の順に並べて青字にする（AnkiMobile と同じ）。親が無いもの（Anki で親を消したなど）は一番上に名前全体で出す
   const fds = [...S.fdecks.values()].filter(f => !f.removed).map(f => ({ id: f.id, name: f.name, dyn: 1 }));
@@ -593,7 +667,10 @@ function rebuildLB() {
   for (const [due, conf, nid] of S.meta.lbExtra || []) cards.push({ due, conf, nid });
   S.lb = buildLoadBalancer(cards, t.daysElapsed, t.nextDayAt, S.meta.presets);
 }
-function startStudy(did) { if (typeof did === 'number') { S.lastDeck = did; try { localStorage.setItem('lastDeck', String(did)); } catch {} } S.deck = did; S.mainQ = null; S.auto = false; autoClear(); document.body.dataset.view = 'study'; rebuildLB(); advance(); }
+function startStudy(did) {
+  // 今のデッキ（Anki の curDeck）も同期する（AnkiMobile と同じく、デッキを開いただけでも同期ボタンの色が変わる）
+  if (typeof did === 'number' && did !== S.meta.config.curDeck) saveConf('global', { curDeck: did }, Date.now()).then(() => paintSync());
+  if (typeof did === 'number') { S.lastDeck = did; try { localStorage.setItem('lastDeck', String(did)); } catch {} } S.deck = did; S.mainQ = null; S.auto = false; autoClear(); document.body.dataset.view = 'study'; rebuildLB(); advance(); }
 // 下の帯の「新規 + 学習中 + 復習」。今のカードの種類に下線（AnkiMobile と同じ）
 function paintCounts(c, card) {
   const qq = !card ? null : isFDeck(S.deck) ? fq(card) : card.queue;   // フィルターデッキでは中での種類（プレビューのデッキなら復習、繰り返しは学習中）
@@ -1623,6 +1700,56 @@ function autoFire(card, side) {
   if (a === 1) rate(1); else if (a === 3) rate(2); else if (a === 2) rate(3); else if (a === 4) toast('回答する時間になりました'); else buryCard();
 }
 
+// ---------- データベース・メディア・白紙カードのチェック（設定の最初のページ。文言は Anki の翻訳のとおり） ----------
+// データベースをチェック: 端末の中のサーバーの控えを捨てて、サーバーから全部取り直す（送っていない変更は先に送る）。取り直したら読み込み直す
+async function checkDatabase() {
+  const say = m => iosAlert('データベースをチェック', m);
+  try {
+    await store.resetServerCopy(S.manifest.base.state);
+    const got = await sync.syncNow();
+    if (!got) { say('サーバーにつながりませんでした。ネットにつないでから、もう一度試してください。'); return; }
+    say('データベースを再構築し最適化しました。'); setTimeout(() => location.reload(), 1200);
+  } catch (e) { say(String(e?.message || e)); }
+}
+// メディアをチェック: カードが使っているファイルと、配った束にあるファイルを比べる（Anki の「メディアをチェック」の報告と同じ書き方）
+async function checkMedia() {
+  let have = [];
+  try { have = await fetchJSON(BUNDLE + S.manifest.media); } catch {}
+  const names = new Set((Array.isArray(have) ? have : Object.keys(have || {})).map(x => (Array.isArray(x) ? x[0] : x)));
+  const used = new Set(), re = /<img[^>]+src=["']?([^"'>\s]+)|\[sound:([^\]]+)\]/gi;
+  for (const c of S.all) {
+    for (const h of [c.q, c.a]) for (const m of String(h || '').matchAll(re)) { const n = decodeURIComponent((m[1] || m[2] || '').trim()); if (n && !/^(https?:|data:)/i.test(n)) used.add(n); }
+    for (const av of [...(c.qav || []), ...(c.aav || [])]) if (av?.sound) used.add(av.sound);
+  }
+  const missing = [...used].filter(n => !names.has(n)).sort(), unused = [...names].filter(n => !used.has(n)).sort();
+  const lines = [`欠落しているファイル：${missing.length}個`, `使用されていないファイル：${unused.length}個`];
+  if (missing.length) lines.push('', '▼ 次のファイルを参照しているカードがありますが、該当するファイルがメディアフォルダ内にありません', ...missing.map(n => `実物なし（欠落）：${n}`));
+  if (unused.length) lines.push('', '▼ 次のファイルはメディアフォルダ内に存在していますが、どのカードにも使用されていません', ...unused.map(n => `使用なし：${n}`));
+  iosAlert('メディアをチェック', lines.join('\n'));
+}
+// 白紙カード: ノートの中身から見て、もう作られないはずのカード（表が空になるカード・穴埋めの番号が無いカード）を、ノートタイプごとに数える
+// （Anki の empty_cards と同じ判定。消すのはパソコンの Anki で：暗記はカードだけを消す同期を持たないため）
+async function checkEmptyCards() {
+  let notes; try { notes = await loadNotes(S, BUNDLE); } catch (e) { iosAlert('白紙カード', String(e?.message || e)); return; }
+  const byNote = new Map(); for (const c of S.all) { if (c.type == null) continue; (byNote.get(c.nid) ?? byNote.set(c.nid, []).get(c.nid)).push(c); }
+  const report = new Map();
+  for (const [nid, cs] of byNote) {
+    const n = notes.get(nid), raw = S.meta.notetypes?.[n?.mid];
+    if (!n || !raw || !Array.isArray(raw.templates)) continue;
+    const t = { name: raw.name, type: raw.type, sortf: raw.sortf || 0, flds: raw.fields, tmpls: raw.templates };
+    const fa = Array.isArray(n.flds) ? n.flds : String(n.flds).split('\x1f');
+    let req; try { req = new Set(tmplCardsRequired(t, fa, new Set(), false).map(r => r.ord)); } catch { continue; }   // 今の中身から作るはずのカード（今あるものも含めて）
+    const empty = cs.filter(c => !req.has(c.ord)); if (!empty.length) continue;
+    const r = report.get(raw.name) ?? report.set(raw.name, []).get(raw.name);
+    const tname = c => raw.type === 1 ? `${raw.templates[0]?.name ?? ''} ${c.ord + 1}` : (raw.templates[c.ord]?.name ?? String(c.ord + 1));   // 穴埋めは「Cloze 2」（Anki と同じ）
+    r.push(`${cs.length}枚中${empty.length}枚のカードが白紙（${[...new Set(empty.map(tname))].join('、')}）`);
+  }
+  if (!report.size) { iosAlert('白紙カード', '白紙カードはありません。'); return; }
+  const lines = []; for (const [name, ls] of report) lines.push(`${name} の白紙カード：`, ...ls, '');
+  lines.push('消すときは、パソコンの Anki の「ツール」→「白紙カード」で消してから、手順 9 で組み直してください。');
+  iosAlert('白紙カード', lines.join('\n'));
+}
+
 window.ankiBridge = cmd => {
   if (cmd === 'customStudy') openCustom();
   else if (cmd === 'unbury' && S.decksById.has(S.deck)) {
@@ -1693,7 +1820,7 @@ function setupTools() {
   const PAGES = {
     root: () => ({ title: '設定', groups: [
       [{ t: '同期', go: 'sync' }, { t: '学習', go: 'study' }, { t: '編集', go: 'edit' }, { t: 'テーマ', go: 'theme' }, { t: 'プロファイル', go: 'profile' }, { t: 'バックアップ', go: 'backup' }, { t: 'このアプリについて', go: 'about' }],
-      [{ t: 'データベースをチェック', act: 1, off: 1 }, { t: 'メディアをチェック', act: 1, off: 1 }, { t: '白紙カード', act: 1, off: 1 }],
+      [{ t: 'データベースをチェック', act: 1, run: () => { closePrefs(); checkDatabase(); } }, { t: 'メディアをチェック', act: 1, run: () => { closePrefs(); checkMedia(); } }, { t: '白紙カード', act: 1, run: () => { closePrefs(); checkEmptyCards(); } }],
       ...(FEAT.pen || FEAT.autoSync ? [[{ t: 'このアプリ独自の機能', go: 'extras' }]] : [])] }),
     // 本家の AnkiMobile に無い機能（どれも最初は切ってある）
     extras: () => ({ title: 'このアプリ独自の機能', groups: [

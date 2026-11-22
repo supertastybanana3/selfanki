@@ -5,6 +5,7 @@
 import { timingToday } from '../fsrs/sched.mjs';
 import { historicalStates, retrievability, FSRS5_DEFAULT_DECAY } from '../fsrs/history.mjs';
 import { searchCards, loadNotes, displayText } from './search.mjs';
+import * as jobs from './fsrsjobs.mjs';
 
 // ---------- protobuf（必要な分だけ） ----------
 class W {
@@ -47,6 +48,7 @@ function read(buf) {
 }
 const str = b => (b ? new TextDecoder().decode(b) : '');
 const floatsOf = vals => { const out = []; for (const v of vals || []) { if (v instanceof Uint8Array) { const dv = new DataView(v.buffer, v.byteOffset, v.byteLength); for (let i = 0; i + 4 <= v.byteLength; i += 4) out.push(Math.round(dv.getFloat32(i, true) * 1e6) / 1e6); } else out.push(Math.round(v * 1e6) / 1e6); } return out; };
+const f32sOf = vals => { const out = []; for (const v of vals || []) { if (v instanceof Uint8Array) { const dv = new DataView(v.buffer, v.byteOffset, v.byteLength); for (let i = 0; i + 4 <= v.byteLength; i += 4) out.push(dv.getFloat32(i, true)); } else out.push(v); } return out; };
 const intsOf = vals => { const out = []; for (const v of vals || []) { if (v instanceof Uint8Array) { /* packed varints */ let i = 0; const b = v; while (i < b.length) { let r = 0n, sh = 0n; for (;;) { const c = b[i++]; r |= BigInt(c & 0x7f) << sh; if (!(c & 0x80)) break; sh += 7n; } out.push(Number(BigInt.asIntN(64, r))); } } else out.push(v); } return out; };
 const f1 = (m, k, d = 0) => (m[k] ? m[k][m[k].length - 1] : d);
 const r6 = x => Math.round(x * 1e6) / 1e6;
@@ -66,7 +68,7 @@ function writeConfig(w, p) {
 }
 function readConfig(m, base) {
   const p = structuredClone(base || {}); p.new ||= {}; p.rev ||= {}; p.lapse ||= {};
-  p.new.delays = floatsOf(m[1]); p.lapse.delays = floatsOf(m[2]); p.fsrsWeights = floatsOf(m[3]); p.easyDaysPercentages = floatsOf(m[4]); p.fsrsParams5 = floatsOf(m[5]); p.fsrsParams6 = floatsOf(m[6]);
+  p.new.delays = floatsOf(m[1]); p.lapse.delays = floatsOf(m[2]); p.fsrsWeights = f32sOf(m[3]); p.easyDaysPercentages = floatsOf(m[4]); p.fsrsParams5 = f32sOf(m[5]); p.fsrsParams6 = f32sOf(m[6]);   // パラメータは f32 のまま（Anki と同じ値で計算する）
   p.new.perDay = f1(m, 9); p.rev.perDay = f1(m, 10); p.new.initialFactor = Math.round(r6(f1(m, 11, 2.5)) * 1000); p.rev.ease4 = r6(f1(m, 12)); p.rev.hardFactor = r6(f1(m, 13)); p.lapse.mult = r6(f1(m, 14)); p.rev.ivlFct = r6(f1(m, 15));
   p.rev.maxIvl = f1(m, 16); p.lapse.minInt = f1(m, 17); p.new.ints = [f1(m, 18), f1(m, 19), (p.new.ints || [])[2] ?? 0];
   p.new.order = f1(m, 20) === 1 ? 0 : 1; p.lapse.leechAction = f1(m, 21); p.lapse.leechFails = f1(m, 22); p.autoplay = !f1(m, 23); p.maxTaken = f1(m, 24); p.timer = f1(m, 25) ? 1 : 0;
@@ -99,6 +101,9 @@ function deckConfigsForUpdate(S, did) {
   });
   writeDeckConfig(w, 3, DEFAULT_PRESET);
   w.bool(7, !!S.meta.config.newCardsIgnoreReviewLimit); w.bool(8, !!S.meta.config.fsrs); w.bool(9, !!S.meta.config.applyAllParentLimits);
+  // 最後に「全プリセットを最適化」した日からの日数（rslib: 0 なら 0）・健康診断（既定オン）・古い評価ボタン（既定オフ）
+  const last = S.meta.config.lastFsrsOptimize | 0; w.u32(10, last > 0 ? Math.max(0, today - last) : 0);
+  w.bool(11, S.meta.config.fsrsHealthCheck !== false); w.bool(12, !!S.meta.config.fsrsLegacyEvaluate);
   return w.done();
 }
 function parseUpdate(S, body) {
@@ -106,7 +111,8 @@ function parseUpdate(S, body) {
   const configs = (m[2] || []).map(b => { const d = read(b); const id = f1(d, 1); const base = S.meta.presets[id] || { ...structuredClone(DEFAULT_PRESET), id: 0 }; const p = readConfig(read(f1(d, 5, new Uint8Array())), base); p.id = id; p.name = str(f1(d, 2, null)) || p.name; return p; });
   const lim = m[6] ? read(f1(m, 6)) : {};
   const limits = { reviewLimit: lim[1] ? f1(lim, 1) : null, newLimit: lim[2] ? f1(lim, 2) : null, reviewToday: lim[3] ? f1(lim, 3) : null, newToday: lim[4] ? f1(lim, 4) : null, reviewTodayActive: !!f1(lim, 5), newTodayActive: !!f1(lim, 6), desiredRetention: lim[7] ? r6(f1(lim, 7)) : null };
-  return { target: f1(m, 1), configs, removed: intsOf(m[3]), mode: f1(m, 4), limits, newCardsIgnoreReviewLimit: !!f1(m, 7), fsrs: !!f1(m, 8), applyAllParentLimits: !!f1(m, 9) };
+  return { target: f1(m, 1), configs, removed: intsOf(m[3]), mode: f1(m, 4), limits, newCardsIgnoreReviewLimit: !!f1(m, 7), fsrs: !!f1(m, 8), applyAllParentLimits: !!f1(m, 9),
+    fsrsReschedule: !!f1(m, 10), fsrsHealthCheck: !!f1(m, 11) };
 }
 
 
@@ -332,6 +338,23 @@ export function cardStatsBytes(x) {
   return w.done();
 }
 
+// ---------- FSRS の計算の頼みと進み具合 ----------
+function simRequest(m) {
+  return { params: f32sOf(m[1]), desiredRetention: f1(m, 2), deckSize: f1(m, 3), daysToSimulate: f1(m, 4), newLimit: f1(m, 5), reviewLimit: f1(m, 6), maxInterval: f1(m, 7),
+    search: str(f1(m, 8, null)), newCardsIgnoreReviewLimit: !!f1(m, 9), easyDaysPercentages: f32sOf(m[10]), reviewOrder: f1(m, 11), suspendAfterLapseCount: m[12] ? f1(m, 12) : null,
+    historicalRetention: f1(m, 13), learningStepCount: f1(m, 14), relearningStepCount: f1(m, 15) };
+}
+// collection.proto Progress（oneof: none=1・compute_params=9・compute_retention=10・compute_memory=11）
+function progressBytes(p) {
+  const w = new W();
+  if (!p) w.msg(1, () => {});
+  else if (p.kind === 'computeParams') w.msg(9, y => { y.u32(1, p.current); y.u32(2, p.total); y.u32(3, p.reviews); y.u32(4, p.currentPreset); y.u32(5, p.totalPresets); });
+  else if (p.kind === 'computeRetention') w.msg(10, y => { y.u32(1, p.current); y.u32(2, p.total); });
+  else if (p.kind === 'computeMemory') w.msg(11, y => { y.u32(1, p.current); y.u32(2, p.total); y.str(3, p.label || ''); });
+  else w.msg(1, () => {});
+  return w.done();
+}
+
 export function installAnkiBackend(getS, currentDid, hooks = {}) {
   window.ankiBackend = async (method, body, query) => {
     body = Uint8Array.from(body || []); // 画面（iframe）側で作られた配列は instanceof が効かないので、こちらの側で作り直す
@@ -356,7 +379,43 @@ export function installAnkiBackend(getS, currentDid, hooks = {}) {
     if (method === 'getDeckConfigsForUpdate') { const m = read(body); return deckConfigsForUpdate(S, f1(m, 1) || did); }
     if (method === 'updateDeckConfigs') { const req = parseUpdate(S, body); await hooks.updateDeckConfigs?.(req); setTimeout(() => hooks.close?.(), 50); return new Uint8Array(); }
     if (method === 'deckOptionsRequireClose') { hooks.close?.(); return new Uint8Array(); }
-    if (method === 'deckOptionsReady' || method === 'getIgnoredBeforeCount' || method === 'getRetentionWorkload') return new Uint8Array();
+    if (method === 'deckOptionsReady') return new Uint8Array();
+    // ---- FSRS の計算（最適化・評価・シミュレーター・保持率）。重い計算は Web Worker で（app/fsrsjobs.mjs） ----
+    if (method === 'latestProgress') return progressBytes(jobs.latestProgress());
+    if (method === 'setWantsAbort') { jobs.wantAbort(); return new Uint8Array(); }
+    if (method === 'computeFsrsParams') {
+      const m = read(body);
+      const r = await jobs.computeFsrsParams(S, did, { search: str(f1(m, 1, null)), currentParams: f32sOf(m[2]), ignoreBeforeMs: f1(m, 3), numRelearningSteps: f1(m, 4), healthCheck: !!f1(m, 5) });
+      const w = new W(); w.floats(1, r.params); w.u32(2, r.fsrsItems); if (r.healthCheckPassed != null) { w.tag(3, 0); w.varint(r.healthCheckPassed ? 1 : 0); } return w.done();
+    }
+    if (method === 'evaluateParamsLegacy') {
+      const m = read(body);
+      const r = await jobs.evaluateParams(S, did, { params: f32sOf(m[1]), search: str(f1(m, 2, null)), ignoreBeforeMs: f1(m, 3) });
+      const w = new W(); w.f32(1, r.logLoss); w.f32(2, r.rmseBins); return w.done();
+    }
+    if (method === 'simulateFsrsReview' || method === 'simulateFsrsWorkload' || method === 'computeOptimalRetention') {
+      const req = simRequest(read(body));
+      if (method === 'simulateFsrsReview') {
+        const r = await jobs.simulateFsrsReview(S, did, req);
+        const w = new W(); w.floats(1, r.memorized); w.packed(2, r.reviewCount); w.packed(3, r.newCount); w.floats(4, r.cost); return w.done();
+      }
+      if (method === 'simulateFsrsWorkload') {
+        const r = await jobs.simulateFsrsWorkload(S, did, req);
+        const w = new W(); w.mapNum(1, r.cost, (y, v) => y.f32o(2, v)); w.mapNum(2, r.memorized, (y, v) => y.f32o(2, v)); w.mapNum(3, r.reviewCount, (y, v) => y.u32o(2, v)); return w.done();
+      }
+      const v = await jobs.computeOptimalRetention(S, did, req);
+      const w = new W(); w.f32o(1, v); return w.done();
+    }
+    if (method === 'getRetentionWorkload') {
+      const m = read(body);
+      const costs = await jobs.getRetentionWorkload(S, did, f32sOf(m[1]), str(f1(m, 2, null)));
+      const w = new W(); w.mapNum(1, costs, (y, v) => y.f32o(2, v)); return w.done();
+    }
+    if (method === 'getIgnoredBeforeCount') {
+      const m = read(body);
+      const r = await jobs.ignoredBeforeCount(S, did, str(f1(m, 1, null)), str(f1(m, 2, null)));
+      const w = new W(); w.u32(1, r.included); w.u32(2, r.total); return w.done();
+    }
     throw new Error('この画面の機能はまだありません: ' + method);
   };
   window.ankiIsDark = () => document.documentElement.dataset.theme === 'dark' || (document.documentElement.dataset.theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);

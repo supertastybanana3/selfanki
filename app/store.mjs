@@ -31,8 +31,8 @@ export async function get(store, key) { const db = await open(); return req(db.t
 export async function set(store, value, key) { const db = await open(); const tx = db.transaction(store, 'readwrite'); tx.objectStore(store).put(value, key); return done(tx); }
 // 送る前の操作を積む
 export async function addOp(op) { const db = await open(); const tx = db.transaction('outbox', 'readwrite'); tx.objectStore('outbox').add({ ...op, at: Date.now() }); return done(tx); }
-// まとめて足す（フィルターデッキを組む・空にするときなど、たくさんのカードを一度に）
-export async function addOps(ops) { if (!ops.length) return; const db = await open(); const tx = db.transaction('outbox', 'readwrite'); const at = Date.now(); for (const op of ops) tx.objectStore('outbox').add({ ...op, at }); return done(tx); }
+// まとめて積む（1つの取引で。記憶の値の計算し直しのように数千枚になるとき）
+export async function addOps(ops) { if (!ops.length) return; const db = await open(); const tx = db.transaction('outbox', 'readwrite'); const st = tx.objectStore('outbox'); const at = Date.now(); for (const op of ops) st.add({ ...op, at }); return done(tx); }
 export async function outbox() {
   const db = await open(); const tx = db.transaction('outbox'); const st = tx.objectStore('outbox');
   const [keys, vals] = await Promise.all([req(st.getAllKeys()), req(st.getAll())]);
