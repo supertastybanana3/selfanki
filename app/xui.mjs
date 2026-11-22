@@ -66,6 +66,23 @@ export function setupExchange(ctx) {
     return m;
   }
   const mediaNames = async () => [...(await mediaIndex()).keys()];
+  // 編集の画面で足す画像・音声（rslib media/files.rs の add_data_to_folder_uniquely と normalize_filename と同じ決まり:
+  // 使えない文字 [ ] < > : " / ? * ^ \ | と制御文字を除き、NFC にして 120 バイトまで。同じ名前で中身が違えば「名前-<sha1>.拡張子」）。返す: 使う名前
+  async function addMedia(name0, bytes) {
+    let name = String(name0 || '').normalize('NFC').replace(/[\[\]<>:"/?*^\\|\x00-\x1f\x7f]/g, '').trim() || 'media';
+    const enc = new TextEncoder(); if (enc.encode(name).length > 120) { const dot = name.lastIndexOf('.'), ext = dot > 0 ? name.slice(dot) : ''; let stem = dot > 0 ? name.slice(0, dot) : name; while (enc.encode(stem + ext).length > 120) stem = stem.slice(0, -1); name = stem + ext; }
+    const sha1 = await sha1hex(bytes), idx = await mediaIndex();
+    const same = h => !!h && (h === sha1 || (h.length < 40 && sha1.startsWith(h)));   // 束の一覧は sha1 の先頭 10 桁
+    if (idx.has(name)) {
+      if (same(idx.get(name))) return name;
+      const dot = name.lastIndexOf('.'); name = dot > 0 ? `${name.slice(0, dot)}-${sha1}${name.slice(dot)}` : `${name}-${sha1}`;
+      if (idx.has(name)) return name;
+    }
+    await saveMedia(name, bytes);
+    try { await uploadPending(); } catch {}   // その場で送る（Service Worker が受け持っていなくても、サーバーから出せるように）。送れなければ次の同期で
+    return name;
+  }
+  const sha1Of = bytes => sha1hex(bytes);
   // 中身を取る: 端末の控え（読み込んだばかりでまだ送っていないものも）→ ネット
   const fetchMedia = async name => {
     const u = ctx.MEDIA + encodeURIComponent(name);
@@ -179,5 +196,5 @@ export function setupExchange(ctx) {
       ctx.iosAlert('インポート', `コレクションをインポートしました。\n追加: ${log.new}・更新: ${log.updated}・削除: ${log.removed}・カード: ${log.cards}・メディア: ${log.media}`);
     } catch (e) { progress(null); console.error(e); ctx.iosAlert('インポート', String(e?.message || e)); }
   }
-  return { exportDeck, exportCollection, importFile, pickFile, uploadPending, mediaIndex, ex, share };
+  return { exportDeck, exportCollection, importFile, pickFile, uploadPending, mediaIndex, addMedia, sha1Of, ex, share };
 }
