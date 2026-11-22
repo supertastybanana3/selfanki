@@ -24,6 +24,7 @@ import * as fsrsJobs from './fsrsjobs.mjs';
 const BUNDLE = new URL('../bundle/', location.href).href;
 const MEDIA = BUNDLE + 'media/';
 const MATHJAX_URL = new URL('../vendor/mathjax/tex-chtml.js', location.href).href;
+const MJCONF_URL = new URL('./mjconfig.js', location.href).href;   // MathJax の設定（中身は MATHJAX_CONFIG と同じ。インラインのスクリプトは CSP で動かないため）
 const $ = s => document.querySelector(s);
 const S = { meta: null, all: [], cards: [], byId: new Map(), revlog: [], revIds: new Set(), deck: null, q: null, card: null, side: 'q', undo: [], shownAt: 0, open: new Set(), fdecks: new Map() };
 let pen, ask, sp, notes, xchg, ntScreen;
@@ -864,7 +865,7 @@ async function previewCard(c) { $('#bprev').hidden = false; await previewInto($(
 // カードの裏をプレビューの枠に出す（ブラウザのプレビューと、編集の画面の目のボタン）
 async function previewInto(f, c) {
   const css = S.meta.notetypes[c.mid]?.css || ''; const dark = isDark();
-  const math = /\\\(|\\\[/.test(c.a) ? `<script>${MATHJAX_CONFIG}</script><script src="${MATHJAX_URL}" async></script>` : '';
+  const math = /\\\(|\\\[/.test(c.a) ? `<script src="${MJCONF_URL}"></script><script src="${MATHJAX_URL}" async></script>` : '';
   const body = c.a.replace(/\[\[type:[^\]]*\]\]/g, '').replace(/\[anki:play:(q|a):(\d+)\]/g, '');
   f.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="${MEDIA}"><style id="sa-base">${BASE_LIGHT}</style><style>${CARD_EXTRA}</style><style>${css}</style><style id="sa-dark"></style>${math}</head><body class="card${dark ? ' nightMode night_mode' : ''}">${body}</body></html>`;
   await new Promise(r => { f.onload = r; });
@@ -1299,7 +1300,6 @@ code#typeans{white-space:pre-wrap;font-variant-ligatures:none}
 .typeGood{background:#afa;color:black} .typeBad{color:black;background:#faa} .typeMissed{color:black;background:#ccc}
 .replay-button{display:inline-block;width:2.57em;height:2.57em;vertical-align:middle;margin:0 .1em;text-decoration:none}
 .replay-button svg{width:100%;height:100%;display:block}`;
-const MATHJAX_CONFIG = `window.MathJax={tex:{inlineMath:[['\\\\(','\\\\)']],displayMath:[['\\\\[','\\\\]']],processEscapes:false,processEnvironments:false,processRefs:false,packages:{'[+]':['noerrors','mathtools','mhchem'],'[-]':['textmacros']}},loader:{load:['[tex]/noerrors','[tex]/mathtools','[tex]/mhchem']},startup:{typeset:true}};`;
 const BASE_LIGHT = 'html{background:#fff;color:#000}', BASE_DARK = 'html{background:#000 !important;color:#f2f2f2}';
 // カードの iframe は1回だけ作り、以後は CSS と本文だけ差し替える（めくるたびに文書を作り直すと、描き終わるまで一瞬白くなる）
 let frameP = null, frameSeq = 0;
@@ -1469,8 +1469,8 @@ function typesetMath(doc, el) {
   const w = doc.defaultView;
   if (w.MathJax?.startup?.promise) { w.MathJax.startup.promise.then(() => w.MathJax.typesetPromise([el])).catch(() => {}); return; }
   if (doc.getElementById('sa-mj')) return; // 読み込み中（読み終わったときに今の本文を組む）
-  const c = doc.createElement('script'); c.textContent = MATHJAX_CONFIG; doc.head.appendChild(c);
-  const s = doc.createElement('script'); s.id = 'sa-mj'; s.src = MATHJAX_URL; s.async = true; doc.head.appendChild(s);
+  const c = doc.createElement('script'); c.src = MJCONF_URL; c.async = false; doc.head.appendChild(c);   // 設定 → MathJax の順に（async=false で入れた順に動く）
+  const s = doc.createElement('script'); s.id = 'sa-mj'; s.src = MATHJAX_URL; s.async = false; doc.head.appendChild(s);
 }
 // ---------- ダークモード ----------
 // カードを丸ごと反転すると色相がずれて赤が白っぽくなる（invert+hue-rotate は色を正確には戻さない）。

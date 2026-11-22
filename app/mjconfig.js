@@ -1,0 +1,2 @@
+// カードの枠で MathJax を読む前の設定（app.mjs の typesetMath・previewInto）。ページの決まり（CSP の script-src）でインラインのスクリプトは動かないので、ファイルにしてある
+window.MathJax={tex:{inlineMath:[['\\(','\\)']],displayMath:[['\\[','\\]']],processEscapes:false,processEnvironments:false,processRefs:false,packages:{'[+]':['noerrors','mathtools','mhchem'],'[-]':['textmacros']}},loader:{load:['[tex]/noerrors','[tex]/mathtools','[tex]/mhchem']},startup:{typeset:true}};

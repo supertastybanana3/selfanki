@@ -75,7 +75,10 @@ export async function onRequest({ request, env, next }) {
   const p = url.pathname;
   const out = new Response(res.body, res);
   // 外への通信（fetch など）は自分のサイトだけ。カードの中身が端末の記録を外へ送れないように
-  if ((out.headers.get('content-type') || '').includes('text/html')) out.headers.set('content-security-policy', "connect-src 'self'; form-action 'self'; base-uri 'self'");
+  // アプリの画面（/app/）は、スクリプトを自分のサイトのファイルだけにする。カードの枠（srcdoc）はこの決まりを受け継ぐので、カードに紛れ込んだ
+  // インラインのスクリプト・onerror などの属性・javascript: のリンクは動かない（もらったデッキ・.apkg の中身から端末の記録を読まれないように）。
+  // wasm-unsafe-eval は sql.js（.apkg の読み書き）の WebAssembly のため。ペアリングの画面と Anki の画面（/ankiweb/）は除く
+  if ((out.headers.get('content-type') || '').includes('text/html')) out.headers.set('content-security-policy', "connect-src 'self'; form-action 'self'; base-uri 'self'" + (p === '/app' || p.startsWith('/app/') ? "; script-src 'self' 'wasm-unsafe-eval'; object-src 'none'" : ''));
   if (/^\/bundle\/(c\/|n\/|state\.|stateadd\.|revlog\.|meta\.)/.test(p) || p.startsWith('/bundle/media/') || p.startsWith('/vendor/')) out.headers.set('cache-control', 'private, max-age=31536000, immutable');
   else out.headers.set('cache-control', 'no-cache');
   return out;
