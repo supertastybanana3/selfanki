@@ -15,13 +15,13 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 const plain = h => stripHtml(String(h).replace(/<(?:img|audio|video|source)\b[^>]*?\bsrc\s*=\s*["']?([^"'>\s]+)[^>]*>/gi, ' $1 '));
 const BACK_SVG = '<svg viewBox="0 0 12 20" width="12" height="20" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2 2 10l8 8"/></svg>';
 const CHEV = '<svg width="7.7" height="12.8" viewBox="0 0 9 15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 1.5 7.5 7.5 1.5 13.5"/></svg>';
-// 道具の帯（AnkiMobile のマニュアル editing.md の並び: B I U・Fx・絵筆・クリップ・√・目・</>）。絵筆・クリップ・√ はまだ写していない
+// 道具の帯（AnkiMobile のマニュアル editing.md の並び: B I U・Fx・絵筆・クリップ・√・目・</>）。クリップはまだ写していない
 const TOOLS = [
   ['bold', '<b>B</b>', '太字'], ['italic', '<i style="font-family:Georgia,serif">I</i>', 'イタリック'], ['underline', '<u>U</u>', '下線を追加'],
   ['removeFormat', '<span style="font-style:italic;font-family:Georgia,serif">F<small>x</small></span>', '書式を取り除く'],
-  ['color', '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4.5l5 5-8 8-5-5z"/><path d="M6.5 12.5 3 21l8.5-3.5"/></svg>', '文字色', 1],
+  ['color', '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4.5l5 5-8 8-5-5z"/><path d="M6.5 12.5 3 21l8.5-3.5"/></svg>', '文字色'],
   ['attach', '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M20 11.5 12 19.5a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7L9.7 17.2a1.7 1.7 0 0 1-2.4-2.4L15 7"/></svg>', 'メディアを追加', 1],
-  ['math', '<span style="font-family:Georgia,serif">√</span>', '数式', 1],
+  ['math', '<span style="font-family:Georgia,serif">√</span>', '数式'],
   ['preview', '<svg viewBox="0 0 28 20" width="25" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M1.5 10S6 2 14 2s12.5 8 12.5 8S22 18 14 18 1.5 10 1.5 10z"/><circle cx="14" cy="10" r="4"/></svg>', 'プレビュー'],
   ['html', '<span style="font:600 15px ui-monospace,Menlo,monospace">&lt;/&gt;</span>', 'HTMLエディタ'],
 ];
@@ -320,7 +320,35 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
       return;
     }
     if (ed.html.has(i)) return;
-    try { fr.contentDocument.execCommand(k, false, null); fit(fr); } catch {}
+    const run = (cmd, val = null) => { try { fr.contentWindow.focus(); fr.contentDocument.execCommand(cmd, false, val); fit(fr); } catch {} };
+    if (k === 'color') {   // 絵筆: 文字色（iOS の色の選択画面。最後に選んだ色を覚える）。選んでいた文字に色を付ける
+      const inp = document.createElement('input'); inp.type = 'color'; inp.value = ls('editColor') || '#ff0000';
+      inp.style.cssText = 'position:fixed;left:-100px;top:0;opacity:0';
+      document.body.append(inp);
+      inp.addEventListener('change', () => { lsSet('editColor', inp.value); try { fr.contentDocument.execCommand('styleWithCSS', false, true); } catch {} run('foreColor', inp.value); inp.remove(); });
+      inp.addEventListener('blur', () => setTimeout(() => inp.remove(), 500));
+      inp.click(); return;
+    }
+    if (k === 'math') {   // √: 下付き・上付きと MathJax（文言は Anki の訳。選んでいた文字を囲む）
+      const wrap = (a, b) => () => { const sel = fr.contentDocument.getSelection()?.toString() ?? ''; run('insertText', a + sel + b); };
+      menu('数式', [['下付き文字', () => run('subscript')], ['上付き文字', () => run('superscript')],
+        ['MathJax インライン数式', wrap('\\(', '\\)')], ['MathJax ブロック数式', wrap('\\[', '\\]')], ['MathJax 化学式', wrap('\\(\\ce{', '}\\)')]],
+        el.querySelector('.etb [data-k="math"]'));
+      return;
+    }
+    run(k);
+  }
+  // 道具の帯から出す小さなメニュー（ツールの吹き出しと同じ見た目で、押したボタンの下に出す）
+  function menu(title, items, anchor) {
+    document.getElementById('etools')?.remove();
+    const pop = document.createElement('div'); pop.id = 'etools'; pop.innerHTML = '<div class="h"></div>'; pop.firstChild.textContent = title;
+    for (const [t, fn] of items) { const b = document.createElement('button'); b.textContent = t; b.addEventListener('pointerdown', e => e.preventDefault()); b.onclick = () => { close(); fn(); }; pop.append(b); }
+    const r = anchor.getBoundingClientRect();
+    pop.style.top = (r.bottom + 6) + 'px'; pop.style.right = 'auto'; pop.style.left = Math.max(8, Math.min(window.innerWidth - 268, r.left + r.width / 2 - 130)) + 'px';
+    const off = e => { if (!pop.contains(e.target)) close(); };
+    function close() { pop.remove(); document.removeEventListener('pointerdown', off, true); }
+    document.addEventListener('pointerdown', off, true);
+    document.body.append(pop);
   }
   function preview() {
     const vals = readVals(), t = nt(ed.mid), tags = tagsArr(readTags());
