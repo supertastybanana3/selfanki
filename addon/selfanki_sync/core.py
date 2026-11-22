@@ -139,7 +139,7 @@ def same(a, b):
     """a＝サーバー側、b＝Anki 側。間隔・期日・記憶の値に加えて、サーバー側にフラグがあればフラグも比べる（マークは別に比べる）"""
     for k in ('type', 'queue', 'due', 'ivl', 'factor', 'reps', 'lapses', 'left'):
         if a.get(k) != b.get(k): return False
-    if 'did' in a and 'did' in b and a['did'] != b['did']: return False   # 端末の「デッキの変更」で動かしたカード（サーバー側に did があるときだけ比べる）
+    if a.get('didAt') and 'did' in b and a.get('did') != b['did']: return False   # 端末で動かしたカード（印 didAt があるときだけ比べる。Anki から届いた did は比べない）
     if 'flags' in a and (a['flags'] & 7) != (b.get('flags', 0) & 7): return False
     da, db = a.get('data') or {}, b.get('data') or {}
     for k, tol in (('s', 2e-4), ('d', 2e-3)):
@@ -156,7 +156,7 @@ DECISIVE = (0, 1, 2, 3, 4)
 
 def out_of_filtered(s, a):
     """端末でコレクションを置き換えた（.colpkg）とき: 状態に did があり、フィルターデッキの印（data.flt）が無いのに、Anki ではフィルターデッキに入っている → 元のデッキへ戻す（write_card が戻す）"""
-    return s['st'].get('did') is not None and bool(a['odid']) and 'flt' not in (s['st'].get('data') or {})
+    return bool(s['st'].get('didAt')) and s['st'].get('did') is not None and bool(a['odid']) and 'flt' not in (s['st'].get('data') or {})
 
 
 def plan(scards, srevs, acards, anki_rev_ids, anki_revlog, fresh=()):
@@ -201,10 +201,11 @@ def plan(scards, srevs, acards, anki_rev_ids, anki_revlog, fresh=()):
 def write_card(col, cid, st):
     """暗記で答えた状態をカードに書く（記憶の値もそのまま。フィルターデッキに入っていたら元のデッキに戻す）"""
     from anki.cards import FSRSMemoryState
-    c = col.get_card(cid)
+    c = col.get_card(cid); mod0 = c.mod
     for k in ('type', 'queue', 'due', 'ivl', 'factor', 'reps', 'lapses', 'left'): setattr(c, k, st[k])
     if c.odid: c.did, c.odid, c.odue = c.odid, 0, 0
-    if st.get('did') and col.decks.get(st['did'], default=False) and not col.decks.get(st['did'])['dyn']: c.did = st['did']   # 端末でデッキを変えたカード
+    # 端末で動かしたカード: 動かした時刻（didAt）が Anki のカードの最後の変更より新しいときだけ（Anki で後から動かしたものを戻さない）
+    if st.get('did') and (st.get('didAt') or 0) > mod0 * 1000 and col.decks.get(st['did'], default=False) and not col.decks.get(st['did'])['dyn']: c.did = st['did']
     d = st.get('data') or {}
     c.memory_state = FSRSMemoryState(stability=d['s'], difficulty=d['d']) if d.get('s') is not None and d.get('d') is not None else None
     c.desired_retention = d.get('dr'); c.decay = d.get('decay'); c.last_review_time = d.get('lrt')

@@ -547,7 +547,7 @@ export function createExchange(env) {
         const pk = new Set(cs.map(c => c.id)); R.skipped.cardsLeft += (devCards.get(n.id) || []).filter(c => !pk.has(c.id)).length;
       }
       for (const c of cs) {
-        const st = stateOf(c); st.did = pkgDeckIds.has(+(c.odid || c.did)) ? +(c.odid || c.did) : 1;
+        const st = stateOf(c); st.did = pkgDeckIds.has(+(c.odid || c.did)) ? +(c.odid || c.did) : 1; st.didAt = rev;   // 置き換えで決めたデッキ（端末で動かした印。app.mjs の pickState）
         const d = S.byId.get(c.id);
         if (d && !d.gone && sameState(d, st)) continue;
         R.sets.push({ t: 'set', c: { id: c.id, st, rev } });

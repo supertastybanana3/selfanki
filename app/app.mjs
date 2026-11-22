@@ -120,9 +120,17 @@ const cfg = () => ({ crt: S.meta.crt, meta: S.meta, fsrs: !!S.meta.config.fsrs, 
 // 「まだ送っていない自分の答え（outbox）」を順に重ねたもの
 const STATE_KEYS = ['type', 'queue', 'due', 'ivl', 'factor', 'reps', 'lapses', 'left', 'data'];
 // flags（フラグ）と mark（ノートのマーク＝タグ marked）も状態として運ぶ。mark はアプリで付け外ししたときだけ入る
-// did（カードのデッキ）は、ブラウザの「デッキの変更」で動かしたカード（didSet）・コレクションの置き換え（.colpkg の読み込み）・Anki から届いた状態にあるときだけ送り・重ねる
-const pickState = c => { const o = {}; for (const k of STATE_KEYS) o[k] = c[k]; o.flags = c.flags || 0; if (c.mark !== undefined) o.mark = c.mark ? 1 : 0; if (c.leeched) o.leech = 1; if (c.didSet) o.did = c.did; return o; };
-function applyState(c, st, rev) { for (const k of STATE_KEYS) if (k in st) c[k] = st[k]; if ('flags' in st) c.flags = st.flags; if ('mark' in st) c.mark = !!st.mark; if (st.leech) c.leeched = true; if ('did' in st && S.decksById?.has(st.did)) { c.did = st.did; c.didSet = true; } c.rev = rev; }
+// did（カードのデッキ）: 端末で動かしたカード（ブラウザの「デッキの変更」・その元に戻す・.colpkg の置き換え）だけ、動かした時刻 didAt と一緒に送る。
+// アドオン・mirror.py は didAt が Anki のカードの最後の変更より新しいときだけ Anki のデッキを移す。
+// Anki から届いた状態の did（didAt なし）は、端末の表示を合わせるだけで、送り返さない（Anki で動かしたカードを古いデッキに戻さないように）
+const pickState = c => { const o = {}; for (const k of STATE_KEYS) o[k] = c[k]; o.flags = c.flags || 0; if (c.mark !== undefined) o.mark = c.mark ? 1 : 0; if (c.leeched) o.leech = 1; if (c.didAt) { o.did = c.did; o.didAt = c.didAt; } return o; };
+function applyState(c, st, rev) { for (const k of STATE_KEYS) if (k in st) c[k] = st[k]; if ('flags' in st) c.flags = st.flags; if ('mark' in st) c.mark = !!st.mark; if (st.leech) c.leeched = true; if ('did' in st && S.decksById?.has(st.did)) { c.did = st.did; if (st.didAt) c.didAt = st.didAt; else delete c.didAt; } c.rev = rev; }
+// 元に戻す用の控え: 操作の前と後で変わった項目だけ（ほかの同期・計算で変わった項目を、古い姿で上書きしないように）
+function snapDiff(before, after) {
+  const o = { id: before.id };
+  for (const k of new Set([...Object.keys(before), ...Object.keys(after)])) if (k !== 'id' && k !== 'rev' && JSON.stringify(before[k]) !== JSON.stringify(after[k])) o[k] = structuredClone(before[k]);
+  return o;
+}
 const REV_KEYS = ['id', 'cid', 'ease', 'ivl', 'lastIvl', 'factor', 'time', 'type'];
 function addRev(r) { if (S.revIds.has(r.id)) return; S.revIds.add(r.id); const o = {}; for (const k of REV_KEYS) o[k] = r[k]; S.revlog.push(o); }
 function delRev(id) { if (!S.revIds.delete(id)) return; S.revlog = S.revlog.filter(r => r.id !== id); }
@@ -449,7 +457,7 @@ async function writeFlt(id, picked, undoLabel = null) {
     c.data = data; c.rev = at; ops.push({ t: 'set', c: { id: c.id, st: pickState(c), rev: at }, base: base.get(c.id) || 0 });
   }
   await store.addOps(ops);
-  if (undoLabel) { undoPush({ kind: 'set', prevs, label: undoLabel, rebuild: true, noForce: true }); }   // 戻したあとは並びから選び直す
+  if (undoLabel) { undoPush({ kind: 'set', prevs: prevs.map(p => snapDiff(p, S.byId.get(p.id))), label: undoLabel, rebuild: true, noForce: true }); }   // 戻したあとは並びから選び直す
   S.mainQ = null; scheduleSync();
   return picked.size;
 }
@@ -679,6 +687,10 @@ async function repositionAction(cs) {
 const REC = { mr: null, chunks: [], url: null, card: null };
 async function recToggle() {
   if (REC.mr && REC.mr.state === 'recording') { REC.mr.stop(); return; }
+  if (REC.asking) return;   // マイクの許可を待っているあいだの2回目は無視（録音が2つ始まらないように）
+  REC.asking = true; try { await recStart(); } finally { REC.asking = false; }
+}
+async function recStart() {
   let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { iosAlert('声を録音', 'マイクを使えません（' + (e?.message || e) + '）'); return; }
   REC.chunks = []; REC.card = S.card?.id ?? null;
   const mr = new MediaRecorder(stream); REC.mr = mr;
@@ -703,7 +715,7 @@ function moveCards(cs) {
   const lst = d.querySelector('.lst');
   for (const dk of [...S.meta.decks].filter(x => !x.dyn).sort(deckCmp)) {
     const b = document.createElement('button'); b.textContent = dk.name.replace(/::/g, ' › ');
-    b.onclick = () => { d.remove(); changeCards(cs, c => { c.did = dk.id; c.didSet = true; }, `${cs.length}枚のカードを「${dk.name}」に移しました`, 'デッキの変更', false).then(() => paintBrowse(true)); };
+    b.onclick = () => { d.remove(); const at = Date.now(); changeCards(cs, c => { c.did = dk.id; c.didAt = at; }, `${cs.length}枚のカードを「${dk.name}」に移しました`, 'デッキの変更', false).then(() => paintBrowse(true)); };
     lst.append(b);
   }
   const no = document.createElement('button'); no.textContent = 'キャンセル'; no.className = 'cancel'; no.onclick = () => d.remove(); d.firstChild.append(no);
@@ -729,7 +741,7 @@ async function findReplace(cs) {
   if (!r || !r.texts[0]) return;
   const [find, repl, field] = r.texts, [isRe, matchCase] = r.toggles;
   let rx; try { rx = new RegExp(isRe ? find : find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), matchCase ? 'g' : 'gi'); } catch (e) { iosAlert('Error', String(e.message)); return; }
-  const rep = isRe ? repl.replace(/\$\{(\w+)\}/g, '$<$1>') : repl.replace(/\$/g, '$$$$');
+  const rep = isRe ? repl.replace(/\$\{(\w+)\}/g, (m, g) => (/^\d+$/.test(g) ? '$' + g : '$<' + g + '>')) : repl.replace(/\$/g, '$$$$');   // Anki（Rust の regex）の ${1}・${name} を JS の $1・$<name> に
   const nids = [...new Set(cs.map(c => c.nid))];
   const n = await notes.bulkEdit(nids, (c0, t) => {
     if (field.trim().toLowerCase() === 'tags') return { flds: c0.flds, tags: c0.tags.replace(rx, rep) };
@@ -769,9 +781,13 @@ async function downloadFromLink() {
 // AnkiMobile の URL スキーム（manual url-schemes.md）: addnote・search・sync。infoForAdding（クリップボードの独自の型）はできない
 const MEDIA_URL = /^https?:\/\/\S+\.(jpe?g|png|gif|webp|svg|bmp|mp3|m4a|aac|ogg|oga|opus|wav|flac|mp4|m4v|mov|webm)$/i;
 async function handleXcb(raw) {
+  for (let i = 0; i < 600 && !(S.meta && S.all && notes && xchg); i++) await new Promise(r => setTimeout(r, 100));   // 起動直後（読み込みが終わるまで待つ。60 秒まで）
+  if (!(S.meta && S.all && notes && xchg)) return false;
   const m = /^x-callback-url(?:\/|%2F)(addnote|search|sync)\/?(?:\?(.*))?$/is.exec(raw); if (!m) return false;
   const q = new URLSearchParams(m[2] || ''), back = q.get('x-success');
-  const done = () => { if (back) location.href = back; };
+  // x-success はほかのアプリへ戻るためのもの（shortcuts:// など）。javascript:・data: などと、ウェブのページ（http/https）へは飛ばない（カードのリンクから悪用されないように）
+  const safeBack = back && /^[a-z][a-z0-9+.-]*:/i.test(back) && !/^(javascript|data|vbscript|blob|file|about|http|https|filesystem):/i.test(back.trim()) ? back.trim() : null;
+  const done = () => { if (safeBack) location.href = safeBack; };
   if (m[1] === 'sync') { await runSync(true); done(); return true; }
   if (m[1] === 'search') { openBrowse(q.get('query') ?? ''); done(); return true; }
   const fail = msg => { iosAlert('ノートの追加', msg); return false; };
@@ -989,7 +1005,7 @@ async function inverseOf(e) {
   if (e.kind === 'note') return notes.inverse(e);
   if (e.kind === 'deck') return deckOps.inverse(e);
   if (e.kind === 'nt') return ntScreen.inverse(e);   // カードテンプレート（ノートタイプの変更）
-  return { ...e, prevs: e.prevs.map(p => structuredClone(S.byId.get(p.id))) };
+  return { ...e, prevs: e.prevs.map(p => { const c = S.byId.get(p.id), o = { id: p.id }; for (const k of Object.keys(p)) if (k !== 'id') o[k] = structuredClone(c[k]); return o; }) };   // 同じ項目の今の値
 }
 async function revertEntry(e) {
   if (e.kind === 'note') { await notes.undo(e); return; }   // ノートの追加・編集・削除
@@ -997,7 +1013,8 @@ async function revertEntry(e) {
   if (e.kind === 'nt') { await ntScreen.revert(e); return; }   // カードテンプレート（ノートタイプを前のものに）
   // 非表示・休止・フラグ・マーク・デッキを戻す（新しい時刻で前の状態を送る。デッキを動かしたカードは前のデッキも送る）
   const now = Date.now(), base = lastRevIds(e.prevs.map(p => p.id));
-  for (const p of e.prevs) { const c = S.byId.get(p.id), moved = c.didSet; Object.assign(c, p); if (moved) c.didSet = true; c.rev = now; await store.addOp({ t: 'set', c: { id: c.id, st: pickState(c), rev: now }, base: base.get(c.id) || 0 }); }
+  for (const p of e.prevs) { const c = S.byId.get(p.id); Object.assign(c, p); if ('did' in p) c.didAt = now; c.rev = now;   // デッキを戻したら、戻した時刻を新しい印に
+    await store.addOp({ t: 'set', c: { id: c.id, st: pickState(c), rev: now }, base: base.get(c.id) || 0 }); }
   if (e.rebuild) S.mainQ = null;
   scheduleSync();
 }
@@ -1008,7 +1025,7 @@ async function redoAction() {
   S.busy = true; redoing = true;
   try {
     REDO.pop();
-    if (e.kind === 'ans') { await rateInner(e.ease, e.taken); return; }   // 同じボタン・同じ解答時間でもう一度答える
+    if (e.kind === 'ans') { if (e.ease >= 1 && e.ease <= 4) await rateInner(e.ease, e.taken); return; }   // 同じボタン・同じ解答時間でもう一度答える
     const inv = await inverseOf(e); await revertEntry(e); undoPush(inv);
     toast(`やり直しました（${e.label}）`);
     if (e.kind === 'set' && document.body.dataset.view === 'study') { if (S.card && S.byId.get(S.card.id)?.queue < 0) advance(); else paintMarks(); }
@@ -1023,7 +1040,7 @@ async function undoInner() {
     return;
   }
   const { prev, revlogId, sibs = [] } = S.undo.pop();
-  const r0 = S.revlog.find(x => x.id === revlogId); if (r0) REDO.push({ kind: 'ans', cid: prev.id, ease: r0.ease, taken: r0.time });
+  const r0 = S.revlog.find(x => x.id === revlogId); if (r0 && r0.type <= 3 && r0.ease >= 1 && r0.ease <= 4) REDO.push({ kind: 'ans', cid: prev.id, ease: r0.ease, taken: r0.time }); else REDO.length = 0;   // 手動の期日・リセット（記録の種類 4）はやり直さない
   const c = S.byId.get(prev.id); Object.assign(c, prev); if (!prev.leeched) delete c.leeched; delRev(revlogId);
   await store.addOp({ t: 'undo', rid: revlogId, c: { id: c.id, st: pickState(c), rev: c.rev } });
   const now = Date.now(), base = lastRevIds(sibs.map(s => s.id));   // 答えと一緒に埋めた兄弟も戻す
@@ -1063,7 +1080,7 @@ async function changeCards(cards, fn, msg, name, next = true, rebuild = true) {
   try {
     const now = Date.now(), prevs = cards.map(c => structuredClone(c)), base = lastRevIds(cards.map(c => c.id));
     for (const c of cards) { fn(c); c.rev = now; await store.addOp({ t: 'set', c: { id: c.id, st: pickState(c), rev: now }, base: base.get(c.id) || 0 }); }
-    undoPush({ kind: 'set', prevs, label: name, rebuild });
+    undoPush({ kind: 'set', prevs: prevs.map(p => snapDiff(p, S.byId.get(p.id))), label: name, rebuild });
     if (rebuild) S.mainQ = null;   // 非表示・休止・フラグは Anki でもキューを組み直す（マークはノートの変更なので組み直さない）
   } finally { S.busy = false; }
   toast(msg); scheduleSync();

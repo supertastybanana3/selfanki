@@ -95,7 +95,7 @@ def same(a, b):
         if x is not None and abs(x - y) > tol * max(1.0, abs(x)): return False
     return da.get('lrt') == db.get('lrt')
 
-def anki_params(cid, st, odid):
+def anki_params(cid, st, odid, amod=0, deck_ids=None):
     d = st.get('data') or {}
     keys = ['type', 'queue', 'due', 'ivl', 'factor', 'reps', 'lapses', 'left']
     vals = [st[k] for k in keys]
@@ -103,8 +103,10 @@ def anki_params(cid, st, odid):
     vals += [{'stability': d['s'], 'difficulty': d['d']} if d.get('s') is not None and d.get('d') is not None else None, d.get('dr'), d.get('decay'), d.get('lrt')]
     if d.get('pos') is not None: keys.append('original_position'); vals.append(d['pos'])
     if 'flags' in st: keys.append('flags'); vals.append(st['flags'])
-    if odid: keys += ['did', 'odid', 'odue']; vals += [st.get('did') or odid, 0, 0]  # フィルターデッキに入っていたら元のデッキに戻してから書く
-    elif st.get('did'): keys.append('did'); vals.append(st['did'])   # 端末でデッキを変えたカード
+    # 端末で動かしたカード: 動かした時刻（didAt）が Anki のカードの最後の変更より新しく、Anki にそのデッキがあるときだけ（mirror.py はデッキを作れない）
+    move = bool(st.get('did')) and (st.get('didAt') or 0) > amod * 1000 and (deck_ids is None or st['did'] in deck_ids)
+    if odid: keys += ['did', 'odid', 'odue']; vals += [st['did'] if move else odid, 0, 0]  # フィルターデッキに入っていたら元のデッキに戻してから書く
+    elif move: keys.append('did'); vals.append(st['did'])
     return {'card': cid, 'keys': keys, 'newValues': vals, 'warning_check': True}
 
 # ---- 端末で追加・編集・削除したノート（サーバーの notes 表） ----
@@ -247,7 +249,7 @@ def main():
         to_srv, new_srv, view = [], 0, {}
         for cid, c in acards.items():
             tl = [t.lower() for t in c['tags']]
-            ast = {k: c[k] for k in STATE_KEYS}; ast['flags'] = c['flags']; ast['mark'] = int('marked' in tl); ast['did'] = c['did']
+            ast = {k: c[k] for k in STATE_KEYS}; ast['flags'] = c['flags']; ast['mark'] = int('marked' in tl); ast['did'] = odid.get(cid) or c['did']   # 元のデッキ（フィルターデッキに入っていても）
             if cid not in scards: to_srv.append((cid, ast, aver[cid], last.get(cid, 0))); new_srv += 1; continue   # 移したあとに Anki で足したカード
             view[cid] = {'st': ast, 'nid': c['nid'], 'odid': odid.get(cid, 0), 'nmod': c.get('nmod', 0), 'leech': 'leech' in tl, 'ver': aver[cid]}
         p = acore.plan(scards, srevs, view, anki_rev_ids, [rr for rr in arevlog if rr[1] in view])
@@ -262,9 +264,12 @@ def main():
             return summary
         # 5. Anki に書く（カード → 記録。記録を先に入れて途中で止まると、次の回で「Anki のほうが新しい」に見えてしまう）
         bad = []
+        deck_ids = set((ac('deckNamesAndIds') or {}).values())   # 端末で動かしたカードの行き先が Anki にあるか
+        nomove = sum(1 for cid, st, _ in to_anki if st.get('didAt') and st.get('did') not in deck_ids)
+        if nomove: log(f'端末で動かした先のデッキが Anki に無いので、{nomove} 枚はデッキを動かさなかった（端末で作ったデッキはアドオンでしか作れない。手順 8-A）')
         for i in range(0, len(to_anki), 100):
             part = to_anki[i:i + 100]
-            res = ac('multi', actions=[{'action': 'setSpecificValueOfCard', 'params': anki_params(cid, st, odid.get(cid, 0))} for cid, st, _ in part])
+            res = ac('multi', actions=[{'action': 'setSpecificValueOfCard', 'params': anki_params(cid, st, odid.get(cid, 0), acards[cid]['mod'], deck_ids)} for cid, st, _ in part])
             for (cid, _, _), x in zip(part, res):
                 # multi の中身は版によって [True] のままか {'result': [True], 'error': None} で返る
                 ok = x == [True] or (isinstance(x, dict) and not x.get('error') and x.get('result') == [True])

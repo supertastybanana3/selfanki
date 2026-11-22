@@ -198,6 +198,7 @@ export function createNotes(env) {
       items.push({ nid, prev: { ...c0, did: exDeck ?? live[0]?.did ?? 1 } });
     }
     if (recs.length) await commit(recs, { kind: 'note', label, items });
+    for (const rec of recs) { const marked = tagsArr(rec.tags).some(x => x.toLowerCase() === 'marked'); for (const c of cardsOf(rec.id)) if (c.mark !== undefined) c.mark = marked; }   // editNote と同じく、マークを書いたタグに合わせる
     return recs.length;
   }
   async function deleteNotes(nids, label = 'ノートを削除') {
