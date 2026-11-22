@@ -409,3 +409,39 @@ export function cardsRequired(nt, fieldsArr, existing = new Set(), ensureNotEmpt
   if (!existing.size && !out.length && ensureNotEmpty) out.push({ ord: 0, did: null });
   return out;
 }
+
+// ---------- ノートタイプの変更で使う（rslib template.rs の rename_and_remove_fields・template_to_string・find_field_references） ----------
+export function parseTemplate(s) { try { return parse(s ?? ''); } catch { return null; } }
+export function templateToString(nodes) {
+  let b = '';
+  for (const n of nodes) {
+    if (n.t === 'text') b += n.s;
+    else if (n.t === 'comment') b += '<!--' + n.s + '-->';
+    else if (n.t === 'rep') b += '{{' + [...n.filters].reverse().concat(n.key).join(':') + '}}';
+    else b += '{{' + (n.t === 'cond' ? '#' : '^') + n.key + '}}' + templateToString(n.children) + '{{/' + n.key + '}}';
+  }
+  return b;
+}
+// map: 古い名前 → 新しい名前（null＝消した）
+export function renameAndRemoveFields(nodes, map) {
+  const out = [];
+  for (const n of nodes) {
+    if (n.t === 'text' || n.t === 'comment') out.push(n);
+    else if (n.t === 'rep') { if (!map.has(n.key)) out.push(n); else if (map.get(n.key) != null) out.push({ ...n, key: map.get(n.key) }); }
+    else {
+      const children = renameAndRemoveFields(n.children, map);
+      if (!map.has(n.key)) out.push({ ...n, children }); else if (map.get(n.key) == null) out.push(...children); else out.push({ ...n, key: map.get(n.key), children });
+    }
+  }
+  return out;
+}
+const isClozeCondKey = k => /^c[0-9]+$/.test(k) && Number(k.slice(1)) <= 4294967295;
+export function referencedFields(nodes, clozeOnly = false, withConds = true, set = new Set()) {
+  for (const n of nodes) {
+    if (n.t === 'rep') { if (!clozeOnly || n.filters.includes('cloze')) set.add(n.key); }
+    else if (n.t === 'cond' || n.t === 'neg') { if (withConds && !isClozeCondKey(n.key)) set.add(n.key); referencedFields(n.children, clozeOnly, withConds, set); }
+  }
+  return set;
+}
+export const containsClozeReplacement = nodes => nodes.some(n => n.t === 'rep' && n.filters.includes('cloze'));
+export const containsFieldReplacement = nodes => referencedFields(nodes, false, false).size > 0;

@@ -3,6 +3,7 @@
 // 決まり: 束のノート（Anki で最後に変えた時刻 nmod）と端末の記録（rev）の新しいほうを使う。消したノートのカードは隠す（c.gone）。
 // 端末で作ったカードには c.local を付ける（束のカードと分けるため）
 import { renderCard, cardsRequired, sortText, stripHtml, clozeNumbers } from './template.mjs';
+import { reorderFields, remapFields, remapCardOrds } from './ntedit.mjs';
 
 const tagsArr = s => String(s || '').split(/\s+/).filter(Boolean);
 // ノートの guid（Anki と同じく、64 ビットの乱数を 91 文字で。rslib anki_base91）。.apkg に書き出したとき、Anki が同じノートだと分かる印
@@ -106,9 +107,12 @@ export function createNotes(env) {
       addCard({ id: cid, nid: rec.id, did, mid: rec.mid, ord, flags: 0, tags: [], type: 0, queue: 0, due, ivl: 0, factor: 0, reps: 0, lapses: 0, left: 0, data: {},
         mod: Math.floor(rec.rev / 1000), nmod: 0, rev: 0, local: true });
     }
+    // 記録のカードの一覧が、そのノートの生きているカードのすべて（ord もこの一覧のとおり。ノートタイプの変更でテンプレートを消した・並べ替えたとき）
+    const want = new Map(rec.cards.map(([cid, ord]) => [cid, ord]));
     for (const c of index().get(rec.id) || []) {
       if (c.nid !== rec.id) continue;
-      c.gone = false;
+      if (!want.has(c.id)) { c.gone = true; continue; }
+      c.gone = false; c.ord = want.get(c.id);
       const r = renderCard(t, { fields: rec.flds, tags }, { ord: c.ord, flags: c.flags || 0, id: c.id, deckName: deckName(c.did) });
       Object.assign(c, { q: r.q, a: r.a, qav: r.qav, aav: r.aav, tname: r.tname, sfld: sortText(rec.flds[t.sortf] ?? ''), tags, mid: rec.mid });
       if (r.typ) c.typ = r.typ; else delete c.typ;
@@ -201,7 +205,7 @@ export function createNotes(env) {
     for (const { nid } of entry.items) {
       const rec = S.noteRecs.get(nid);
       if (rec?.eff === 'del' || !liveCards(nid).length) { items.push({ nid, prev: null }); continue; }
-      const c0 = await content(nid); items.push({ nid, prev: c0 ? { ...c0, did: rec?.did ?? liveCards(nid)[0]?.did ?? 1 } : null });
+      const c0 = await content(nid); items.push({ nid, prev: c0 ? { ...c0, did: rec?.did ?? liveCards(nid)[0]?.did ?? 1, cards: liveCards(nid).map(cardRow) } : null });
     }
     return { ...entry, items };
   }
@@ -211,7 +215,7 @@ export function createNotes(env) {
     for (const { nid, prev } of entry.items) {
       const cur = S.noteRecs.get(nid);
       if (!prev) { if (cur) recs.push({ ...wire(cur), rev: newRev(nid), del: 1 }); continue; }
-      recs.push({ id: nid, mid: prev.mid, flds: prev.flds, tags: prev.tags, did: prev.did ?? cur?.did ?? 1, cards: cur?.cards || liveCards(nid).map(cardRow), rev: newRev(nid), del: 0, added: prev.added ? 1 : 0 });
+      recs.push({ id: nid, mid: prev.mid, flds: prev.flds, tags: prev.tags, did: prev.did ?? cur?.did ?? 1, cards: prev.cards ?? cur?.cards ?? liveCards(nid).map(cardRow), rev: newRev(nid), del: 0, added: prev.added ? 1 : 0 });
     }
     for (const rec of recs) { apply(rec); await env.store.addOp({ t: 'note', n: wire(rec) }); }
     env.changed(new Set(recs.map(r => r.id)));
@@ -489,6 +493,62 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
     }
     return n;
   }
+  // ---------- ノートタイプの変更（app/ntedit.mjs の決まりで、ノートとカードを書き換える） ----------
+  // そのノートタイプの、生きているノート（カードの mid は記録で書き換わる）。id の順（rslib は nid の順に作る）
+  const notesOfType = mid => [...new Set(S.all.filter(c => !c.gone && +c.mid === +mid).map(c => c.nid))].filter(nid => S.noteRecs.get(nid)?.eff !== 'del').sort((a, b) => a - b);
+  const lastDeckOf = mid => { const d = +S.meta.config?.['_nt_' + mid + '_lastDeck']; return S.decksById.has(d) ? d : null; };
+  // カードを作る（rslib cardgen.rs）。exist＝残るカード [{ id, ord, did, type, due }]、target＝どのデッキにも決まらないときのデッキ
+  function genCards(t, flds, exist, target, skipFull) {
+    if (skipFull && t.type !== 1 && exist.length === t.tmpls.length) return [];
+    const decks = new Set(exist.map(c => c.did)), exDeck = decks.size === 1 ? [...decks][0] : null, exNew = exist.find(c => c.type === 0);
+    const req = cardsRequired(t, flds, new Set(exist.map(c => c.ord)), true);
+    const ids = freshCardIds(req.length); let pos = null;
+    return req.map((r, i) => { const d = deckForAdding(r.did ?? exDeck ?? target); if (exNew) return [ids[i], r.ord, d, exNew.due]; pos = pos || takePosition(); return [ids[i], r.ord, d, isRandom(d) ? pos.r : pos.p]; });
+  }
+  // ノートタイプを直した（plan＝ntedit.mjs prepareNotetype の返り値。S.meta.notetypes[mid] はもう新しいもの）。書き換えたノートの、元に戻す用の items を返す
+  async function notetypeEdited(mid, plan) {
+    const t = nt(mid); if (!t) return [];
+    const recs = [], items = [];
+    for (const nid of notesOfType(mid)) {
+      const c0 = await content(nid); if (!c0) continue;
+      const live = liveCards(nid);
+      const flds = plan.fieldsChanged ? reorderFields(c0.flds, plan.fieldOrds) : c0.flds;
+      let changed = plan.fieldsChanged;
+      const gone = new Set(plan.tmpl.removed), exist = [];
+      for (const c of live) {
+        if (t.type !== 1 && gone.has(c.ord)) { changed = true; continue; }
+        const ord = t.type !== 1 && plan.tmpl.moved.has(c.ord) ? plan.tmpl.moved.get(c.ord) : c.ord;
+        if (ord !== c.ord) changed = true;
+        exist.push({ id: c.id, ord, did: c.did, type: c.type, due: c.due });
+      }
+      const add = plan.generate ? genCards(t, flds, exist, null, true) : [];
+      if (add.length) changed = true;
+      if (!changed) continue;
+      const decks = new Set(exist.map(c => c.did)), did = decks.size === 1 ? [...decks][0] : (live[0]?.did ?? 1);
+      recs.push({ id: nid, mid: +mid, flds, tags: c0.tags, did, cards: [...exist.map(c => [c.id, c.ord, c.did, c.type === 0 ? c.due : 0]), ...add], rev: newRev(nid), del: 0, added: c0.added });
+      items.push({ nid, prev: { ...c0, did: live[0]?.did ?? 1, cards: live.map(cardRow) } });
+    }
+    if (recs.length) { for (const rec of recs) apply(rec); await env.store.addOps(recs.map(r => ({ t: 'note', n: wire(r) }))); env.changed(new Set(recs.map(r => r.id))); env.scheduleSync(); }
+    return items;
+  }
+  // ブラウザの「ノートタイプを変更」。fmap[i]＝新しい i 番目のフィールドに入れる前のフィールドの位置（null＝空）、tmap[i]＝新しい i 番目のテンプレートに移す前のカードの ord（穴埋めがからむときは null）
+  async function changeNotetypeOf(nids, newMid, fmap, tmap) {
+    const t = nt(newMid); if (!t) return 0;
+    const newNt = S.meta.notetypes[newMid], recs = [], items = [];
+    for (const nid of [...nids].sort((a, b) => a - b)) {
+      const c0 = await content(nid); if (!c0) continue;
+      const oldNt = S.meta.notetypes[c0.mid], live = liveCards(nid); if (!oldNt || !live.length) continue;
+      const flds = remapFields(c0.flds, fmap), ords = remapCardOrds(live, oldNt, newNt, tmap), exist = [];
+      live.forEach((c, i) => { if (ords[i] != null) exist.push({ id: c.id, ord: ords[i], did: c.did, type: c.type, due: c.due }); });
+      const add = genCards(t, flds, exist, lastDeckOf(newMid), false);
+      const decks = new Set(exist.map(c => c.did)), did = decks.size === 1 ? [...decks][0] : (live[0]?.did ?? 1);
+      recs.push({ id: nid, mid: +newMid, flds, tags: c0.tags, did, cards: [...exist.map(c => [c.id, c.ord, c.did, c.type === 0 ? c.due : 0]), ...add], rev: newRev(nid), del: 0, added: c0.added });
+      items.push({ nid, prev: { ...c0, did: live[0]?.did ?? 1, cards: live.map(cardRow) } });
+    }
+    if (!recs.length) return 0;
+    await commit(recs, { kind: 'note', label: 'ノートタイプを変更', items });
+    return recs.length;
+  }
   // コレクションの置き換え（.colpkg）で消すノート。元に戻すは作らず、1回で積む
   async function removeNotes(nids) {
     const recs = [];
@@ -503,5 +563,5 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
     env.changed(new Set(recs.map(r => r.id))); env.scheduleSync();
     return recs.length;
   }
-  return { ready, apply, reset, openAdd, openEdit, deleteFrom, deleteBrowse, undo, inverse, bulkEdit, importRecords, removeNotes, rerender, isOpen: () => !!ed, close, element: build };
+  return { ready, apply, reset, openAdd, openEdit, deleteFrom, deleteBrowse, undo, inverse, bulkEdit, importRecords, removeNotes, rerender, notesOfType, notetypeEdited, changeNotetypeOf, isOpen: () => !!ed, close, element: build };
 }
