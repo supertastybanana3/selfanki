@@ -57,4 +57,10 @@ export function syncNow() {
   })();
   return running;
 }
+// サーバー側に、まだ取っていない変更があるか（AnkiMobile の同期ボタンは、AnkiWeb 側に変更があるときも色が変わる）。1件だけ問い合わせる
+export async function remoteHasChanges() {
+  const cur = { ns: 0, ni: 0, ...((await store.get('kv', 'cursor')) || { cs: 0, ci: 0, rs: 0, ri: 0 }) };
+  const j = await call(`pull?cs=${cur.cs}&ci=${cur.ci}&rs=${cur.rs}&ri=${cur.ri}&ns=${cur.ns}&ni=${cur.ni}&n=1`);
+  return !!(j.cards.length || j.revlog.length || (j.notes || []).length);
+}
 export async function pendingCount() { state.pending = (await store.outbox()).length; return state.pending; }

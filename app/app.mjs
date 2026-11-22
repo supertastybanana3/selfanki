@@ -309,7 +309,7 @@ async function runSync(manual = false) {
     setTimeout(() => dlg.remove(), Math.max(0, 600 - (Date.now() - t0)));
   }
   btn.classList.remove('busy');
-  if (sync.state.online) { try { localStorage.setItem('syncedOnce', '1'); } catch {} }
+  if (sync.state.online) { try { localStorage.setItem('syncedOnce', '1'); } catch {} remoteDirty = false; remoteAt = Date.now(); }
   if (got && (got.cards.length || got.revlog.length || got.conf?.length || got.notes?.length)) {
     const nids = new Set(); for (const n of got.notes || []) if (notes.apply(n)) nids.add(n.id);
     applyServer(got.cards, got.revlog);
@@ -321,8 +321,16 @@ async function runSync(manual = false) {
   }
   paintSync();
 }
+// サーバー側の変更の有無（一覧を出したとき・前に出てきたときに、1分に1回まで問い合わせる）
+let remoteAt = 0, remoteDirty = false;
+async function checkRemote(force = false) {
+  if (!force && Date.now() - remoteAt < 60000) return; remoteAt = Date.now();
+  try { remoteDirty = await sync.remoteHasChanges(); } catch { remoteDirty = false; }
+  paintSync();
+}
 async function paintSync() {
   const btn = $('#nav-sync'); const n = await sync.pendingCount();
+  btn.dataset.r = remoteDirty ? '1' : '';
   btn.classList.toggle('err', sync.state.online === false && !sync.state.serverless);
   btn.dataset.n = n ? String(n) : '';
   btn.title = sync.state.serverless ? 'サーバーなし' : sync.state.online === false ? `同期できません: ${sync.state.lastError}` : n ? `未送信 ${n}` : '同期済み';
@@ -331,7 +339,7 @@ function startSyncLoop() {
   const btn = $('#nav-sync'); btn.disabled = false; btn.onclick = () => runSync(true);
   const auto = autoSyncOn;
   window.addEventListener('online', () => { if (auto()) scheduleSync(500); });
-  document.addEventListener('visibilitychange', () => { if (!auto()) return; if (!document.hidden) scheduleSync(500); else runSync(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && document.body.dataset.view === 'decks') checkRemote(true); if (!auto()) return; if (!document.hidden) scheduleSync(500); else runSync(); });
   setInterval(() => { if (auto() && !document.hidden) runSync(); }, 5 * 60 * 1000);
   scheduleSync(300); paintSync();
 }
@@ -386,7 +394,7 @@ function openTools() {
 function showDecks() {
   if (ask) ask.onCard(null);
   if (typeof stopAv === 'function') stopAv();
-  S.deck = null; document.body.dataset.view = 'decks'; sp?.setCard(null); S.auto = false; autoClear();
+  S.deck = null; document.body.dataset.view = 'decks'; sp?.setCard(null); S.auto = false; autoClear(); checkRemote();
   checkDay();
   const decks = [...S.meta.decks].sort(deckCmp);
   const kids = name => decks.filter(d => d.name.startsWith(name + '::') && !d.name.slice(name.length + 2).includes('::'));
@@ -560,7 +568,10 @@ function rebuildLB() {
   for (const [due, conf, nid] of S.meta.lbExtra || []) cards.push({ due, conf, nid });
   S.lb = buildLoadBalancer(cards, t.daysElapsed, t.nextDayAt, S.meta.presets);
 }
-function startStudy(did) { if (typeof did === 'number') { S.lastDeck = did; try { localStorage.setItem('lastDeck', String(did)); } catch {} } S.deck = did; S.mainQ = null; S.auto = false; autoClear(); document.body.dataset.view = 'study'; rebuildLB(); advance(); }
+function startStudy(did) {
+  // 今のデッキ（Anki の curDeck）も同期する（AnkiMobile と同じく、デッキを開いただけでも同期ボタンの色が変わる）
+  if (typeof did === 'number' && did !== S.meta.config.curDeck) saveConf('global', { curDeck: did }, Date.now()).then(() => paintSync());
+  if (typeof did === 'number') { S.lastDeck = did; try { localStorage.setItem('lastDeck', String(did)); } catch {} } S.deck = did; S.mainQ = null; S.auto = false; autoClear(); document.body.dataset.view = 'study'; rebuildLB(); advance(); }
 // 下の帯の「新規 + 学習中 + 復習」。今のカードの種類に下線（AnkiMobile と同じ）
 function paintCounts(c, card) {
   const cur = !card ? null : card.queue === 0 ? 'new' : (card.queue === 1 || card.queue === 3) ? 'lrn' : 'rev';
