@@ -554,7 +554,9 @@ function countsFor(did, home = null) {
 // 道具の画面（歯車のメニュー）を開く
 function openTools() {
   if (document.body.dataset.view !== 'study') return;
-  const u = $('#menu-undo'), top = S.undo[S.undo.length - 1]; u.disabled = !S.undo.length; u.textContent = !top ? '元に戻す' : top.kind === 'note' ? `${top.label} を元に戻す` : 'カードへの回答 を元に戻す';
+  // 文言は Anki の訳（「X を元に戻す」「X をやり直す」。答えは「カードへの回答」）
+  const u = $('#menu-undo'), top = S.undo[S.undo.length - 1]; u.disabled = !S.undo.length; u.textContent = !top ? '元に戻す' : `${top.kind && top.label ? top.label : 'カードへの回答'} を元に戻す`;
+  const rd = $('#menu [data-act="redo"]'), rt = REDO[REDO.length - 1]; rd.disabled = !rt; rd.textContent = !rt ? 'やり直す' : `${rt.kind === 'ans' ? 'カードへの回答' : rt.label} をやり直す`;
   $('#menu').classList.add('open');
 }
 function showDecks() {
@@ -2066,6 +2068,7 @@ function setupTools() {
   document.querySelectorAll('#menu [data-act]').forEach(b => b.onclick = () => {
     const a = b.dataset.act; closeMenu();
     if (a === 'undo') undoAnswer();
+    else if (a === 'redo') redoAction();
     else if (a === 'decks') showDecks();
     else if (a === 'options' || a === 'stats' || a === 'filter') ACT.get(a)[2]();
     else if (a === 'custom') openCustom();
