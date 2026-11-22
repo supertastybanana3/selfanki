@@ -19,12 +19,14 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 const plain = h => stripHtml(String(h).replace(/<(?:img|audio|video|source)\b[^>]*?\bsrc\s*=\s*["']?([^"'>\s]+)[^>]*>/gi, ' $1 '));
 const BACK_SVG = '<svg viewBox="0 0 12 20" width="12" height="20" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2 2 10l8 8"/></svg>';
 const CHEV = '<svg width="7.7" height="12.8" viewBox="0 0 9 15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 1.5 7.5 7.5 1.5 13.5"/></svg>';
-// 道具の帯（AnkiMobile のマニュアル editing.md の並び: B I U・Fx・絵筆・クリップ・√・目・</>）。クリップはまだ写していない
+// 道具の帯（AnkiMobile のマニュアル editing.md の並び: B I U・Fx・絵筆・クリップ・(iPad はマイクが別)・ペン（iPad）・√・目・</>）。マイクの置き場所とクリップのメニューの文言は実機と見比べていない
 const TOOLS = [
   ['bold', '<b>B</b>', '太字'], ['italic', '<i style="font-family:Georgia,serif">I</i>', 'イタリック'], ['underline', '<u>U</u>', '下線を追加'],
   ['removeFormat', '<span style="font-style:italic;font-family:Georgia,serif">F<small>x</small></span>', '書式を取り除く'],
   ['color', '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4.5l5 5-8 8-5-5z"/><path d="M6.5 12.5 3 21l8.5-3.5"/></svg>', '文字色'],
-  ['attach', '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M20 11.5 12 19.5a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7L9.7 17.2a1.7 1.7 0 0 1-2.4-2.4L15 7"/></svg>', 'メディアを追加', 1],
+  ['attach', '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M20 11.5 12 19.5a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7L9.7 17.2a1.7 1.7 0 0 1-2.4-2.4L15 7"/></svg>', 'メディアを追加'],
+  ['mic', '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></svg>', '音声を録音'],
+  ['draw', '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19z"/><path d="M14.5 6.5l3 3"/></svg>', '手書き'],
   ['math', '<span style="font-family:Georgia,serif">√</span>', '数式'],
   ['preview', '<svg viewBox="0 0 28 20" width="25" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M1.5 10S6 2 14 2s12.5 8 12.5 8S22 18 14 18 1.5 10 1.5 10z"/><circle cx="14" cy="10" r="4"/></svg>', 'プレビュー'],
   ['html', '<span style="font:600 15px ui-monospace,Menlo,monospace">&lt;/&gt;</span>', 'HTMLエディタ'],
@@ -55,6 +57,14 @@ const CSS = `#editor{position:fixed;inset:0;z-index:28;background:var(--am-bg);d
 #editor .etoast{position:absolute;left:50%;bottom:calc(28px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:3;padding:8px 14px;border-radius:10px;background:rgba(40,40,42,.92);color:#fff;font-size:15px;opacity:0;transition:opacity .2s;pointer-events:none;white-space:nowrap}
 #editor .etoast.show{opacity:1}
 #etools{position:fixed;z-index:31;top:calc(46px + env(safe-area-inset-top));right:10px;width:260px;border-radius:13px;background:var(--br-pop,#2c2c2e);box-shadow:0 8px 30px rgba(0,0,0,.45);overflow:hidden;display:flex;flex-direction:column}
+#erec{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.48);display:flex;align-items:center;justify-content:center}
+#erec .box{width:270px;border-radius:14px;background:var(--br-pop,#2c2c2e);color:#fff;text-align:center;overflow:hidden}
+#erec .t{font-size:17px;font-weight:600;padding:19px 16px 4px} #erec .tm{font:300 34px -apple-system,system-ui,sans-serif;font-variant-numeric:tabular-nums;padding:4px 0 16px;color:#ff453a}
+#erec .bt{display:flex;border-top:.5px solid rgba(255,255,255,.15)} #erec .bt button{flex:1;height:44px;font-size:17px;color:#4ea2ff;background:none;border:0} #erec .bt button+button{border-left:.5px solid rgba(255,255,255,.15);font-weight:600}
+#edraw{position:fixed;inset:0;z-index:40;background:#fff;display:flex;flex-direction:column}
+#edraw nav{flex:none;display:flex;justify-content:space-between;align-items:center;height:calc(50px + env(safe-area-inset-top));padding:env(safe-area-inset-top) 12px 0;background:#f7f7f7;border-bottom:.5px solid #c8c8c8}
+#edraw nav button{font-size:17px;color:#007aff;background:none;border:0} #edraw nav .yes{font-weight:600}
+#edraw canvas{flex:1;width:100%;touch-action:none}
 #etools .h{font-size:13px;color:#8e8e93;text-align:center;padding:12px 0 11px}
 #etools button{height:54px;border:0;border-top:.5px solid rgba(255,255,255,.12);background:none;color:#4ea2ff;font-size:18px} #etools button.red{color:#ff4c44}`;
 
@@ -339,6 +349,13 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
       inp.addEventListener('blur', () => setTimeout(() => inp.remove(), 500));
       inp.click(); return;
     }
+    if (k === 'attach') {   // クリップ: カメラ・写真ライブラリ・ファイルから（画像は Anki の貼り付けと同じく paste-<sha1>、ファイルは元の名前）
+      menu('メディアを追加', [['カメラ', () => pickMedia(fr, ta, i, 'image/*,video/*', 'environment')], ['写真ライブラリ', () => pickMedia(fr, ta, i, 'image/*,video/*')], ['ファイル', () => pickMedia(fr, ta, i, '', null, true)]],
+        el.querySelector('.etb [data-k="attach"]'));
+      return;
+    }
+    if (k === 'mic') { recordInto(fr, ta, i); return; }
+    if (k === 'draw') { drawInto(fr, ta, i); return; }
     if (k === 'math') {   // √: 下付き・上付きと MathJax（文言は Anki の訳。選んでいた文字を囲む）
       const wrap = (a, b) => () => { const sel = fr.contentDocument.getSelection()?.toString() ?? ''; run('insertText', a + sel + b); };
       menu('数式', [['下付き文字', () => run('subscript')], ['上付き文字', () => run('superscript')],
@@ -347,6 +364,77 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
       return;
     }
     run(k);
+  }
+  // 画像・音声をフィールドに入れる（画像は <img src>、音声・動画は [sound:]。Anki の editor と同じ）。HTML を出している欄なら文字として足す
+  const isImage = n => /\.(png|jpe?g|gif|webp|svg|bmp|tiff?|avif|ico)$/i.test(n);
+  function insertMedia(fr, ta, i, name) {
+    const html = isImage(name) ? `<img src="${name.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">` : `[sound:${name}]`;
+    if (ed?.html.has(i)) { const p = ta.selectionStart ?? ta.value.length; ta.value = ta.value.slice(0, p) + html + ta.value.slice(ta.selectionEnd ?? p); return; }
+    try { fr.contentWindow.focus(); fr.contentDocument.execCommand('insertHTML', false, html); fit(fr); } catch {}
+  }
+  async function addBytes(fr, ta, i, name, bytes) {
+    try { const got = await env.addMedia(name, bytes); insertMedia(fr, ta, i, got); }
+    catch (e) { env.iosAlert('Error', String(e?.message || e)); }
+  }
+  function pickMedia(fr, ta, i, accept, capture = null, keepName = false) {
+    const inp = document.createElement('input'); inp.type = 'file'; if (accept) inp.accept = accept; if (capture) inp.setAttribute('capture', capture); inp.multiple = !capture;
+    inp.style.cssText = 'position:fixed;left:-100px;top:0;opacity:0'; document.body.append(inp);
+    inp.addEventListener('change', async () => {
+      for (const f of inp.files) {
+        const bytes = new Uint8Array(await f.arrayBuffer());
+        const ext = (f.name.match(/\.([^.]+)$/) || [])[1]?.toLowerCase() || (f.type.split('/')[1] || 'bin').replace('jpeg', 'jpg').replace('quicktime', 'mov');
+        const name = keepName || !/^(image|video)\//.test(f.type) ? f.name : `paste-${await env.sha1Of(bytes)}.${ext}`;
+        await addBytes(fr, ta, i, name, bytes);
+      }
+      inp.remove();
+    });
+    inp.click();
+  }
+  // マイク: 録って、保存で入れる（Anki の「音声を録音」と同じく録り終えてから入れる）
+  async function recordInto(fr, ta, i) {
+    let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { env.iosAlert('音声を録音', 'マイクを使えません（' + (e?.message || e) + '）'); return; }
+    const mr = new MediaRecorder(stream), chunks = []; mr.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+    const d = document.createElement('div'); d.id = 'erec';
+    d.innerHTML = '<div class="box"><div class="t">録音中</div><div class="tm">0:00</div><div class="bt"><button class="no">キャンセル</button><button class="yes">保存</button></div></div>';
+    document.body.append(d);
+    const t0 = Date.now(), tick = setInterval(() => { const s = Math.floor((Date.now() - t0) / 1000); d.querySelector('.tm').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }, 250);
+    const finish = keep => new Promise(res => { mr.onstop = res; mr.stop(); }).then(async () => {
+      clearInterval(tick); stream.getTracks().forEach(t => t.stop()); d.remove();
+      if (!keep || !chunks.length) return;
+      const type = mr.mimeType || 'audio/mp4', ext = /webm/.test(type) ? 'webm' : /ogg/.test(type) ? 'ogg' : 'm4a';
+      const bytes = new Uint8Array(await new Blob(chunks, { type }).arrayBuffer());
+      await addBytes(fr, ta, i, `rec-${(await env.sha1Of(bytes)).slice(0, 16)}.${ext}`, bytes);
+    });
+    d.querySelector('.no').onclick = () => finish(false); d.querySelector('.yes').onclick = () => finish(true);
+    mr.start();
+  }
+  // ペン: 白い紙に描いて、PNG で入れる（AnkiMobile は iPad だけ。描いた画像をあとで直す機能は無い）
+  function drawInto(fr, ta, i) {
+    const d = document.createElement('div'); d.id = 'edraw';
+    d.innerHTML = '<nav><button class="no">キャンセル</button><button class="undo">元に戻す</button><button class="yes">完了</button></nav><canvas></canvas>';
+    document.body.append(d);
+    const cv = d.querySelector('canvas'), ctx = cv.getContext('2d'), dpr = window.devicePixelRatio || 1;
+    const W = cv.clientWidth, H = cv.clientHeight; cv.width = W * dpr; cv.height = H * dpr; ctx.scale(dpr, dpr);
+    let strokes = [], cur = null;
+    const paint = () => { ctx.clearRect(0, 0, W, H); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#000';
+      for (const s of cur ? [...strokes, cur] : strokes) { ctx.beginPath(); s.forEach((p, k) => { ctx.lineWidth = p.w; k ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); if (s.length === 1) ctx.lineTo(s[0].x + .01, s[0].y); ctx.stroke(); } };
+    const pt = e => { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top, w: e.pointerType === 'pen' && e.pressure > 0 ? 1 + 4 * e.pressure : 3 }; };
+    cv.addEventListener('pointerdown', e => { e.preventDefault(); try { cv.setPointerCapture(e.pointerId); } catch {} cur = [pt(e)]; paint(); });
+    cv.addEventListener('pointermove', e => { if (!cur) return; for (const x of (e.getCoalescedEvents?.() || [e])) cur.push(pt(x)); paint(); });
+    const end = () => { if (cur) { strokes.push(cur); cur = null; paint(); } }; cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+    d.querySelector('.undo').onclick = () => { strokes.pop(); paint(); };
+    d.querySelector('.no').onclick = () => d.remove();
+    d.querySelector('.yes').onclick = async () => {
+      if (!strokes.length) { d.remove(); return; }
+      // 描いた所だけを切り出す（周りに 10pt の余白）
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const s of strokes) for (const p of s) { x0 = Math.min(x0, p.x - p.w); y0 = Math.min(y0, p.y - p.w); x1 = Math.max(x1, p.x + p.w); y1 = Math.max(y1, p.y + p.w); }
+      x0 = Math.max(0, x0 - 10); y0 = Math.max(0, y0 - 10); x1 = Math.min(W, x1 + 10); y1 = Math.min(H, y1 + 10);
+      const out = document.createElement('canvas'); out.width = Math.round((x1 - x0) * dpr); out.height = Math.round((y1 - y0) * dpr);
+      const o = out.getContext('2d'); o.fillStyle = '#fff'; o.fillRect(0, 0, out.width, out.height); o.drawImage(cv, x0 * dpr, y0 * dpr, out.width, out.height, 0, 0, out.width, out.height);
+      const bytes = new Uint8Array(await (await new Promise(r => out.toBlob(r, 'image/png'))).arrayBuffer());
+      d.remove(); await addBytes(fr, ta, i, `paste-${await env.sha1Of(bytes)}.png`, bytes);
+    };
   }
   // 道具の帯から出す小さなメニュー（ツールの吹き出しと同じ見た目で、押したボタンの下に出す）
   function menu(title, items, anchor) {

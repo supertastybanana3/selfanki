@@ -1002,7 +1002,7 @@ function checkDay(first = false) {
   const t = timingToday(nowSecs(), S.meta), d = t.daysElapsed;
   if (!first && S.day === d) return false;
   const changed = S.day != null && S.day !== d; S.day = d;
-  if (changed) { S.undo = []; if (S.lb) rebuildLB(); }
+  if (changed) { S.undo = []; REDO.length = 0; if (S.lb) rebuildLB(); }
   unburyOld();
   return changed;
 }
@@ -1921,6 +1921,7 @@ function setupNotes() {
     pushUndo: e => undoPush(e),
     changed: notesChanged, scheduleSync: () => scheduleSync(), nextNewPos, bumpNewPos,
     showPreview: (f, c) => previewInto(f, c),
+    addMedia: (name, bytes) => xchg.addMedia(name, bytes), sha1Of: bytes => xchg.sha1Of(bytes),
     typing: t => { try { window.webkit?.messageHandlers?.sa?.postMessage({ typing: t }); } catch {} } });
   notes.element();   // 戻るボタン（Android）が開け閉めを見られるように、先に作っておく
 }
