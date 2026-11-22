@@ -69,7 +69,7 @@ Cloudflare に置かれるもの: カードの表・裏、ノートのすべて�
 
 ### URL で足す（AnkiMobile の URL スキーム）
 
-AnkiMobile の `anki://x-callback-url/addnote?…`・`search?query=…`・`sync` と同じことを、アプリの URL のうしろに `#x-callback-url/…` を付けて受ける（項目は [AnkiMobile のマニュアル](https://docs.ankimobile.net/url-schemes.html)のとおり）。例:
+AnkiMobile の `anki://x-callback-url/addnote?…`・`search?query=…`・`sync` と同じことを、アプリの URL のうしろに `#x-callback-url/…` を付けて受ける（項目は AnkiMobile のマニュアルの「URL Schemes」の章のとおり）。例:
 
 ```
 https://<自分のサイト>/app/#x-callback-url/addnote?type=Basic&deck=Default&fldFront=front%20text&fldBack=back%20text&tags=a%20b
