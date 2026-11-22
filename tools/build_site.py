@@ -133,7 +133,7 @@ def build(export_dir, rebase=False, fetch_media=True, log=print):
     chunks = []
     for i in range(len(starts)):
         b = dump(groups.get(i, [])); chunks.append({'f': put(f'c/{i:03d}.{h8(b)}.json', b), 'n': len(groups.get(i, []))})
-    # ノートの生の中身（検索用。[nid, mid, flds, sfld, csum, tags, mod]）。カードと同じく nid 順に分け、分け目は前回のものを使い回す
+    # ノートの生の中身（検索用・書き出し用。[nid, mid, flds, sfld, csum, tags, mod, guid]）。カードと同じく nid 順に分け、分け目は前回のものを使い回す
     notes_p = os.path.join(export_dir, 'notes.json'); note_files = []
     if os.path.exists(notes_p):
         notes = sorted(json.load(open(notes_p, encoding='utf-8')), key=lambda r: r[0])
