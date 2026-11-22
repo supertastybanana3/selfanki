@@ -6,6 +6,7 @@ import { compileSearch, loadNotes, displayText } from './search.mjs';
 import * as store from './store.mjs';
 import * as sync from './sync.mjs';
 import { createPen } from './pen.mjs';
+import { cardsRequired as tmplCardsRequired } from './template.mjs';
 import { createAsk } from './ask.mjs';
 import { typeQuestion, typeAnswer } from './typeans.mjs';
 import { createScratchpad, spPref, SP_WIDTH, SP_SIZE, SP_ALPHA } from './scratchpad.mjs';
@@ -1543,6 +1544,56 @@ function autoFire(card, side) {
   if (a === 1) rate(1); else if (a === 3) rate(2); else if (a === 2) rate(3); else if (a === 4) toast('回答する時間になりました'); else buryCard();
 }
 
+// ---------- データベース・メディア・白紙カードのチェック（設定の最初のページ。文言は Anki の翻訳のとおり） ----------
+// データベースをチェック: 端末の中のサーバーの控えを捨てて、サーバーから全部取り直す（送っていない変更は先に送る）。取り直したら読み込み直す
+async function checkDatabase() {
+  const say = m => iosAlert('データベースをチェック', m);
+  try {
+    await store.resetServerCopy(S.manifest.base.state);
+    const got = await sync.syncNow();
+    if (!got) { say('サーバーにつながりませんでした。ネットにつないでから、もう一度試してください。'); return; }
+    say('データベースを再構築し最適化しました。'); setTimeout(() => location.reload(), 1200);
+  } catch (e) { say(String(e?.message || e)); }
+}
+// メディアをチェック: カードが使っているファイルと、配った束にあるファイルを比べる（Anki の「メディアをチェック」の報告と同じ書き方）
+async function checkMedia() {
+  let have = [];
+  try { have = await fetchJSON(BUNDLE + S.manifest.media); } catch {}
+  const names = new Set((Array.isArray(have) ? have : Object.keys(have || {})).map(x => (Array.isArray(x) ? x[0] : x)));
+  const used = new Set(), re = /<img[^>]+src=["']?([^"'>\s]+)|\[sound:([^\]]+)\]/gi;
+  for (const c of S.all) {
+    for (const h of [c.q, c.a]) for (const m of String(h || '').matchAll(re)) { const n = decodeURIComponent((m[1] || m[2] || '').trim()); if (n && !/^(https?:|data:)/i.test(n)) used.add(n); }
+    for (const av of [...(c.qav || []), ...(c.aav || [])]) if (av?.sound) used.add(av.sound);
+  }
+  const missing = [...used].filter(n => !names.has(n)).sort(), unused = [...names].filter(n => !used.has(n)).sort();
+  const lines = [`欠落しているファイル：${missing.length}個`, `使用されていないファイル：${unused.length}個`];
+  if (missing.length) lines.push('', '▼ 次のファイルを参照しているカードがありますが、該当するファイルがメディアフォルダ内にありません', ...missing.map(n => `実物なし（欠落）：${n}`));
+  if (unused.length) lines.push('', '▼ 次のファイルはメディアフォルダ内に存在していますが、どのカードにも使用されていません', ...unused.map(n => `使用なし：${n}`));
+  iosAlert('メディアをチェック', lines.join('\n'));
+}
+// 白紙カード: ノートの中身から見て、もう作られないはずのカード（表が空になるカード・穴埋めの番号が無いカード）を、ノートタイプごとに数える
+// （Anki の empty_cards と同じ判定。消すのはパソコンの Anki で：暗記はカードだけを消す同期を持たないため）
+async function checkEmptyCards() {
+  let notes; try { notes = await loadNotes(S, BUNDLE); } catch (e) { iosAlert('白紙カード', String(e?.message || e)); return; }
+  const byNote = new Map(); for (const c of S.all) { if (c.type == null) continue; (byNote.get(c.nid) ?? byNote.set(c.nid, []).get(c.nid)).push(c); }
+  const report = new Map();
+  for (const [nid, cs] of byNote) {
+    const n = notes.get(nid), raw = S.meta.notetypes?.[n?.mid];
+    if (!n || !raw || !Array.isArray(raw.templates)) continue;
+    const t = { name: raw.name, type: raw.type, sortf: raw.sortf || 0, flds: raw.fields, tmpls: raw.templates };
+    const fa = Array.isArray(n.flds) ? n.flds : String(n.flds).split('\x1f');
+    let req; try { req = new Set(tmplCardsRequired(t, fa, new Set(), false).map(r => r.ord)); } catch { continue; }   // 今の中身から作るはずのカード（今あるものも含めて）
+    const empty = cs.filter(c => !req.has(c.ord)); if (!empty.length) continue;
+    const r = report.get(raw.name) ?? report.set(raw.name, []).get(raw.name);
+    const tname = c => raw.type === 1 ? `${raw.templates[0]?.name ?? ''} ${c.ord + 1}` : (raw.templates[c.ord]?.name ?? String(c.ord + 1));   // 穴埋めは「Cloze 2」（Anki と同じ）
+    r.push(`${cs.length}枚中${empty.length}枚のカードが白紙（${[...new Set(empty.map(tname))].join('、')}）`);
+  }
+  if (!report.size) { iosAlert('白紙カード', '白紙カードはありません。'); return; }
+  const lines = []; for (const [name, ls] of report) lines.push(`${name} の白紙カード：`, ...ls, '');
+  lines.push('消すときは、パソコンの Anki の「ツール」→「白紙カード」で消してから、手順 9 で組み直してください。');
+  iosAlert('白紙カード', lines.join('\n'));
+}
+
 window.ankiBridge = cmd => {
   if (cmd === 'customStudy') openCustom();
   else if (cmd === 'unbury' && typeof S.deck === 'number') {
@@ -1614,7 +1665,7 @@ function setupTools() {
   const PAGES = {
     root: () => ({ title: '設定', groups: [
       [{ t: '同期', go: 'sync' }, { t: '学習', go: 'study' }, { t: '編集', go: 'edit' }, { t: 'テーマ', go: 'theme' }, { t: 'プロファイル', go: 'profile' }, { t: 'バックアップ', go: 'backup' }, { t: 'このアプリについて', go: 'about' }],
-      [{ t: 'データベースをチェック', act: 1, off: 1 }, { t: 'メディアをチェック', act: 1, off: 1 }, { t: '白紙カード', act: 1, off: 1 }],
+      [{ t: 'データベースをチェック', act: 1, run: () => { closePrefs(); checkDatabase(); } }, { t: 'メディアをチェック', act: 1, run: () => { closePrefs(); checkMedia(); } }, { t: '白紙カード', act: 1, run: () => { closePrefs(); checkEmptyCards(); } }],
       ...(FEAT.pen || FEAT.autoSync ? [[{ t: 'このアプリ独自の機能', go: 'extras' }]] : [])] }),
     // 本家の AnkiMobile に無い機能（どれも最初は切ってある）
     extras: () => ({ title: 'このアプリ独自の機能', groups: [
