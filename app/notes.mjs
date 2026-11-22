@@ -5,6 +5,9 @@
 import { renderCard, cardsRequired, sortText, stripHtml, clozeNumbers } from './template.mjs';
 
 const tagsArr = s => String(s || '').split(/\s+/).filter(Boolean);
+// ノートの guid（Anki と同じく、64 ビットの乱数を 91 文字で。rslib anki_base91）。.apkg に書き出したとき、Anki が同じノートだと分かる印
+const B91 = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&()*+,-./:;<=>?@[]^_`{|}~';
+function guid64() { const b = crypto.getRandomValues(new Uint32Array(2)); let n = (BigInt(b[0]) << 32n) | BigInt(b[1]), s = ''; while (n > 0n) { s = B91[Number(n % 91n)] + s; n /= 91n; } return s || 'a'; }
 // タグを Anki と同じく空白で区切り、大文字小文字だけ違う重なりを除く（初めのものを残す）
 function normTags(s) { const seen = new Set(), out = []; for (const t of tagsArr(s)) { const k = t.toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push(t); } } return out.join(' '); }
 // 中身が空か（画像・音声だけのフィールドは空ではない）。空のフィールドに残る <br> などは '' にする
@@ -77,9 +80,10 @@ export function createNotes(env) {
   }
   const ready = () => Object.keys(S.meta.notetypes || {}).some(m => nt(m));
   const deckName = did => S.decksById.get(did)?.name ?? '(Deck)';   // rslib と同じく、無いデッキは (Deck)
-  const noteRow = (rec, t) => ({ mid: rec.mid, flds: rec.flds.join('\x1f'), sfld: plain(rec.flds[t.sortf] ?? ''), csum: 0, tags: tagsArr(rec.tags).length ? ' ' + tagsArr(rec.tags).join(' ') + ' ' : '', mod: Math.floor(rec.rev / 1000) });
+  const noteRow = (rec, t, guid) => ({ mid: rec.mid, flds: rec.flds.join('\x1f'), sfld: plain(rec.flds[t.sortf] ?? ''), csum: 0, tags: tagsArr(rec.tags).length ? ' ' + tagsArr(rec.tags).join(' ') + ' ' : '', mod: Math.floor(rec.rev / 1000), guid: rec.guid ?? guid });
   const cardRow = c => [c.id, c.ord, c.did, c.type === 0 ? c.due : 0];
-  const wire = r => ({ id: r.id, mid: r.mid, flds: r.flds, tags: r.tags, did: r.did, cards: r.cards, rev: r.rev, del: r.del ? 1 : 0, added: r.added ? 1 : 0 });
+  // guid＝端末で作ったノートの guid（Anki に足すときに使う）、imp＝パッケージから読み込んだノート（Anki でもこのカードだけを作る）
+  const wire = r => ({ id: r.id, mid: r.mid, flds: r.flds, tags: r.tags, did: r.did, cards: r.cards, rev: r.rev, del: r.del ? 1 : 0, added: r.added ? 1 : 0, ...(r.guid ? { guid: r.guid } : {}), ...(r.imp ? { imp: 1 } : {}) });
 
   // ---------- 記録を重ねる ----------
   const sameContent = (a, b) => a.mid === b.mid && !!a.del === !!b.del && a.tags === b.tags && JSON.stringify(a.flds) === JSON.stringify(b.flds) && JSON.stringify(a.cards) === JSON.stringify(b.cards);
@@ -88,6 +92,8 @@ export function createNotes(env) {
     const cur = S.noteRecs.get(rec0.id);
     if (cur && cur.rev > rec0.rev) return false;
     const rec = { ...rec0, src: rec0.src || 'app' };
+    if (rec.guid == null && cur?.guid) rec.guid = cur.guid;   // 編集の記録には guid が無い（足したときの guid を引き継ぐ）
+    if (!rec.imp && cur?.imp) rec.imp = 1;
     const bm = bundleMod(rec.id);
     rec.eff = bm != null && rec.rev <= bm * 1000 ? 'anki' : rec.del ? 'del' : nt(rec.mid) ? 'note' : 'anki';
     S.noteRecs.set(rec.id, rec);
@@ -107,11 +113,11 @@ export function createNotes(env) {
       Object.assign(c, { q: r.q, a: r.a, qav: r.qav, aav: r.aav, tname: r.tname, sfld: sortText(rec.flds[t.sortf] ?? ''), tags, mid: rec.mid });
       if (r.typ) c.typ = r.typ; else delete c.typ;
     }
-    S.notes?.set(rec.id, noteRow(rec, t));
+    S.notes?.set(rec.id, noteRow(rec, t, S.notes.get(rec.id)?.guid));
     return true;
   }
   // 検索用のノートの中身（束の notes）を読んだときに、記録を重ねる（search.mjs の loadNotes から呼ばれる）
-  S.onNotesLoaded = m => { for (const rec of S.noteRecs.values()) { if (rec.eff === 'del') m.delete(rec.id); else if (rec.eff === 'note') m.set(rec.id, noteRow(rec, nt(rec.mid))); } };
+  S.onNotesLoaded = m => { for (const rec of S.noteRecs.values()) { if (rec.eff === 'del') m.delete(rec.id); else if (rec.eff === 'note') m.set(rec.id, noteRow(rec, nt(rec.mid), m.get(rec.id)?.guid)); } };
   function reset() { idx = null; S.noteRecs.clear(); }
 
   // ---------- 変える ----------
@@ -141,7 +147,7 @@ export function createNotes(env) {
     const t = nt(mid), req = cardsRequired(t, flds), ids = freshCardIds(req.length);
     let pos = null;
     const cards = req.map((r, i) => { const d = deckForAdding(r.did ?? did); pos = pos || takePosition(); return [ids[i], r.ord, d, isRandom(d) ? pos.r : pos.p]; });
-    const rec = { id: freshNoteId(), mid, flds, tags, did, cards, rev: Date.now(), del: 0, added: 1 };
+    const rec = { id: freshNoteId(), mid, flds, tags, did, cards, rev: Date.now(), del: 0, added: 1, guid: guid64() };
     await commit([rec], { kind: 'note', label: 'ノートの追加', items: [{ nid: rec.id, prev: null }] });
     return rec;
   }
@@ -414,5 +420,36 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
     const n = await deleteNotes(nids, 'ノートを削除する');
     if (n) env.toast(`${nids.length}件のノートを削除しました（カード${n}枚）`);
   }
-  return { ready, apply, reset, openAdd, openEdit, deleteFrom, deleteBrowse, undo, bulkEdit, isOpen: () => !!ed, close, element: build };
+  // パッケージの読み込み（app/exchange.mjs の applyImport から）。adds＝足すノートの記録そのもの、updates＝既にあるノートの中身の更新（＋増えるカード）、
+  // extraCards＝既にあるノート（中身はそのまま）に増えるカード。元に戻すは作らない
+  async function importRecords({ adds = [], updates = [], extraCards = [] }) {
+    const recs = [...adds];
+    for (const u of [...updates, ...extraCards]) {
+      const c0 = await content(u.id); if (!c0) continue;
+      const live = liveCards(u.id), decks = new Set(live.map(c => c.did)), exDeck = decks.size === 1 ? [...decks][0] : null;
+      recs.push({ id: u.id, mid: c0.mid, flds: u.flds ?? c0.flds, tags: u.tags ?? c0.tags, did: exDeck ?? live[0]?.did ?? 1, cards: [...live.map(cardRow), ...u.cards], rev: newRev(u.id), del: 0, added: c0.added });
+    }
+    if (!recs.length) return 0;
+    for (const rec of recs) apply(rec);
+    await env.store.addOps(recs.map(r => ({ t: 'note', n: wire(r) })));   // 何千件でも1回で積む
+    env.changed(new Set(recs.map(r => r.id)));
+    env.scheduleSync();
+    return recs.length;
+  }
+  // ノートタイプが届いた・変わったとき（同期の nt:<id>・読み込み）: そのノートタイプのノートを描き直す。束のカードも、ノートの中身から描き直す
+  async function rerender(mids) {
+    const want = new Set([...mids].map(Number)); if (!want.size) return 0;
+    for (const rec of S.noteRecs.values()) if (want.has(+rec.mid)) { S.noteRecs.delete(rec.id); apply(rec); }
+    const t0 = [...want].map(m => [m, nt(m)]).filter(([, t]) => t); if (!t0.length) return 0;
+    const notesMap = await env.loadNotes(); let n = 0;
+    for (const c of S.all) {
+      if (!want.has(+c.mid) || c.gone || c.local) continue;
+      const rec = S.noteRecs.get(c.nid); if (rec && rec.eff === 'note') continue;   // 端末の記録で描いたもの（上で描き直した）
+      const note = notesMap.get(c.nid), t = nt(c.mid); if (!note || !t) continue;
+      const r = renderCard(t, { fields: note.flds.split('\x1f'), tags: tagsArr(note.tags) }, { ord: c.ord, flags: c.flags || 0, id: c.id, deckName: deckName(c.did) });
+      Object.assign(c, { q: r.q, a: r.a, qav: r.qav, aav: r.aav, tname: r.tname }); if (r.typ) c.typ = r.typ; else delete c.typ; n++;
+    }
+    return n;
+  }
+  return { ready, apply, reset, openAdd, openEdit, deleteFrom, deleteBrowse, undo, bulkEdit, importRecords, rerender, isOpen: () => !!ed, close, element: build };
 }

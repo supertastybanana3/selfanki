@@ -407,5 +407,76 @@ export function createExchange(env) {
     return normalize ? a.map(x => x.normalize('NFC')) : a;
   }
 
-  return { exportDeck, exportCollection, gather, planImport, gatherPackage };
+
+  // パッケージのカード（schema 11 の行）→ アプリの状態（フィルターデッキに入っていれば、元のデッキでの状態＋data.flt。tools/export_anki.py の home_state と同じ）
+  function stateOf(c) {
+    const data = c.data ? JSON.parse(c.data) : {};
+    const st = { type: c.type, queue: c.queue, due: c.due, ivl: c.ivl, factor: c.factor, reps: c.reps, lapses: c.lapses, left: c.left, data, flags: c.flags || 0 };
+    if (c.odid) {
+      const hdue = c.odue !== 0 ? c.odue : c.due;
+      st.queue = c.queue >= 0 ? (c.type === 0 ? 0 : c.type === 2 ? 2 : hdue > 1_000_000_000 ? 1 : 3) : c.queue; st.due = hdue;
+      data.flt = { d: c.did, due: c.due, q: c.queue };
+    }
+    return st;
+  }
+  const homeDeck = c => (c.odid ? c.odid : c.did);
+  // フィルターデッキ（schema 11）→ アプリの形（tools/export_anki.py の fdeck_def と同じ）
+  function fdeckFrom11(d, name) {
+    const terms = (d.terms || []).slice(0, 2).map(t => ({ search: t[0], limit: +t[1], order: +t[2] }));
+    return { id: d.id, name: name ?? d.name, terms: terms.length ? terms : [{ search: '', limit: 100, order: 1 }], second: terms.length > 1, resched: d.resched !== false,
+      previewAgain: d.previewAgainSecs ?? 60, previewHard: d.previewHardSecs ?? 600, previewGood: d.previewGoodSecs ?? 0, mod: Math.floor(Date.now() / 1000) };
+  }
+  // 計画を端末の記録にして、同期で Anki とほかの端末に届ける。
+  // hooks: { commitConf(rows), commitImported({ adds, updates, extraCards, rev }), addOps(ops), saveMedia(name, Uint8Array), done() }
+  async function applyImport(plan, hooks) {
+    const rev = Date.now(), rows = [], decksNow = new Set(deckList().map(d => d.id));
+    // 1. ノートタイプ（nt:<id> に schema 11 のまま。アプリはここから描き、アドオンは同じ id で Anki に作る）
+    for (const m of [...plan.notetypesAdd, ...plan.notetypesUpdate]) rows.push({ k: 'nt:' + m.id, v: m, rev });
+    // 2. デッキ（ふつうのデッキは dname:<id>＝app/decks.mjs の記録。フィルターデッキは fdeck:<id>＝端末だけ）とプリセット・デッキの設定
+    for (const a of plan.decksAdd) { decksNow.add(a.id); rows.push(a.dyn ? { k: 'fdeck:' + a.id, v: fdeckFrom11({ ...a.d11, id: a.id }, a.name), rev } : { k: 'dname:' + a.id, v: { name: a.name, created: 1 }, rev }); }
+    for (const c of plan.dconfAdd) rows.push({ k: 'preset:' + c.id, v: { ...c, id: +c.id }, rev });
+    const lim = d => { const v = {}; for (const k of ['reviewLimit', 'newLimit', 'reviewLimitToday', 'newLimitToday']) if (d[k] != null) v[k] = d[k]; return v; };
+    for (const a of plan.decksAdd) if (!a.dyn && a.d11) rows.push({ k: 'deck:' + a.id, v: { conf: +a.d11.conf || 1, ...lim(a.d11), ...(a.d11.desc ? { desc: a.d11.desc } : {}), ...(a.d11.desiredRetention != null ? { desiredRetention: a.d11.desiredRetention } : {}) }, rev: rev + 1 });
+    for (const u of plan.decksUpdate) {
+      if (u.filtered) { const f = S.fdecks.get(u.id); rows.push({ k: 'fdeck:' + u.id, v: fdeckFrom11({ ...u.filtered, id: u.id }, f?.name), rev: Math.max(rev, (f?.rev || 0) + 1) }); continue; }
+      const v = lim(u); if (u.desc) { v.desc = u.desc; if (u.md) v.md = true; } if (u.conf !== 1) v.conf = u.conf;
+      if (Object.keys(v).length) rows.push({ k: 'deck:' + u.id, v, rev: Math.max(rev + 1, ((S.decksById.get(u.id)?.mod || 0) + 1) * 1000) });
+    }
+    if (rows.length) await hooks.commitConf(rows);
+    // 3. ノート（足したノートは added=1・imp=1＝Anki でもこのカードだけを作る。既にあるノートの更新と、既にあるノートに増えるカード）
+    const fixDeck = did => (decksNow.has(did) ? did : 1);
+    const byNote = new Map(); for (const c of plan.cardsAdd) { if (!byNote.has(c.nid)) byNote.set(c.nid, []); byNote.get(c.nid).push(c); }
+    const row = c => [c.id, c.ord, fixDeck(homeDeck(c)), c.odid ? (c.odue !== 0 ? c.odue : c.due) : c.due];
+    const adds = plan.notesAdd.map(n => { const cs = byNote.get(n.id) || []; byNote.delete(n.id);
+      return { id: n.id, guid: n.guid, mid: n.mid, flds: n.flds, tags: n.tags.join(' '), did: cs.length ? fixDeck(homeDeck(cs[0])) : 1, cards: cs.map(row), rev, del: 0, added: 1, imp: 1 }; });
+    const updates = plan.notesUpdate.map(n => { const cs = byNote.get(n.id) || []; byNote.delete(n.id); return { id: n.id, mid: n.mid, flds: n.flds, tags: n.tags.join(' '), cards: cs.map(row) }; });
+    const extraCards = [...byNote].map(([nid, cs]) => ({ id: nid, cards: cs.map(row) }));
+    await hooks.commitImported({ adds, updates, extraCards, rev });
+    // 4. カードの状態（学習の記録を含めたとき・新規のままでないカード）と、記録
+    const ops = [];
+    for (const c of plan.cardsAdd) {
+      const st = stateOf(c); st.data = st.data || {};
+      if (st.type === 0 && st.queue === 0 && !st.flags && !Object.keys(st.data).length) continue;   // 新規のまま（ノートの記録の位置で足りる）
+      ops.push({ t: 'set', c: { id: c.id, st, rev } });
+    }
+    for (const r of plan.revlogAdd) ops.push({ t: 'rev', r: { id: r.id, cid: r.cid, ease: r.ease, ivl: r.ivl, lastIvl: r.lastIvl, factor: r.factor, time: r.time, type: r.type } });
+    if (ops.length) await hooks.addOps(ops);
+    // 5. 画像・音声（端末に置き、同期でサーバーへ送る）
+    let i = 0;
+    for (const m of plan.media) { if (++i % 10 === 0) env.progress?.(`メディアを読み込んでいます… ${i}/${plan.media.length}`); await hooks.saveMedia(m.name, await m.bytes()); }
+    await hooks.done?.();
+    return plan.log;
+  }
+  // ファイルを読み込む（.apkg・.colpkg）。opts: { sched, configs }。返すのは log
+  async function importPackage(file, opts, hooks) {
+    env.progress?.('ファイルをインポート中...');
+    try {
+      const SQL = await env.sql(), zstd = await env.zstd();
+      const p = await pkg.readPackage(file, { SQL, zstd });
+      const plan = await planImport(p, opts);
+      return await applyImport(plan, hooks);
+    } finally { env.progress?.(null); }
+  }
+
+  return { exportDeck, exportCollection, gather, planImport, gatherPackage, applyImport, importPackage, stateOf };
 }
