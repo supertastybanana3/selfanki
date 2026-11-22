@@ -135,6 +135,7 @@ presets = {c['id']: c for c in col.decks.all_config() if c['id'] in used_conf}
 conf_keys = ['rollover', 'collapseTime', 'newCardsIgnoreReviewLimit', 'dayLearnFirst', 'newSpread', 'applyAllParentLimits', 'creationOffset', 'localOffset', 'fsrs',
              'loadBalancerEnabled', 'fsrsShortTermWithStepsEnabled', 'sched2021', 'nextPos', 'ignoreAccentsInSearch', 'normalize_note_text', 'curDeck', 'restorePositionReviewer', 'resetCountsReviewer', 'randomOrderReposition', 'shiftPositionOfExistingCards', 'setDueReviewer', 'curModel',
              'lastFsrsOptimize', 'fsrsHealthCheck', 'fsrsLegacyEvaluate']
+conf_keys += [f'_nt_{m["id"]}_lastDeck' for m in col.models.all()]   # ノートタイプごとに最後に足したデッキ（端末でノートタイプを変えたときに、新しいカードを入れるデッキ。rslib の get_last_deck_added_to_for_notetype）
 meta = {'exported_at': int(time.time()), 'source': os.path.basename(SRC), 'crt': col.crt, 'config': {k: col.get_config(k, None) for k in conf_keys},
         'decks': [decks[d] for d in sorted(keep_deck, key=lambda d: decks[d]['name'])], 'presets': presets, 'notetypes': notetypes,
         # Anki のフィルターデッキ（中のカードが移すデッキにあるものだけ。中のカードの印は cards の data.flt）

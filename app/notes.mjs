@@ -136,7 +136,9 @@ export function createNotes(env) {
 
   // ---------- 変える ----------
   const freshNoteId = () => { let id = Date.now(); while (index().has(id) || S.noteRecs.has(id) || S.notes?.has(id)) id++; return id; };
-  function freshCardIds(n) { const out = []; let id = Date.now(); while (out.length < n) { if (!S.byId.has(id)) out.push(id); id++; } return out; }
+  // 新しいカードの id（ミリ秒）。まだ積んでいない分（まとめて書くときの前のノートのカード）とも重ならないように、前に出した id より大きくする
+  let lastFresh = 0;
+  function freshCardIds(n) { const out = []; let id = Math.max(Date.now(), lastFresh + 1); while (out.length < n) { if (!S.byId.has(id)) out.push(id); id++; } lastFresh = id - 1; return out; }
   const newRev = nid => Math.max(Date.now(), (S.noteRecs.get(nid)?.rev || 0) + 1, (bundleMod(nid) ?? 0) * 1000 + 1);
   // 新規の位置（rslib cardgen: ノートごとに1つ。並び順が「ランダム」のプリセットのデッキでは、1〜max(位置, 1000) の乱数。Anki と同じ乱数ではない）
   const isRandom = did => S.meta.presets?.[S.decksById.get(did)?.conf]?.new?.order === 0;
@@ -569,7 +571,7 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
   // ノートタイプが届いた・変わったとき（同期の nt:<id>・読み込み）: そのノートタイプのノートを描き直す。束のカードも、ノートの中身から描き直す
   async function rerender(mids) {
     const want = new Set([...mids].map(Number)); if (!want.size) return 0;
-    for (const rec of S.noteRecs.values()) if (want.has(+rec.mid)) { S.noteRecs.delete(rec.id); apply(rec); }
+    for (const rec of [...S.noteRecs.values()]) if (want.has(+rec.mid)) { S.noteRecs.delete(rec.id); apply(rec); }   // 写しで回す（消して足し直すと、Map の終わりに付いてもう一度回ってしまう）
     const t0 = [...want].map(m => [m, nt(m)]).filter(([, t]) => t); if (!t0.length) return 0;
     const notesMap = await env.loadNotes(); let n = 0;
     for (const c of S.all) {
@@ -623,7 +625,7 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
   async function changeNotetypeOf(nids, newMid, fmap, tmap) {
     const t = nt(newMid); if (!t) return 0;
     const newNt = S.meta.notetypes[newMid], recs = [], items = [];
-    for (const nid of [...nids].sort((a, b) => a - b)) {
+    for (const nid of nids) {   // 渡された順（rslib も note_ids の順に位置を割り当てる）
       const c0 = await content(nid); if (!c0) continue;
       const oldNt = S.meta.notetypes[c0.mid], live = liveCards(nid); if (!oldNt || !live.length) continue;
       const flds = remapFields(c0.flds, fmap), ords = remapCardOrds(live, oldNt, newNt, tmap), exist = [];
