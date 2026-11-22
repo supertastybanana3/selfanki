@@ -599,6 +599,28 @@ async function repositionAction(cs) {
   if (!touched.length) { toast(`新規カードの位置を${count}枚変更しました。`); return; }
   await changeCards(touched, c => Object.assign(c, changes.get(c.id)), `新規カードの位置を${count}枚変更しました。`, '並び替える', false);
 }
+// 声を録る（発音を録って、すぐ聞き比べる。録ったものは端末の中だけで、次のカードに進むと消える）
+const REC = { mr: null, chunks: [], url: null, card: null };
+async function recToggle() {
+  if (REC.mr && REC.mr.state === 'recording') { REC.mr.stop(); return; }
+  let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { iosAlert('声を録音', 'マイクを使えません（' + (e?.message || e) + '）'); return; }
+  REC.chunks = []; REC.card = S.card?.id ?? null;
+  const mr = new MediaRecorder(stream); REC.mr = mr;
+  mr.ondataavailable = e => { if (e.data.size) REC.chunks.push(e.data); };
+  mr.onstop = () => { stream.getTracks().forEach(t => t.stop()); if (REC.url) URL.revokeObjectURL(REC.url); REC.url = URL.createObjectURL(new Blob(REC.chunks, { type: mr.mimeType || 'audio/mp4' })); toast('録音を止めました'); };
+  mr.start(); toast('録音しています（もう一度で止める）');
+}
+function recPlay() {
+  if (!REC.url || REC.card !== (S.card?.id ?? null)) { toast('このカードで録った声はありません'); return; }
+  stopAv(); const a = new Audio(REC.url); a.play().catch(() => {});
+}
+function recMenu() {
+  const recording = REC.mr && REC.mr.state === 'recording';
+  const d = document.createElement('div'); d.id = 'flagdlg'; d.innerHTML = '<div class="box"><b>録音</b></div>';
+  const add = (t, fn, cls) => { const b = document.createElement('button'); b.textContent = t; if (cls) b.className = cls; b.onclick = () => { d.remove(); fn && fn(); }; d.firstChild.append(b); };
+  add(recording ? '録音を止める' : '声を録音', recToggle); add('録音した声を再生', recPlay); add('キャンセル', null, 'cancel');
+  document.body.append(d);
+}
 // 「タグを追加」「タグを解除」（rslib add_tags_to_notes・remove_tags_from_notes と同じ: 大文字小文字を区別しない。外すほうは * が使え、子のタグ（親::子）も外れる）
 async function editTags(cs, add) {
   const r = await iosPrompt({ title: add ? 'タグを追加' : 'タグを解除', message: '空白で区切って複数書けます', input: '' });
@@ -737,6 +759,7 @@ function advance(force = null) {
     return;
   }
   S.card = nx.card; S.side = 'q'; S.shownAt = performance.now(); S.shownState = curState(S.card, nowSecs()); sp?.setCard(S.card);
+  if (REC.card != null && REC.card !== S.card.id) { if (REC.url) URL.revokeObjectURL(REC.url); REC.url = null; REC.card = null; }   // 録った声は次のカードで消える
   pen.clear(); penSide('q'); paintCounts(c, S.card); ask.onCard(S.card); paintMarks();
   S.typed = null; setFrame(cardHtml(S.card, 'q'), S.card.mid, S.card.ord); setButtons('q'); if (autoplay(S.card)) playAv(S.card.qav);
   autoArm();
@@ -1624,7 +1647,7 @@ const ACTIONS = [
   ['good', '回答 (正解)', () => answerBy(3)],
   ['easy', '回答 (簡単)', () => answerBy(4)],
   ['hard', '回答 (難しい)', () => answerBy(2)],
-  ['record', '声を録音', null],
+  ['record', '声を録音', () => recToggle()],
   ['spSize', '手書きサイズ', () => sp.cycleSize()],
   ['scratchpad', '手書きパッド', () => sp.toggle()],
   ['due', '期日を指定', () => dueAction()],
@@ -1633,8 +1656,8 @@ const ACTIONS = [
   ['show', '解答を表示', () => { if (S.side === 'q') showAnswer(); }],
   ['showGood', '解答を表示 / 回答 (正解)', () => { if (S.side === 'q') showAnswer(); else answerBy(3); }],
   ['add', '追加', () => notes.openAdd({ did: S.decksById.has(S.deck) ? S.deck : null })],   // フィルターデッキにはノートを足せない
-  ['playRec', '録音した声を再生', null],
-  ['recMenu', '録音メニュー', null],
+  ['playRec', '録音した声を再生', () => recPlay()],
+  ['recMenu', '録音メニュー', () => recMenu()],
   ['fwd5', '音声 +5秒', () => avSeek(5)],
   ['back5', '音声 -5秒', () => avSeek(-5)],
   ['pause', '音声を一時停止/再開', () => avPause()],
