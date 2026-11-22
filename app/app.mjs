@@ -5,6 +5,7 @@ import { buildFiltered, filteredQueues, nextFilteredCard, afterRescheduling, ans
 import { installAnkiBackend } from './ankiweb.mjs';
 import { compileSearch, loadNotes, displayText } from './search.mjs';
 import * as store from './store.mjs';
+import { parseBackupName } from './backup.mjs';
 import * as sync from './sync.mjs';
 import { createPen } from './pen.mjs';
 import { cardsRequired as tmplCardsRequired } from './template.mjs';
@@ -339,6 +340,22 @@ function scheduleSync(ms = 4000) {
 const autoSyncOn = () => !!FEAT.autoSync && pref('autoSync');
 const syncNeverDone = () => { try { return !localStorage.getItem('syncedOnce'); } catch { return false; } };
 // 手で同期したときの小窓（AnkiMobile 25.09 の実機と同じ「同期中... 追加/変更: N↑ N↓ 削除: N↑ N↓」）。キャンセルは小窓を閉じるだけ（同期は続く）
+// バックアップの印（変わったかどうかだけ分かればよい）: 記録の数・カードと記録とノートの最後の変更・デッキとプリセットの中身
+function collectionSig() {
+  let m = 0; for (const c of S.all) { if ((c.rev || 0) > m) m = c.rev; if ((c.mod || 0) * 1000 > m) m = c.mod * 1000; }
+  let n = 0; for (const r of S.noteRecs?.values?.() || []) if ((r.rev || 0) > n) n = r.rev;
+  const str = JSON.stringify([S.meta.presets || {}, (S.meta.decks || []).map(d => [d.id, d.name, d.conf]), [...(S.fdecks?.values() || [])].map(f => [f.id, f.name, f.rev])]);
+  let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return [S.revlog.length, S.all.length, S.all.reduce((a, c) => a + (c.gone ? 1 : 0), 0), m, n, h].join(':');
+}
+// 自動: アプリを閉じた（隠れた）とき。間隔と変更は xchg.backup が見る
+async function autoBackup() { if (!S.all?.length || !xchg || S.busy) return; try { await xchg.backup(false, collectionSig()); } catch (e) { console.warn('バックアップ', e); } }
+async function backupNow() {
+  try {
+    const r = await xchg.backup(true, collectionSig());
+    if (r === 'unchanged') toast('直近のバックアップから変更がありません。'); else if (r === 'created') toast('バックアップを作成しました。');
+  } catch (e) { iosAlert('バックアップ', String(e?.message || e)); }
+}
 async function runSync(manual = false) {
   const btn = $('#nav-sync'); btn.classList.add('busy');
   let dlg = null;
@@ -389,6 +406,7 @@ function startSyncLoop() {
   const btn = $('#nav-sync'); btn.disabled = false; btn.onclick = () => runSync(true);
   const auto = autoSyncOn;
   window.addEventListener('online', () => { if (auto()) scheduleSync(500); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) autoBackup(); });   // 閉じたときのバックアップ
   document.addEventListener('visibilitychange', () => { if (!document.hidden && document.body.dataset.view === 'decks') checkRemote(true); if (!auto()) return; if (!document.hidden) scheduleSync(500); else runSync(); });
   setInterval(() => { if (auto() && !document.hidden) runSync(); }, 5 * 60 * 1000);
   scheduleSync(300); paintSync();
@@ -718,6 +736,49 @@ function pickFlag(cs) {
   add('フラグを消去', () => changeCards(cs, c => { c.flags = c.flags & ~7; }, 'フラグを外しました', 'フラグ', false).then(() => paintBrowse(true)));
   add('キャンセル', null, 'cancel');
   document.body.append(d);
+}
+// AnkiMobile の URL スキーム（manual url-schemes.md）: addnote・search・sync。infoForAdding（クリップボードの独自の型）はできない
+const MEDIA_URL = /^https?:\/\/\S+\.(jpe?g|png|gif|webp|svg|bmp|mp3|m4a|aac|ogg|oga|opus|wav|flac|mp4|m4v|mov|webm)$/i;
+async function handleXcb(raw) {
+  const m = /^x-callback-url(?:\/|%2F)(addnote|search|sync)\/?(?:\?(.*))?$/is.exec(raw); if (!m) return false;
+  const q = new URLSearchParams(m[2] || ''), back = q.get('x-success');
+  const done = () => { if (back) location.href = back; };
+  if (m[1] === 'sync') { await runSync(true); done(); return true; }
+  if (m[1] === 'search') { openBrowse(q.get('query') ?? ''); done(); return true; }
+  const fail = msg => { iosAlert('ノートの追加', msg); return false; };
+  const prof = q.get('profile'); if (prof != null && !['User 1', 'ユーザー 1'].includes(prof)) return fail(`プロファイル「${prof}」は開いていません。`);
+  if (!notes.ready()) return fail('この束にはテンプレートが入っていません。手順 9 で書き出し直してください。');
+  const typeName = q.get('type'), deckNameQ = q.get('deck');
+  if (!typeName || !deckNameQ) return fail('type と deck が要ります。');
+  const mid = Object.keys(S.meta.notetypes || {}).find(k => S.meta.notetypes[k].name === typeName), t = mid && notes.notetype(mid);
+  if (!t) return fail(`ノートタイプ「${typeName}」が見つかりません。`);
+  const fold = s => s.normalize('NFC').toLowerCase();
+  const dk = S.meta.decks.find(d => fold(d.name) === fold(deckNameQ.replace(/\s*::\s*/g, '::')));
+  if (!dk || dk.dyn) return fail(`デッキ「${deckNameQ}」が見つかりません。`);
+  const flds = t.flds.map(() => '');
+  for (const [k, v] of q) {
+    if (!k.startsWith('fld')) continue;
+    const i = t.flds.findIndex(f => f.name === k.slice(3)); if (i < 0) return fail(`フィールド「${k.slice(3)}」がありません。`);
+    let val = v;
+    if (MEDIA_URL.test(v.trim())) {   // 画像・音声への URL は取ってきて、ファイルとして入れる
+      try {
+        const r = await fetch(v.trim()); if (!r.ok) throw new Error(String(r.status));
+        const u = new URL(v.trim()), base = decodeURIComponent((u.search ? (v.trim().match(/[^/=&?]+$/) || [''])[0] : u.pathname.split('/').pop()) || 'media');
+        const name = await xchg.addMedia(base, new Uint8Array(await r.arrayBuffer()));
+        val = /\.(jpe?g|png|gif|webp|svg|bmp)$/i.test(name) ? `<img src="${name.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">` : `[sound:${name}]`;
+      } catch (e) { return fail(`「${v}」を取ってこられませんでした（${e?.message || e}）。`); }
+    }
+    flds[i] = val;
+  }
+  const strip = h => String(h).replace(/<img[^>]*src=["']?([^"' >]+)[^>]*>/gi, ' $1 ').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+  if (!strip(flds[0]) && !/\[sound:|<img/i.test(flds[0])) return fail('最初のフィールドが空欄です。');
+  if (q.get('dupes') !== '1') {   // 重複（同じノートタイプで、最初のフィールドが同じ＝rslib の DuplicateOrEmpty）
+    const all = await loadNotes(S, BUNDLE), first = strip(flds[0]);
+    for (const n of all.values()) if (String(n.mid) === String(mid) && strip(n.flds.split('\x1f')[0]) === first) return fail('同じ内容のノートがすでにあります（dupes=1 を付けると足せます）。');
+  }
+  try { await notes.addNote(+mid, dk.id, flds, (q.get('tags') || '').split(/\s+/).filter(Boolean).join(' ')); }
+  catch (e) { return fail(String(e?.message || e)); }
+  toast('追加しました'); done(); return true;
 }
 function openBrowse(query) {
   $('#browse').hidden = false; $('#bprev').hidden = true; if (BR.sel) setBrowseSelect(false);
@@ -1938,6 +1999,10 @@ function setupXchg() {
     applyConf, applyOp, iosPrompt, iosAlert, toast,
     afterImport: async () => { await flushNt(); refreshCards(); S.mainQ = null; showDecks(); scheduleSync(500); } });
   window.__xchg = xchg;   // 試験用（画面の通し試験がここから呼ぶ）
+  // URL スキーム（AnkiMobile の anki://x-callback-url/…）を、アプリの URL の #x-callback-url/… で受ける（値の復号は URLSearchParams に任せる。先に全体を復号すると、中の URL の & が区切りになる）
+  const takeXcb = () => { const h = location.hash.slice(1); if (!/^x-callback-url(\/|%2F)/i.test(h)) return; history.replaceState(null, '', location.pathname + location.search); handleXcb(h); };
+  window.addEventListener('hashchange', takeXcb); setTimeout(takeXcb, 0);
+  window.__saOpenURL = u => handleXcb(String(u).replace(/^[a-z][a-z0-9+.-]*:\/\//i, ''));   // 殻（iOS）から
 }
 // ---------- 起動 ----------
 function setupTools() {
@@ -2044,9 +2109,22 @@ function setupTools() {
       [{ t: '英字入力時に文頭を自動で大文字にする', tg: true, off: 1 }, { t: 'オートコレクト', tg: true, off: 1 }, { t: 'スマート引用符とダッシュを自動変換', tg: true, off: 1 }],
       [{ t: '手書きスクリーンで指での入力を無視', tg: false, off: 1 }]] }),
     profile: () => ({ title: 'プロファイル', groups: [[{ t: 'ユーザー 1', ck: true }]] }),
-    backup: () => ({ title: 'バックアップ', groups: [
-      [{ t: '自動バックアップの間隔（分）', v: '30', off: 1 }, { t: '各日代表のバックアップ保管数（何日分）', v: '12', off: 1 }, { t: '各週代表のバックアップ保管数（何週分）', v: '10', off: 1 }, { t: '各月代表のバックアップ保管数（何か月分）', v: '9', off: 1 }],
-      { note: 'このアプリにはバックアップの機能がありません。パソコンの Anki に書き戻している場合は、Anki 側のバックアップに入ります。' }] }),
+    // バックアップ（Anki と同じ決まりで、画像・音声を含めない .colpkg を端末に置く。app/backup.mjs）。押すとそのバックアップに戻す（.colpkg の読み込みと同じ確認）
+    backup: () => {
+      const lim = xchg.bkLimits(), list = xchg.backupsCached();
+      if (!list) xchg.backups().then(() => { if (!$('#prefs').hidden && stack.at(-1) === 'backup') renderPrefs(); });
+      const num = (t, k) => ({ t, v: String(lim[k]), run: async () => {
+        const r = await iosPrompt({ title: t, numbers: [{ label: t, value: String(lim[k]) }] }); if (!r) return;
+        xchg.setBkLimit(k, r.numbers[0]); renderPrefs();
+      } });
+      const when = n => { const d = parseBackupName(n); return d ? d.toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : n; };
+      const mb = b => b.size >= 1048576 ? `${(b.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b.size / 1024))} KB`;
+      return { title: 'バックアップ', groups: [
+        [{ t: 'バックアップを作成', act: 1, run: () => backupNow().then(() => { if (!$('#prefs').hidden && stack.at(-1) === 'backup') renderPrefs(); }) }],
+        [num('自動バックアップの間隔（分）', 'mins'), num('各日代表のバックアップ保管数（何日分）', 'daily'), num('各週代表のバックアップ保管数（何週分）', 'weekly'), num('各月代表のバックアップ保管数（何か月分）', 'monthly')],
+        { note: 'このアプリは一定時間（分）ごとに、アプリを閉じたとき（ほかのアプリに切り替えたとき）にコレクションのバックアップを作成しています。各期間（日／週／月）の代表として保管するバックアップ以外のバックアップは、ディスク領域を空けるために、作成から2日以上経過した後に削除していきます。画像・音声は含みません。' },
+        ...(list && list.length ? [list.map(b => ({ t: when(b.name), v: mb(b), run: () => { closePrefs(); xchg.restoreBackup(b.name); } }))] : [])] };
+    },
     about: () => ({ title: 'このアプリについて', about: ['Anki のカードと学習の記録をそのまま使う暗記アプリです。', '復習の間隔の計算と出題の順番は、Anki のソースコード（AGPL）をもとに書き直したもので、Anki 本体と同じ結果になることを確かめています。', '答えた記録をパソコンの Anki に書き戻せば、Anki や AnkiMobile と並行して使えます。'] }),
     sync: () => ({ title: '同期', groups: [
       [{ t: '音声と画像を同期', tg: true, off: 1 }, { t: 'メディア同期の進捗を表示', tg: true, off: 1 }],

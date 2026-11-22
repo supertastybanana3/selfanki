@@ -653,5 +653,5 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
     env.changed(new Set(recs.map(r => r.id))); env.scheduleSync();
     return recs.length;
   }
-  return { ready, apply, reset, openAdd, openEdit, deleteFrom, deleteBrowse, undo, inverse, bulkEdit, importRecords, removeNotes, rerender, notesOfType, notetypeEdited, changeNotetypeOf, isOpen: () => !!ed, close, element: build };
+  return { ready, apply, reset, openAdd, openEdit, deleteFrom, deleteBrowse, undo, inverse, bulkEdit, addNote, notetype: nt, importRecords, removeNotes, rerender, notesOfType, notetypeEdited, changeNotetypeOf, isOpen: () => !!ed, close, element: build };
 }

@@ -28,6 +28,7 @@ const req = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); 
 const done = tx => new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error); });
 export async function getAll(store) { const db = await open(); return req(db.transaction(store).objectStore(store).getAll()); }
 export async function get(store, key) { const db = await open(); return req(db.transaction(store).objectStore(store).get(key)); }
+export async function del(store, key) { const db = await open(); const tx = db.transaction(store, 'readwrite'); tx.objectStore(store).delete(key); return done(tx); }
 export async function set(store, value, key) { const db = await open(); const tx = db.transaction(store, 'readwrite'); tx.objectStore(store).put(value, key); return done(tx); }
 // 送る前の操作を積む
 export async function addOp(op) { const db = await open(); const tx = db.transaction('outbox', 'readwrite'); tx.objectStore('outbox').add({ ...op, at: Date.now() }); return done(tx); }

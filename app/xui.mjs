@@ -3,6 +3,7 @@
 // 文言は Anki 本体の翻訳（exporting-*・importing-*）のとおり。AnkiMobile の画面そのものは実機で比べていない
 import { createExchange } from './exchange.mjs';
 import { sha1hex } from './pkg.mjs';
+import { BK_DEF, backupName, parseBackupName, obsoleteBackups } from './backup.mjs';
 
 const MEDIA_CACHE = 'media-v1';   // app/sw.js の画像・音声の控えと同じ名前（ここに置けば、束の画像と同じ道で出る）
 const PART = 1_048_576;            // サーバーへ送るかけらの大きさ（functions/api/media.js と同じ）
@@ -93,7 +94,9 @@ export function setupExchange(ctx) {
 
   // ---------- 進み具合（画面の真ん中の小窓） ----------
   let hud = null;
+  let quiet = false;   // 自動バックアップの最中は、真ん中の小窓を出さない
   function progress(text) {
+    if (quiet) return;
     if (text == null) { hud?.remove(); hud = null; return; }
     if (!hud) {
       hud = document.createElement('div'); hud.id = 'xprog';
@@ -196,5 +199,38 @@ export function setupExchange(ctx) {
       ctx.iosAlert('インポート', `コレクションをインポートしました。\n追加: ${log.new}・更新: ${log.updated}・削除: ${log.removed}・カード: ${log.cards}・メディア: ${log.media}`);
     } catch (e) { progress(null); console.error(e); ctx.iosAlert('インポート', String(e?.message || e)); }
   }
-  return { exportDeck, exportCollection, importFile, pickFile, uploadPending, mediaIndex, addMedia, sha1Of, ex, share };
+  // ---------- バックアップ（app/backup.mjs の決まり。端末の kv に bk:list＝[{ name, size }] と bk:<名前>＝中身） ----------
+  const bkLimits = () => { const g = k => { try { const v = localStorage.getItem('bk:' + k); return v == null ? BK_DEF[k] : Math.max(0, parseInt(v, 10) || 0); } catch { return BK_DEF[k]; } }; return { mins: g('mins'), daily: g('daily'), weekly: g('weekly'), monthly: g('monthly') }; };
+  const setBkLimit = (k, v) => { try { localStorage.setItem('bk:' + k, String(Math.max(0, parseInt(v, 10) || 0))); } catch {} };
+  let bkCache = null, bkRunning = null;
+  async function backups() { bkCache = ((await store.get('kv', 'bk:list')) || []).filter(b => parseBackupName(b.name)).sort((a, b) => b.name.localeCompare(a.name)); return bkCache; }
+  // 作る。force＝「バックアップを作成」（間隔は見ない）。sig＝コレクションの今の印（前のバックアップと同じなら作らない＝rslib changed_since_last_backup）
+  // 返す: 'created' | 'unchanged' | 'recent' | 'busy'
+  async function backup(force, sig) {
+    if (bkRunning) return 'busy';
+    bkRunning = (async () => {
+      const list = await backups(), now = new Date(), lim = bkLimits();
+      if (sig != null && sig === (await store.get('kv', 'bk:sig'))) return 'unchanged';
+      if (!force && list.some(b => now - parseBackupName(b.name) < lim.mins * 60000)) return 'recent';
+      quiet = !force; if (force) progress('バックアップを作成中…');
+      let out; try { out = await ex.exportCollection({ media: false }); } finally { quiet = false; progress(null); }
+      const name = backupName(now);
+      await store.set('kv', out.blob, 'bk:' + name);
+      const all = [...list.filter(b => b.name !== name), { name, size: out.blob.size }];
+      const gone = obsoleteBackups(all.map(b => ({ ...b, date: parseBackupName(b.name) })), now, lim);
+      for (const b of gone) await store.del('kv', 'bk:' + b.name);
+      const keep = all.filter(b => !gone.some(g => g.name === b.name));
+      await store.set('kv', keep, 'bk:list'); if (sig != null) await store.set('kv', sig, 'bk:sig');
+      bkCache = keep.sort((a, b) => b.name.localeCompare(a.name));
+      return 'created';
+    })().finally(() => { bkRunning = null; });
+    return bkRunning;
+  }
+  // 戻す: .colpkg の読み込み（置き換え）と同じ道で
+  async function restoreBackup(name) {
+    const blob = await store.get('kv', 'bk:' + name);
+    if (!blob) { ctx.iosAlert('バックアップ', 'ファイルが壊れています。バックアップから復元してください。'); return; }
+    await importCollection(new File([blob], name));
+  }
+  return { backup, backups, backupsCached: () => bkCache, bkLimits, setBkLimit, restoreBackup, exportDeck, exportCollection, importFile, pickFile, uploadPending, mediaIndex, addMedia, sha1Of, ex, share };
 }
