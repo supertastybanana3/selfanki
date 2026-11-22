@@ -118,7 +118,8 @@ const cfg = () => ({ crt: S.meta.crt, meta: S.meta, fsrs: !!S.meta.config.fsrs, 
 const STATE_KEYS = ['type', 'queue', 'due', 'ivl', 'factor', 'reps', 'lapses', 'left', 'data'];
 // flags（フラグ）と mark（ノートのマーク＝タグ marked）も状態として運ぶ。mark はアプリで付け外ししたときだけ入る
 const pickState = c => { const o = {}; for (const k of STATE_KEYS) o[k] = c[k]; o.flags = c.flags || 0; if (c.mark !== undefined) o.mark = c.mark ? 1 : 0; if (c.leeched) o.leech = 1; return o; };
-function applyState(c, st, rev) { for (const k of STATE_KEYS) if (k in st) c[k] = st[k]; if ('flags' in st) c.flags = st.flags; if ('mark' in st) c.mark = !!st.mark; if (st.leech) c.leeched = true; c.rev = rev; }
+// did はコレクションの置き換え（.colpkg の読み込み）でだけ入る（カードを別のデッキへ移す）
+function applyState(c, st, rev) { for (const k of STATE_KEYS) if (k in st) c[k] = st[k]; if ('flags' in st) c.flags = st.flags; if ('mark' in st) c.mark = !!st.mark; if (st.leech) c.leeched = true; if (st.did != null && S.decksById.has(st.did)) c.did = st.did; c.rev = rev; }
 const REV_KEYS = ['id', 'cid', 'ease', 'ivl', 'lastIvl', 'factor', 'time', 'type'];
 function addRev(r) { if (S.revIds.has(r.id)) return; S.revIds.add(r.id); const o = {}; for (const k of REV_KEYS) o[k] = r[k]; S.revlog.push(o); }
 function delRev(id) { if (!S.revIds.delete(id)) return; S.revlog = S.revlog.filter(r => r.id !== id); }

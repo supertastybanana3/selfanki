@@ -134,7 +134,7 @@ export function createExchange(env) {
     let revlog = [];
     if (sched) {
       const ids = new Set(cards.map(c => c.id));
-      revlog = S.revlog.filter(r => ids.has(r.cid)).map(r => ({ ...r, usn: -1 })).sort((a, b) => a.id - b.id);
+      revlog = (search.all ? S.revlog : S.revlog.filter(r => ids.has(r.cid))).map(r => ({ ...r, usn: -1 })).sort((a, b) => a.id - b.id);   // コレクション全部なら、消したカードの記録も（Anki の .colpkg と同じ）
       if (!allowFiltered) for (const c of cards) if (c.odid) { c.odid = c.did; restoreFromFiltered(c); }
     } else {
       // スケジュールを含めない: マーク・リーチのタグを外し、カードを新規に戻す（位置は Anki の次の位置から）
@@ -478,5 +478,123 @@ export function createExchange(env) {
     } finally { env.progress?.(null); }
   }
 
-  return { exportDeck, exportCollection, gather, planImport, gatherPackage, applyImport, importPackage, stateOf };
+
+  // ---------- .colpkg の読み込み（コレクションを置き換える） ----------
+  // AnkiMobile はコレクションのファイルを丸ごと入れ替える。暗記では、束＋記録の今の姿を、パッケージの中身に合わせる記録を作る（新しい rev なので、同期で Anki とほかの端末も同じになる）:
+  //   ノート … パッケージに無いものは消す・あるものは中身を合わせる・足りないものは同じ id で足す。カード … 状態（デッキも）をパッケージのものに、足りないカードは足す
+  //   デッキ … 作る・名前を合わせる・パッケージに無いものは消す（パッケージで別のデッキに移るカードが残っているデッキは消さずに残す）。フィルターデッキ・プリセットも合わせる
+  //   ノートタイプ … 足す・変わったものは書き直す（フィールドとテンプレートの並びが変わるものは書き直さない）。記録 … 足りないものを足す（端末にだけある記録は消さない）
+  // できないこと（報告に数を出す）: ノートタイプの違う同じ id のノート・パッケージに無いカードだけを消すこと・端末にだけある記録を消すこと
+  async function planReplace(p) {
+    const col = p.col, rev = Date.now(), notesNow = await env.loadNotes();
+    const R = { notetypesAdd: [], notetypesUpdate: [], deckRows: [], notes: { add: [], update: [], del: [] }, extraCards: [], sets: [], revlog: [], media: [], skipped: { ntSchema: 0, noteType: 0, cardsLeft: 0, revLeft: 0, decksKept: 0, media: 0 } };
+    // ノートタイプ
+    const ntSame = (a, b) => JSON.stringify(cmpNt(a)) === JSON.stringify(cmpNt(b));
+    const names = x => [(x.flds || []).map(f => f.name), (x.tmpls || []).map(t => t.name)];
+    for (const m of col.notetypes) {
+      const cur = S.meta.notetypes?.[m.id];
+      if (!cur) { R.notetypesAdd.push(m); continue; }
+      const c11 = ntTo11(m.id, cur);
+      if (ntSame(c11, m)) continue;
+      if (JSON.stringify(names(c11)) !== JSON.stringify(names(m))) { R.skipped.ntSchema++; continue; }
+      R.notetypesUpdate.push(m);
+    }
+    // デッキ（ふつう・フィルター）とプリセット
+    const pkgNormal = col.decks.filter(d => !d.dyn), pkgDyn = col.decks.filter(d => d.dyn), pkgIds = new Set(col.decks.map(d => +d.id)), pkgConf = new Set(col.dconf.map(c => +c.id));
+    const devNormal = S.meta.decks.filter(d => !d.gone), devById = new Map(devNormal.map(d => [d.id, d]));
+    const pkgCardDeck = new Map(col.cards.map(c => [c.id, c.odid || c.did]));
+    for (const d of pkgNormal) {
+      const cur = devById.get(+d.id);
+      if (!cur) R.deckRows.push({ k: 'dname:' + d.id, v: { name: d.name, created: 1 }, rev });
+      else if (cur.name !== d.name) R.deckRows.push({ k: 'dname:' + d.id, v: { name: d.name, ...(cur.local ? { created: 1 } : {}) }, rev });
+      const v = { conf: +d.conf || 1, reviewLimit: d.reviewLimit ?? null, newLimit: d.newLimit ?? null, reviewLimitToday: d.reviewLimitToday ?? null, newLimitToday: d.newLimitToday ?? null, desc: d.desc || '' };
+      if (!cur || ['conf', 'reviewLimit', 'newLimit', 'desc'].some(k => JSON.stringify(cur[k] ?? (k === 'desc' ? '' : null)) !== JSON.stringify(v[k])) || JSON.stringify(cur.reviewLimitToday ?? null) !== JSON.stringify(v.reviewLimitToday) || JSON.stringify(cur.newLimitToday ?? null) !== JSON.stringify(v.newLimitToday))
+        R.deckRows.push({ k: 'deck:' + d.id, v, rev: rev + 1 });
+    }
+    for (const d of devNormal) {
+      if (pkgIds.has(d.id) || d.id === 1) continue;
+      const keeps = S.all.some(c => !c.gone && c.did === d.id && pkgCardDeck.has(c.id) && pkgCardDeck.get(c.id) !== d.id);
+      if (keeps) { R.skipped.decksKept++; if (!pkgConf.has(+d.conf)) R.deckRows.push({ k: 'deck:' + d.id, v: { conf: 1 }, rev: rev + 1 }); continue; }   // パッケージで別のデッキに移るカードが、いまこのデッキにある（Anki で消すとカードも消えるので残す）
+      R.deckRows.push({ k: 'dname:' + d.id, v: { name: d.name, removed: 1, ...(d.local ? { created: 1 } : {}) }, rev });
+    }
+    for (const d of pkgDyn) R.deckRows.push({ k: 'fdeck:' + d.id, v: fdeckFrom11(d), rev });
+    for (const f of S.fdecks.values()) if (!f.removed && !pkgIds.has(f.id)) R.deckRows.push({ k: 'fdeck:' + f.id, v: { removed: true }, rev });
+    for (const c of col.dconf) { const cur = S.meta.presets?.[c.id]; if (!cur || JSON.stringify({ ...cur, mod: 0, usn: 0 }) !== JSON.stringify({ ...c, mod: 0, usn: 0 })) R.deckRows.push({ k: 'preset:' + c.id, v: { ...c, id: +c.id }, rev }); }
+    for (const id of Object.keys(S.meta.presets || {})) if (!pkgConf.has(+id) && +id !== 1) R.deckRows.push({ k: 'preset:' + id, v: { removed: true }, rev });
+    const g = {}; for (const k of ['fsrs', 'applyAllParentLimits', 'newCardsIgnoreReviewLimit', 'fsrsHealthCheck', 'rollover', 'newSpread', 'dayLearnFirst', 'collapseTime']) if (col.conf?.[k] !== undefined) g[k] = col.conf[k];
+    if (Object.keys(g).length) R.deckRows.push({ k: 'global', v: g, rev });
+    // ノートとカード
+    const pkgNotes = new Map(col.notes.map(n => [n.id, n])), cardsByNote = new Map();
+    for (const c of col.cards) { if (!cardsByNote.has(c.nid)) cardsByNote.set(c.nid, []); cardsByNote.get(c.nid).push(c); }
+    const devCards = new Map(); for (const c of S.all) if (!c.gone && c.type != null) { if (!devCards.has(c.nid)) devCards.set(c.nid, []); devCards.get(c.nid).push(c); }
+    const pkgDeckIds = new Set(pkgNormal.map(d => +d.id));
+    const row = c => [c.id, c.ord, c.odid || c.did, c.odid ? (c.odue || c.due) : c.due];
+    for (const [nid, n] of notesNow) {
+      if (pkgNotes.has(nid)) continue;
+      if (!(devCards.get(nid) || []).length) continue;
+      R.notes.del.push(nid);
+    }
+    for (const n of col.notes) {
+      const cur = notesNow.get(n.id), cs = cardsByNote.get(n.id) || [];
+      const flds = String(n.flds).split('\x1f'), tags = String(n.tags).trim().split(/\s+/).filter(Boolean);
+      if (!cur || !(devCards.get(n.id) || []).length) { R.notes.add.push({ id: n.id, guid: n.guid, mid: +n.mid, flds, tags: tags.join(' '), did: cs.length ? (cs[0].odid || cs[0].did) : 1, cards: cs.map(row), rev, del: 0, added: 1, imp: 1 }); }
+      else {
+        if (+cur.mid !== +n.mid) { R.skipped.noteType++; continue; }
+        const have = new Set((devCards.get(n.id) || []).map(c => c.id)), more = cs.filter(c => !have.has(c.id));
+        const curTags = String(cur.tags).trim().split(/\s+/).filter(Boolean).join(' ');
+        if (cur.flds !== n.flds || curTags !== tags.join(' ')) R.notes.update.push({ id: n.id, mid: +n.mid, flds, tags: tags.join(' '), cards: more.map(row) });
+        else if (more.length) R.extraCards.push({ id: n.id, cards: more.map(row) });
+        const pk = new Set(cs.map(c => c.id)); R.skipped.cardsLeft += (devCards.get(n.id) || []).filter(c => !pk.has(c.id)).length;
+      }
+      for (const c of cs) {
+        const st = stateOf(c); st.did = pkgDeckIds.has(+(c.odid || c.did)) ? +(c.odid || c.did) : 1;
+        const d = S.byId.get(c.id);
+        if (d && !d.gone && sameState(d, st)) continue;
+        R.sets.push({ t: 'set', c: { id: c.id, st, rev } });
+      }
+    }
+    // 記録
+    const pkgRev = new Set(col.revlog.map(r => r.id));
+    for (const r of col.revlog) if (!S.revIds.has(r.id)) R.revlog.push({ t: 'rev', r: { id: r.id, cid: r.cid, ease: r.ease, ivl: r.ivl, lastIvl: r.lastIvl, factor: r.factor, time: r.time, type: r.type } });
+    R.skipped.revLeft = S.revlog.filter(r => !pkgRev.has(r.id)).length;
+    // 画像・音声（端末に無いものだけ。同じ名前で中身が違うものは置き換えない）
+    const have = await env.mediaIndex();
+    for (const e of p.media) {
+      if (!pkg.filenameIsSafe(e.name)) continue;
+      const name = pkg.normalizeFilename(e.name), ex = have.get(name);
+      if (ex == null) { R.media.push({ ...e, name }); continue; }
+      if (ex && e.sha1 && !e.sha1.startsWith(ex) && !ex.startsWith(e.sha1)) R.skipped.media++;
+    }
+    R.log = { found: col.notes.length, new: R.notes.add.length, updated: R.notes.update.length, removed: R.notes.del.length, cards: R.sets.length, revlog: R.revlog.length, media: R.media.length, skipped: R.skipped };
+    return R;
+  }
+  // ノートタイプを比べるとき（mod・usn・id の文字列と数の違いは見ない）
+  const cmpNt = m => { const o = JSON.parse(stringify(m)); delete o.mod; delete o.usn; delete o.id; delete o.originalId; return o; };
+  const stringify = m => JSON.stringify(m, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map(x => [x, typeof v[x] === 'number' && (x === 'id') ? String(v[x]) : v[x]])) : v));
+  function sameState(c, st) {
+    for (const k of ['type', 'queue', 'due', 'ivl', 'factor', 'reps', 'lapses', 'left']) if ((c[k] ?? 0) !== (st[k] ?? 0)) return false;
+    if ((c.flags || 0) !== (st.flags || 0) || c.did !== st.did) return false;
+    return JSON.stringify(c.data || {}) === JSON.stringify(st.data || {});
+  }
+  async function applyReplace(R, hooks) {
+    const rev = Date.now(), rows = [];
+    for (const m of [...R.notetypesAdd, ...R.notetypesUpdate]) rows.push({ k: 'nt:' + m.id, v: m, rev });
+    rows.push(...R.deckRows);
+    if (rows.length) await hooks.commitConf(rows);
+    await hooks.commitImported({ adds: R.notes.add, updates: R.notes.update, extraCards: R.extraCards, rev });
+    if (R.notes.del.length) await hooks.deleteNotes(R.notes.del);
+    const ops = [...R.sets, ...R.revlog];
+    if (ops.length) await hooks.addOps(ops);
+    let i = 0;
+    for (const m of R.media) { if (++i % 10 === 0) env.progress?.(`メディアを読み込んでいます… ${i}/${R.media.length}`); await hooks.saveMedia(m.name, await m.bytes()); }
+    await hooks.done?.();
+    return R.log;
+  }
+  // .colpkg を読み、置き換えの計画を返す（画面で数を見せてから applyReplace する）
+  async function readForReplace(file) {
+    env.progress?.('コレクションをインポート中...');
+    try { const SQL = await env.sql(), zstd = await env.zstd(); return await planReplace(await pkg.readPackage(file, { SQL, zstd })); } finally { env.progress?.(null); }
+  }
+
+  return { exportDeck, exportCollection, gather, planImport, gatherPackage, applyImport, importPackage, stateOf, planReplace, applyReplace, readForReplace };
 }

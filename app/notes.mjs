@@ -451,5 +451,19 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
     }
     return n;
   }
-  return { ready, apply, reset, openAdd, openEdit, deleteFrom, deleteBrowse, undo, bulkEdit, importRecords, rerender, isOpen: () => !!ed, close, element: build };
+  // コレクションの置き換え（.colpkg）で消すノート。元に戻すは作らず、1回で積む
+  async function removeNotes(nids) {
+    const recs = [];
+    for (const nid of nids) {
+      const c0 = await content(nid); if (!c0) continue;
+      const live = liveCards(nid); if (!live.length) continue;
+      recs.push({ id: nid, mid: c0.mid, flds: c0.flds, tags: c0.tags, did: live[0].did, cards: live.map(cardRow), rev: newRev(nid), del: 1, added: c0.added });
+    }
+    if (!recs.length) return 0;
+    for (const rec of recs) apply(rec);
+    await env.store.addOps(recs.map(r => ({ t: 'note', n: wire(r) })));
+    env.changed(new Set(recs.map(r => r.id))); env.scheduleSync();
+    return recs.length;
+  }
+  return { ready, apply, reset, openAdd, openEdit, deleteFrom, deleteBrowse, undo, bulkEdit, importRecords, removeNotes, rerender, isOpen: () => !!ed, close, element: build };
 }

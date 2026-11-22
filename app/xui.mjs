@@ -136,6 +136,7 @@ export function setupExchange(ctx) {
   const hooks = {
     commitConf: async rows => { ctx.applyConf(rows); await store.addOps(rows.map(r => ({ t: 'conf', ...r }))); },
     commitImported: x => ctx.notes.importRecords(x),
+    deleteNotes: nids => ctx.notes.removeNotes(nids),
     addOps: async ops => { for (const op of ops) ctx.applyOp(op); await store.addOps(ops); },
     saveMedia,
     done: () => ctx.afterImport(),
@@ -165,8 +166,17 @@ export function setupExchange(ctx) {
     const ok = await ctx.iosPrompt({ title: 'コレクションをインポート', message: 'この処理は、既存のコレクションを削除し、今からインポートするファイルのデータに置き換えます。本当に実行しますか？', ok: 'インポート', danger: true });
     if (!ok) return;
     try {
-      const log = await ex.replaceCollection(file, hooks);
-      ctx.iosAlert('インポート', `コレクションをインポートしました。\n${report(log)}`);
+      const R = await ex.readForReplace(file), L = R.log, k = L.skipped;
+      // 消す数が多いことがあるので、数を見せてもう一度たずねる（同期で Anki のコレクションにも同じことが起きる）
+      const lines = [`ファイル内にあるノート: ${L.found}枚`, `追加: ${L.new}・更新: ${L.updated}・削除: ${L.removed}`, `カードの状態を合わせる: ${L.cards}枚・学習履歴を足す: ${L.revlog}件`];
+      if (k.ntSchema || k.noteType || k.cardsLeft || k.revLeft || k.decksKept || k.media) lines.push(`そのままにするもの: ノートタイプ ${k.ntSchema}・ノート ${k.noteType}・カード ${k.cardsLeft}・学習履歴 ${k.revLeft}・デッキ ${k.decksKept}・メディア ${k.media}`);
+      lines.push('次の同期で、パソコンの Anki にも同じ変更が入ります。');
+      const go = await ctx.iosPrompt({ title: 'コレクションをインポート', message: lines.join('\n'), ok: '置き換える', danger: true });
+      if (!go) return;
+      progress('コレクションをインポート中...');
+      const log = await ex.applyReplace(R, hooks);
+      progress(null);
+      ctx.iosAlert('インポート', `コレクションをインポートしました。\n追加: ${log.new}・更新: ${log.updated}・削除: ${log.removed}・カード: ${log.cards}・メディア: ${log.media}`);
     } catch (e) { progress(null); console.error(e); ctx.iosAlert('インポート', String(e?.message || e)); }
   }
   return { exportDeck, exportCollection, importFile, pickFile, uploadPending, mediaIndex, ex, share };
