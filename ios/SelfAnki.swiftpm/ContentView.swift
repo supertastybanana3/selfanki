@@ -206,6 +206,11 @@ struct WebShell: UIViewRepresentable {
             while let p = vc?.presentedViewController { vc = p }
             return vc
         }
+        // window.open（「？」ボタン・カードのリンク・共有デッキ）は Safari などで開く（これが無いと WKWebView では何も起きない）
+        func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+            if let u = navigationAction.request.url, let s = u.scheme?.lowercased(), s == "https" || s == "http" || s == "mailto" { UIApplication.shared.open(u) }
+            return nil
+        }
         func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
             guard let vc = topVC() else { completionHandler(); return }
             let ac = UIAlertController(title: nil, message: message, preferredStyle: .alert)
