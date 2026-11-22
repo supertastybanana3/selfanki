@@ -283,12 +283,13 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
       body.append(g);
     }
     ed.html = new Set();
-    // フィールドは、スクリプトを動かさない枠（sandbox）に HTML をそのまま入れる。WebKit はこの枠の中の出来事を親に知らせないので、
+    // フィールドは枠（sandbox）に HTML をそのまま入れる。中身のスクリプト・onerror などは、ページの決まり（CSP の script-src 'self'。srcdoc の枠も受け継ぐ）で動かない。
+    // allow-scripts は、WebKit が枠の中の出来事（貼り付けなど）を親の受け口に渡すために要る（無いと WebKit は受け口を動かさない）。
     // 変えたかどうかは読み込んだときの HTML と比べ、高さと選んでいるフィールドは watch() で見る
     t.flds.forEach((f, i) => {
       const sec = document.createElement('div'); sec.className = 'sec'; sec.textContent = f.name;
       const box = document.createElement('div'); box.className = 'fbox';
-      const fr = document.createElement('iframe'); fr.setAttribute('sandbox', 'allow-same-origin'); fr.title = f.name;
+      const fr = document.createElement('iframe'); fr.setAttribute('sandbox', 'allow-same-origin allow-scripts'); fr.title = f.name;
       const ta = document.createElement('textarea'); ta.hidden = true; ta.spellcheck = false; ta.setAttribute('autocapitalize', 'off'); ta.setAttribute('autocorrect', 'off');
       fr.onload = () => {
         const d = fr.contentDocument; if (!d || !d.body) return;
@@ -411,6 +412,8 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
   }
   // 貼り付けた画像は、ファイルにして入れる（Anki と同じ paste-<sha1>。設定＞編集の「PNG 形式で貼り付ける」がオフなら JPEG、「貼り付けの際にリサイズ」で長辺を最大画像サイズまで）
   async function pasteImages(e, fr, ta, i) {
+    const types = [...(e.clipboardData?.types || [])];
+    if (types.includes('text/html') || types.includes('text/plain')) return;   // 文字と一緒の貼り付け（ウェブのページから写したなど）はふつうに貼る（横取りすると文字が消える）
     const files = [...(e.clipboardData?.items || [])].filter(it => it.kind === 'file' && /^image\//.test(it.type)).map(it => it.getAsFile()).filter(Boolean);
     if (!files.length) return;
     e.preventDefault();

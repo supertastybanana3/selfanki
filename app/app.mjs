@@ -24,7 +24,7 @@ import * as fsrsJobs from './fsrsjobs.mjs';
 const BUNDLE = new URL('../bundle/', location.href).href;
 const MEDIA = BUNDLE + 'media/';
 const MATHJAX_URL = new URL('../vendor/mathjax/tex-chtml.js', location.href).href;
-const MJCONF_URL = new URL('./mjconfig.js', location.href).href;   // MathJax の設定（中身は MATHJAX_CONFIG と同じ。インラインのスクリプトは CSP で動かないため）
+const MJCONF_URL = new URL('./mjconfig.js', location.href).href;   // MathJax の設定（インラインのスクリプトはページの決まり＝CSP で動かないため、ファイルにしてある）
 const $ = s => document.querySelector(s);
 const S = { meta: null, all: [], cards: [], byId: new Map(), revlog: [], revIds: new Set(), deck: null, q: null, card: null, side: 'q', undo: [], shownAt: 0, open: new Set(), fdecks: new Map() };
 let pen, ask, sp, notes, xchg, ntScreen;
