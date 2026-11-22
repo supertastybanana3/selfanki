@@ -14,6 +14,7 @@ import { typeQuestion, typeAnswer } from './typeans.mjs';
 import { createScratchpad, spPref, SP_WIDTH, SP_SIZE, SP_ALPHA } from './scratchpad.mjs';
 import { repositionNew } from '../fsrs/reposition.mjs';
 import { createNotes } from './notes.mjs';
+import { createNtScreen } from './ntscreen.mjs';
 import { createDecks, attachSwipe } from './decks.mjs';
 import { setupExchange } from './xui.mjs';
 import { ntFrom11 } from './exchange.mjs';
@@ -25,7 +26,7 @@ const MEDIA = BUNDLE + 'media/';
 const MATHJAX_URL = new URL('../vendor/mathjax/tex-chtml.js', location.href).href;
 const $ = s => document.querySelector(s);
 const S = { meta: null, all: [], cards: [], byId: new Map(), revlog: [], revIds: new Set(), deck: null, q: null, card: null, side: 'q', undo: [], shownAt: 0, open: new Set(), fdecks: new Map() };
-let pen, ask, sp, notes, xchg;
+let pen, ask, sp, notes, xchg, ntScreen;
 // ---------- 画面の明るさ（自動／ダーク／ライト） ----------
 const THEMES = ['auto', 'dark', 'light'], THEME_LABEL = { auto: '自動', dark: 'ダーク', light: 'ライト' };
 const mq = matchMedia('(prefers-color-scheme: dark)');
@@ -634,7 +635,7 @@ const BROWSE_ACTIONS = [
   ['replace', '検索して置換', cs => findReplace(cs)],
   ['tagAdd', 'タグを追加', cs => editTags(cs, true)],
   ['tagDel', 'タグを解除', cs => editTags(cs, false)],
-  ['notetype', 'ノートタイプを変更', null],
+  ['notetype', 'ノートタイプを変更', cs => ntScreen.openChange(cs)],
   ['delete', 'ノートを削除する', cs => notes.deleteBrowse(cs)],
 ];
 function openBrowseActions() {
@@ -968,11 +969,13 @@ function undoPush(e) { S.undo.push(e); if (S.undo.length > 30) S.undo.shift(); i
 async function inverseOf(e) {
   if (e.kind === 'note') return notes.inverse(e);
   if (e.kind === 'deck') return deckOps.inverse(e);
+  if (e.kind === 'nt') return ntScreen.inverse(e);   // カードテンプレート（ノートタイプの変更）
   return { ...e, prevs: e.prevs.map(p => structuredClone(S.byId.get(p.id))) };
 }
 async function revertEntry(e) {
   if (e.kind === 'note') { await notes.undo(e); return; }   // ノートの追加・編集・削除
   if (e.kind === 'deck') { await deckOps.undo(e); deckDone(); return; }   // デッキの作成・名前変更・削除
+  if (e.kind === 'nt') { await ntScreen.revert(e); return; }   // カードテンプレート（ノートタイプを前のものに）
   // 非表示・休止・フラグ・マーク・デッキを戻す（新しい時刻で前の状態を送る。デッキを動かしたカードは前のデッキも送る）
   const now = Date.now(), base = lastRevIds(e.prevs.map(p => p.id));
   for (const p of e.prevs) { const c = S.byId.get(p.id), moved = c.didSet; Object.assign(c, p); if (moved) c.didSet = true; c.rev = now; await store.addOp({ t: 'set', c: { id: c.id, st: pickState(c), rev: now }, base: base.get(c.id) || 0 }); }
@@ -994,7 +997,7 @@ async function redoAction() {
 }
 async function undoInner() {
   const top = S.undo[S.undo.length - 1];
-  if (top.kind === 'note' || top.kind === 'deck' || top.kind === 'set') {
+  if (top.kind === 'note' || top.kind === 'deck' || top.kind === 'nt' || top.kind === 'set') {
     S.undo.pop(); const inv = await inverseOf(top); await revertEntry(top); REDO.push(inv);
     toast(`元に戻しました（${top.label}）`);
     if (top.kind === 'set') advance(top.noForce ? null : S.byId.get(top.prevs[0].id));
@@ -1654,7 +1657,7 @@ function onKey(e) {
   if ($('#iosDialog') && !$('#iosDialog').hidden) return;   // 確認の小窓（入力欄・OK はその中で受ける）
   if (!$('#iosAlert').hidden) { if (['Enter', 'Escape'].includes(e.key) || e.code === 'Space' || keyOf(e) === ' ') { e.preventDefault(); $('#iosAlert').hidden = true; } return; }
   // ブラウザ・設定・統計などを開いているあいだは、下の出題に答えない（Esc で閉じる）
-  const over = ['#editor', '#bprev', '#browse', '#awpage', '#prefs'].map(q => $(q)).find(el => el && !el.hidden);
+  const over = ['#ntpage', '#editor', '#bprev', '#browse', '#awpage', '#prefs'].map(q => $(q)).find(el => el && !el.hidden);
   if (over) { if (e.key === 'Escape') { e.preventDefault(); over.querySelector('.back')?.click(); } return; }
   // 日本語入力のままのキーボードで、処理しなかったキー（表の面の数字など）を iPad が文字入力として変換に回し、候補が出て
   // 以後のキーが全部変換に吸われてしまう。入力欄の外では、文字・数字・スペース・Enter・Backspace は全部ここで止める
@@ -1778,7 +1781,7 @@ const ACTIONS = [
   ['reset', 'カードをリセット', () => resetAction()],
   ['buryCard', 'カードを今日は非表示', () => buryCard()],
   ['suspendCard', 'カードを休止', () => suspendCard()],
-  ['template', 'カードテンプレート', null],
+  ['template', 'カードテンプレート', () => ntScreen.openTemplates(S.card)],
   ['info', 'カード情報', () => cardInfo(S.card)],
   ['tools', 'ツールアイコン', () => openTools()],
   ['decks', 'デッキ', () => showDecks()],
@@ -1996,6 +1999,10 @@ function setupNotes() {
     pref: k => pref(k), maxImg: () => Math.max(0, parseInt(lsRaw('maxImg', '1024'), 10) || 0),
     typing: t => { try { window.webkit?.messageHandlers?.sa?.postMessage({ typing: t }); } catch {} } });
   notes.element();   // 戻るボタン（Android）が開け閉めを見られるように、先に作っておく
+  // 「カードテンプレート」「ノートタイプを変更」（app/ntscreen.mjs）
+  ntScreen = createNtScreen({ S, notes, prompt: o => iosPrompt(o), alert: (t, m) => iosAlert(t, m), confirm: (title, message, o = {}) => iosPrompt({ title, message, ...o }).then(r => !!r),
+    toast, commitConf: async rows => { applyConf(rows); for (const r of rows) await store.addOp({ t: 'conf', ...r }); }, pushUndo: e => undoPush(e),
+    loadNotes: () => loadNotes(S, BUNDLE), deckName, changed: () => notesChanged(new Set(S.card ? [S.card.nid] : [])) });
 }
 // 書き出し・読み込み（app/xui.mjs・exchange.mjs・pkg.mjs）
 function setupXchg() {

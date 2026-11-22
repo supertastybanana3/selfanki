@@ -124,6 +124,10 @@ def apply_notes():
     ids = list(recs); info = []
     for i in range(0, len(ids), 200): info += ac('notesInfo', notes=ids[i:i + 200])
     push = []; now = int(time.time() * 1000)
+    # 端末で直したノートタイプ（conf の nt:<id>）のノートと、端末でノートタイプを変えたノートは、AnkiConnect では書けない（並べ替えたフィールドを古い並びのまま書いてしまう）。アドオンに任せる
+    rows = api('pull?cs=999999999999&ci=0&rs=999999999999&ri=0&n=1').get('conf', [])
+    nt_app = {int(k[3:]) for k, v, rev, src, _ in rows if k.startswith('nt:') and src == 'app'}
+    mids = ac('modelNamesAndIds') or {}
     for rec, inf in zip(recs.values(), info):
         have = bool(inf and inf.get('noteId')); mod = (inf or {}).get('mod', 0) if have else None
         if rec['del']:
@@ -140,12 +144,14 @@ def apply_notes():
             if rec['src'] == 'app': n['anki_newer'] += 1
             continue
         names = sorted(inf['fields'], key=lambda k: inf['fields'][k]['order'])
+        if rec['mid'] in nt_app or mids.get(inf.get('modelName')) != rec['mid']: n['need_addon'] += 1; continue
         if set(c[0] for c in rec['cards']) - set(inf.get('cards') or []) or len(names) != len(rec['flds']):
             n['need_addon'] += 1; continue   # カードが増える編集・ノートタイプが変わっている
         if not DRY: ac('updateNote', note={'id': rec['id'], 'fields': dict(zip(names, rec['flds'])), 'tags': rec['tags'].split()})
         n['updated'] += 1
     if push and not DRY: api('push', {'ops': push})
-    if n['need_addon']: log('端末で追加したノート・カードが増える編集', n['need_addon'], '件は、Anki のアドオン「暗記と同期」で入れる（ここでは書かない）')
+    if n['need_addon']: log('端末で追加したノート・カードが増える編集・ノートタイプを直したノート・ノートタイプを変えたノート', n['need_addon'], '件は、Anki のアドオン「暗記と同期」で入れる（ここでは書かない）')
+    if nt_app: log(f'端末で直した・読み込んだノートタイプが {len(nt_app)} 件あります。Anki に入れるにはアドオン「暗記と同期」を使ってください（この書き戻しでは書きません）')
     return n
 
 def count_decks():
