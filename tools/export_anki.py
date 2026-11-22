@@ -64,6 +64,21 @@ def clean(h):
         if h2 == h: break
         h = h2
     return JSURL.sub(r'\1=\2about:blank#', h)
+def home_state(ctype, queue, due, odid, odue, data, did):
+    """フィルターデッキに入っているカードは、元のデッキでの queue・due（空にしたときの値。rslib remove_from_filtered_deck_restoring_queue）を
+    状態に、フィルターデッキの中での due・queue を data.flt に入れる（アプリのフィルターデッキ。アドオンの anki_view と同じ形）"""
+    d = json.loads(data) if data else {}
+    if not odid: return queue, due, d
+    hdue = odue if odue != 0 else due
+    hq = queue
+    if queue >= 0: hq = 0 if ctype == 0 else 2 if ctype == 2 else (1 if hdue > 1_000_000_000 else 3)
+    d['flt'] = {'d': did, 'due': due, 'q': queue}
+    return hq, hdue, d
+def fdeck_def(d):
+    """Anki のフィルターデッキの定義（decks.rs の古い JSON の形: terms＝[検索, 上限, 並び]・resched・previewAgainSecs など）をアプリの形に"""
+    terms = [{'search': t[0], 'limit': int(t[1]), 'order': int(t[2])} for t in (d.get('terms') or [])][:2] or [{'search': '', 'limit': 100, 'order': 1}]
+    return {'id': d['id'], 'name': d['name'], 'terms': terms, 'second': len(terms) > 1, 'resched': bool(d.get('resched', True)),
+            'previewAgain': int(d.get('previewAgainSecs', 60)), 'previewHard': int(d.get('previewHardSecs', 600)), 'previewGood': int(d.get('previewGoodSecs', 0)), 'mod': d.get('mod', 0)}
 try: col = Collection(SRC)
 except Exception as e:
     die(f'コレクションを開けませんでした（{e}）。Anki が新しい形で保存している場合は、先にバックアップを取り、パソコンの Anki で「ファイル」→「プロファイルを切り替え」→「Downgrade & Quit」をしてから、もう一度書き出してください。')
@@ -87,13 +102,13 @@ for (cid, nid, did, odid, ord_, ctype, queue, due, odue, ivl, factor, reps, laps
         return res
     for m in re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', q + a): media[m] += 1
     note = card.note(); nt_used.add(note.mid)
+    hq, hdue, cdata = home_state(ctype, queue, due, odid, odue, data, did)
     cards.append({'id': cid, 'nid': nid, 'did': home, 'mid': note.mid, 'ord': ord_,
-                  'type': ctype, 'queue': queue, 'due': odue if odid else due, 'ivl': ivl, 'factor': factor, 'reps': reps,
-                  'lapses': lapses, 'left': left, 'flags': flags, 'mod': mod, 'nmod': note.mod, 'data': json.loads(data) if data else {},
+                  'type': ctype, 'queue': hq, 'due': hdue, 'ivl': ivl, 'factor': factor, 'reps': reps,
+                  'lapses': lapses, 'left': left, 'flags': flags, 'mod': mod, 'nmod': note.mod, 'data': cdata,
                   'tags': note.tags, 'q': q, 'a': a, 'qav': av(out.question_av_tags), 'aav': av(out.answer_av_tags),
                   'sfld': sort_text(note, note.note_type()), 'tname': (card.template() or {}).get('name', ''),
-                  **({'typ': type_info(card, note, q)} if TYPE_PAT.search(q) else {}),
-                  **({'inDyn': 1, 'dynName': decks[did]['name'], 'dynDue': due} if odid else {})})  # Anki ではフィルターデッキの中（負荷分散の数に入らない。カード情報はそのデッキの名前を出す）
+                  **({'typ': type_info(card, note, q)} if TYPE_PAT.search(q) else {})})
 print('cards', len(cards), 'secs', round(time.time() - t0, 1))
 if not cards: die('書き出すカードが0枚でした。exclude_top_decks で全部を除いていないか確かめてください。')
 keep_cids = {c['id'] for c in cards}
@@ -115,6 +130,8 @@ conf_keys = ['rollover', 'collapseTime', 'newCardsIgnoreReviewLimit', 'dayLearnF
              'loadBalancerEnabled', 'fsrsShortTermWithStepsEnabled', 'sched2021', 'nextPos', 'ignoreAccentsInSearch', 'normalize_note_text', 'curDeck', 'restorePositionReviewer', 'resetCountsReviewer', 'randomOrderReposition', 'shiftPositionOfExistingCards', 'setDueReviewer', 'curModel']
 meta = {'exported_at': int(time.time()), 'source': os.path.basename(SRC), 'crt': col.crt, 'config': {k: col.get_config(k, None) for k in conf_keys},
         'decks': [decks[d] for d in sorted(keep_deck, key=lambda d: decks[d]['name'])], 'presets': presets, 'notetypes': notetypes,
+        # Anki のフィルターデッキ（中のカードが移すデッキにあるものだけ。中のカードの印は cards の data.flt）
+        'fdecks': [fdeck_def(decks[did]) for did in sorted({c['data']['flt']['d'] for c in cards if 'flt' in c['data']})],
         # 負荷分散（rslib load_balancer.rs）は同じプリセットの全カードを数えるので、移していないデッキのカードの期日も送る（[期日, プリセット, ノート]）
         'lbExtra': [[due, decks[did].get('conf'), nid] for (cid, nid, did, due) in col.db.all("select id, nid, did, due from cards")
                     if did in decks and not decks[did].get('dyn') and did not in keep_deck and decks[did].get('conf') in used_conf

@@ -408,7 +408,7 @@ export function forgetCard(card, { restorePosition = true, resetCounts = false, 
   delete c.data.pos;
   if (resetCounts) { c.reps = 0; c.lapses = 0; }
   delete c.data.s; delete c.data.d;   // memory_state = None（dr・decay・最後に答えた時刻はそのまま）
-  delete c.inDyn;                      // フィルターデッキから元のデッキへ
+  delete c.data.flt;                   // フィルターデッキから元のデッキへ（remove_from_filtered_deck_before_reschedule）
   const revlog = { id: nowMs, cid: card.id, ease: 0, ivl: 0, lastIvl: Math.min(card.ivl, 2147483647), factor: 0, time: 0, type: 4 };
   return { card: c, revlog, usedNextPos: lastPos == null };
 }
@@ -439,7 +439,7 @@ export function setDueDate(card, { today, nextDayAt, days, forceReset = false, i
   // schedule_as_review: 元の位置を覚え（新規なら今の位置）、復習にする。易しさが 0 ならプリセットの初期値
   const lastPos = card.type === 0 ? card.due : (card.data?.pos ?? null);
   if (lastPos == null) delete c.data.pos; else c.data.pos = lastPos;
-  delete c.inDyn;
+  delete c.data.flt;   // フィルターデッキから元のデッキへ
   c.ivl = ivl; c.due = newDue; c.type = 2; c.queue = 2;
   if (!card.factor) c.factor = Math.round(Math.fround(Math.fround(initialFactor / 1000) * 1000));
   const fr = Math.fround;

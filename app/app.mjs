@@ -1,6 +1,7 @@
 // 自作の暗記アプリ（試作）本体
 import { makeContext, nextStates, answer, forgetCard, setDueDate, parseDueDate, timingToday, learningSteps, buildLoadBalancer, lbAdd, learningFuzzSecs } from '../fsrs/sched.mjs';
 import { buildQueues, todayCounts, nextCard, deckCmp } from '../fsrs/queue.mjs';
+import { buildFiltered, filteredQueues, nextFilteredCard, afterRescheduling, answerPreview, fltIn, fq, fdue, newFilteredDeck, customStudyDeck, CUSTOM_STUDY_NAME, ORDER_LABELS, previewDelays } from '../fsrs/filtered.mjs';
 import { installAnkiBackend } from './ankiweb.mjs';
 import { compileSearch, loadNotes, displayText } from './search.mjs';
 import * as store from './store.mjs';
@@ -16,7 +17,7 @@ const BUNDLE = new URL('../bundle/', location.href).href;
 const MEDIA = BUNDLE + 'media/';
 const MATHJAX_URL = new URL('../vendor/mathjax/tex-chtml.js', location.href).href;
 const $ = s => document.querySelector(s);
-const S = { meta: null, all: [], cards: [], byId: new Map(), revlog: [], revIds: new Set(), deck: null, q: null, card: null, side: 'q', undo: [], shownAt: 0, open: new Set() };
+const S = { meta: null, all: [], cards: [], byId: new Map(), revlog: [], revIds: new Set(), deck: null, q: null, card: null, side: 'q', undo: [], shownAt: 0, open: new Set(), fdecks: new Map() };
 let pen, ask, sp, notes;
 // ---------- 画面の明るさ（自動／ダーク／ライト） ----------
 const THEMES = ['auto', 'dark', 'light'], THEME_LABEL = { auto: '自動', dark: 'ダーク', light: 'ライト' };
@@ -134,6 +135,10 @@ function applyConf(rows) {
     } else if (k.startsWith('deck:')) {
       const d = S.decksById.get(+k.slice(5)); if (!d || rev <= (d.mod || 0) * 1000) continue;
       Object.assign(d, v); d.mod = Math.floor(rev / 1000);
+    } else if (k.startsWith('fdeck:')) {   // フィルターデッキの定義（端末で作った・直した・消した。Anki のフィルターデッキを端末で直したものも）
+      const id = +k.slice(6), cur = S.fdecks.get(id);
+      if (cur && rev <= (cur.rev || 0)) continue;
+      S.fdecks.set(id, v.removed ? { id, removed: true, rev } : { ...v, id, rev });
     } else if (k === 'global') Object.assign(S.meta.config, v);
   }
 }
@@ -173,6 +178,7 @@ async function load() {
   const [meta, chunks, base, baseRev] = await Promise.all([fetchJSON(BUNDLE + man.meta), Promise.all(man.chunks.map(c => fetchJSON(BUNDLE + c.f))),
     fetchJSON(BUNDLE + man.base.state), fetchJSON(BUNDLE + man.base.revlog)]);
   S.meta = meta; S.manifest = man; S.decksById = new Map(meta.decks.map(d => [d.id, d]));
+  S.fdecks = new Map((meta.fdecks || []).map(f => [f.id, { ...f, rev: (f.mod || 0) * 1000 }]));   // Anki のフィルターデッキ（書き出した時点の定義）
   // 「今のデッキ」（統計・ブラウザの deck:current）: この端末で最後に開いたデッキ、無ければ Anki の curDeck（Anki と同じく開き直しても覚えている）
   if (typeof S.lastDeck !== 'number') { let d = null; try { d = +localStorage.getItem('lastDeck') || null; } catch {} if (!S.decksById.has(d)) d = meta.config?.curDeck; if (S.decksById.has(d)) S.lastDeck = d; }
   // 開いた親デッキは開き直しても残す（AnkiMobile と同じ）。この端末で一度も触っていなければ Anki の「畳んだ」印に従う
@@ -270,44 +276,133 @@ function startSyncLoop() {
   scheduleSync(300); paintSync();
 }
 
-// ---------- カスタム学習セッション ----------
-const SESSION_NAME = 'カスタム学習セッション';
-function loadSession() { try { return JSON.parse(localStorage.getItem('session') || 'null'); } catch { return null; } }
-function saveSession(x) { try { x ? localStorage.setItem('session', JSON.stringify(x)) : localStorage.removeItem('session'); } catch {} }
-function sessionCards() { const se = loadSession(); return se ? se.ids.map(id => S.byId.get(id)).filter(c => c && c.queue >= 0 && !c.gone) : []; }
-function sessionCounts() {
-  const now = nowSecs(); const t = timingToday(now, S.meta);
-  const cards = sessionCards();
-  const learning = cards.filter(c => c.queue === 1 && c.due < t.nextDayAt).sort((a, b) => a.due - b.due);
-  const main = cards.filter(c => c.queue === 2 || c.queue === 3 || c.queue === 0).sort((a, b) => a.due - b.due || a.id - b.id);
-  const q = { learning, main, counts: { new: main.filter(c => c.queue === 0).length, learn: learning.length, review: main.filter(c => c.queue !== 0).length }, learnAheadSecs: S.meta.config.collapseTime ?? 1200 };
-  return { q, c: [q.counts.new, learning.filter(c => c.due <= now + q.learnAheadSecs).length, q.counts.review] };
+// ---------- フィルターデッキ（fsrs/filtered.mjs。定義＝書き出しの meta.fdecks に conf の fdeck:<id> を重ねたもの、中のカード＝card.data.flt） ----------
+const liveF = id => { const f = S.fdecks.get(id); return f && !f.removed ? f : null; };
+const fltOf = c => fltIn(S.fdecks, c);
+const fdeckOf = c => { const f = fltOf(c); return f ? liveF(f.d) : null; };
+const isFDeck = did => typeof did === 'number' && !!liveF(did);
+const deckName = did => S.decksById.get(did)?.name ?? liveF(did)?.name ?? '';
+const homeCards = () => S.cards.filter(c => !fltOf(c));   // ふつうのデッキで出すカード（フィルターデッキに入っているものは除く）
+// 組み直す（filtered/mod.rs rebuild_filtered_deck_inner: いったん空にしてから、条件ごとに検索して入れる）。
+// 入れるカードの印は、実際のカードに書く前に写しで決める（1枚も入らずに止めるとき、何も変えないように）
+async function computeFDeck(id, def) {
+  await loadNotes(S, BUNDLE).catch(() => {});   // 本文の検索に使う（読めなければタグなどカードにある分だけで検索する）
+  const now = nowSecs(), t = timingToday(now, S.meta);
+  const last = new Map(); for (const r of S.revlog) if (r.id > (last.get(r.cid) ?? -Infinity)) last.set(r.cid, r.id);
+  const work = S.cards.map(c => (c.data?.flt?.d === id ? { ...c, data: (({ flt, ...rest }) => rest)(c.data) } : { ...c, data: c.data ? { ...c.data } : {} }));
+  const had = S.fdecks.get(id); S.fdecks.set(id, { ...def, id });   // 2つ目の条件の -deck:filtered が1つ目で入れたカードを見るように、組む間は定義を置いておく
+  try {
+    const out = buildFiltered(id, def, work, { matcher: q => compileSearch(S, q, S.lastDeck ?? null), today: t.daysElapsed, nextDayAt: t.nextDayAt, now, fsrs: !!S.meta.config.fsrs, lastReview: cid => last.get(cid) ?? null });
+    return new Map(out.map(x => [x.card.id, x.flt]));
+  } finally { if (had) S.fdecks.set(id, had); else S.fdecks.delete(id); }
 }
-// 先取り学習: deck:そのデッキ prop:due<=N（復習・日をまたぐ学習）、休止中を除く、期日順
-function createReviewAhead(did, days) {
-  const root = S.decksById.get(did); const t = timingToday(nowSecs(), S.meta);
-  const inDeck = c => { const n = S.decksById.get(c.did)?.name; return n === root.name || n?.startsWith(root.name + '::'); };
-  const ids = S.cards.filter(c => inDeck(c) && (c.queue === 2 || c.queue === 3) && c.due - t.daysElapsed <= days).sort((a, b) => a.due - b.due).map(c => c.id);
-  saveSession({ kind: 'ahead', from: did, days, ids, created: Date.now() });
-  return ids.length;
+// カードの印を書き換えて送る（t:'set'。base 付き）。undoLabel があれば「元に戻す」で戻せる
+async function writeFlt(id, picked, undoLabel = null) {
+  const list = [];
+  for (const c of S.cards) {
+    const was = c.data?.flt?.d === id ? c.data.flt : null, now = picked.get(c.id) ?? null;
+    if (!was && !now) continue;
+    if (was && now && was.due === now.due && was.q === now.q) continue;
+    list.push([c, now]);
+  }
+  if (!list.length) return 0;
+  const at = Date.now(), prevs = list.map(([c]) => structuredClone(c)), base = lastRevIds(list.map(([c]) => c.id)), ops = [];
+  for (const [c, flt] of list) {
+    const data = { ...(c.data || {}) }; if (flt) data.flt = flt; else delete data.flt;
+    c.data = data; c.rev = at; ops.push({ t: 'set', c: { id: c.id, st: pickState(c), rev: at }, base: base.get(c.id) || 0 });
+  }
+  await store.addOps(ops);
+  if (undoLabel) { S.undo.push({ kind: 'set', prevs, label: undoLabel, rebuild: true }); if (S.undo.length > 30) S.undo.shift(); }
+  S.mainQ = null; scheduleSync();
+  return picked.size;
 }
-function leaveSessionIfDone(card) {
-  const se = loadSession(); if (!se) return;
-  // 答えて先の日の復習になったカードはセッションから抜ける（元のデッキに戻る）
-  if (card.queue === 2 && card.due > timingToday(nowSecs(), S.meta).daysElapsed) { se.ids = se.ids.filter(id => id !== card.id); saveSession(se.ids.length ? se : null); }
+// 作る・直す（add_or_update_filtered_deck_inner）。1枚も入らず「空でも作成」がオフなら、何も変えずに止める（SearchReturnedNoCards）
+async function saveFDeck(id, def, allowEmpty) {
+  let picked;
+  try { picked = await computeFDeck(id, def); }
+  catch (e) { iosAlert('Error', displayText(String(e && e.message || e))); return false; }
+  if (!picked.size && !allowEmpty) { iosAlert('Error', '検索条件に一致するカードがありません。別のフィルターデッキ内にあるカードや休止中のカードが除外されている可能性があります。'); return false; }
+  await saveConf('fdeck:' + id, def, Date.now());
+  await writeFlt(id, picked);
+  return true;
+}
+async function rebuildFDeck(id) {
+  const def = liveF(id); if (!def) return;
+  let picked; try { picked = await computeFDeck(id, def); } catch (e) { iosAlert('Error', displayText(String(e && e.message || e))); return; }
+  await writeFlt(id, picked, '再構築');
+}
+async function emptyFDeck(id, label = '空にする') { await writeFlt(id, new Map(), label); }
+async function deleteFDeck(id) { await emptyFDeck(id, null); await saveConf('fdeck:' + id, { removed: true }, Date.now()); }
+// 「再構築」「空にする」（フィルターデッキでないときは rslib と同じく FilteredDeckRequired）
+async function fdeckAction(kind) {
+  if (!isFDeck(S.deck)) { iosAlert('Error', 'このアクションはフィルターデッキでのみ使用できます。'); return; }
+  if (S.busy) return;
+  S.busy = true; try { if (kind === 'rebuild') await rebuildFDeck(S.deck); else await emptyFDeck(S.deck); } finally { S.busy = false; }
+  if (document.body.dataset.view === 'study') advance(); else showDecks();
+}
+// 「フィルター / 詰め込み」（新しく作る。今のデッキで既定を入れる）と、フィルターデッキの「オプション」（直す）の画面
+function openFDeck(id = null) {
+  const page = $('#fdeckPage'), isNew = id == null, cur = isNew ? newFilteredDeck(deckName(S.deck ?? S.lastDeck) || null) : liveF(id);
+  if (!cur) return;
+  $('#fd-title').textContent = 'フィルターデッキ'; $('#fd-done').textContent = isNew ? '作成' : '再構築';
+  $('#fd-name').value = cur.name;
+  const terms = [...cur.terms]; while (terms.length < 2) terms.push({ search: '', limit: 20, order: 6 });
+  page.querySelectorAll('.fd-term').forEach((ul, i) => {
+    const sel = ul.querySelector('.fd-order'); if (!sel.options.length) ORDER_LABELS.forEach((t, k) => sel.add(new Option(t, String(k))));
+    ul.querySelector('.fd-search').value = terms[i].search; ul.querySelector('.fd-limit').value = terms[i].limit; sel.value = String(terms[i].order);
+  });
+  const tg = (el, on) => el.classList.toggle('on', !!on);
+  tg($('#fd-second'), cur.second ?? cur.terms.length > 1); $('#fd-t2').hidden = !$('#fd-second').classList.contains('on');
+  tg($('#fd-resched'), cur.resched); page.classList.toggle('resched', !!cur.resched);
+  $('#fd-again').value = cur.previewAgain ?? 60; $('#fd-hard').value = cur.previewHard ?? 600; $('#fd-good').value = cur.previewGood ?? 0;
+  tg($('#fd-allow'), false);
+  $('#fd-second').onclick = () => { $('#fd-second').classList.toggle('on'); $('#fd-t2').hidden = !$('#fd-second').classList.contains('on'); };
+  $('#fd-resched').onclick = () => { $('#fd-resched').classList.toggle('on'); page.classList.toggle('resched', $('#fd-resched').classList.contains('on')); };
+  $('#fd-allow').onclick = () => $('#fd-allow').classList.toggle('on');
+  $('#fd-delgrp').hidden = isNew;
+  const close = () => page.classList.remove('open');
+  $('#fd-cancel').onclick = close;
+  $('#fd-delete').onclick = async () => {
+    const r = await iosPrompt({ title: 'デッキを削除', message: 'このデッキを削除すると、残りのカードもすべて元のデッキに戻ります。', ok: '削除' }); if (!r) return;
+    await deleteFDeck(id); close(); showDecks();
+  };
+  $('#fd-done').onclick = async () => {
+    const int = (v, lo, hi, d) => { const n = Math.trunc(+v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
+    const name = $('#fd-name').value.trim().split('::').map(x => x.trim()).filter(Boolean).join('::');
+    if (!name) { iosAlert('Error', '無効な入力です。'); return; }
+    const parent = name.includes('::') ? name.slice(0, name.lastIndexOf('::')) : null;
+    if (parent && [...S.fdecks.values()].some(f => !f.removed && f.name === parent)) { iosAlert('Error', 'フィルターデッキにサブデッキは作れません。'); return; }
+    // 同じ名前のデッキがあれば、Anki と同じく後ろに「+」を足して重ならないようにする（decks/name.rs ensure_deck_name_unique）
+    let uniq = name; const taken = n => S.meta.decks.some(d => d.name === n) || [...S.fdecks.values()].some(f => !f.removed && f.name === n && f.id !== id);
+    while (taken(uniq)) uniq += '+';
+    const terms = [...page.querySelectorAll('.fd-term')].map(ul => ({ search: ul.querySelector('.fd-search').value, limit: int(ul.querySelector('.fd-limit').value, 1, 99999, 100), order: int(ul.querySelector('.fd-order').value, 0, 9, 1) }));
+    const second = $('#fd-second').classList.contains('on');
+    const def = { name: uniq, terms: second ? terms : terms.slice(0, 1), second, resched: $('#fd-resched').classList.contains('on'),
+      previewAgain: int($('#fd-again').value, 0, 99999, 60), previewHard: int($('#fd-hard').value, 0, 99999, 600), previewGood: int($('#fd-good').value, 0, 99999, 0) };
+    if (S.busy) return;
+    S.busy = true; let ok = false; const did = isNew ? Date.now() : id;
+    try { ok = await saveFDeck(did, def, $('#fd-allow').classList.contains('on')); } finally { S.busy = false; }
+    if (!ok) return;
+    close(); startStudy(did);
+  };
+  page.classList.add('open');
 }
 
 // ---------- デッキ一覧 ----------
 const extKey = (day, did) => `ext:${day}:${did}`;
 function getExt(day, did) { try { return JSON.parse(localStorage.getItem(extKey(day, did)) || 'null') || { new: 0, rev: 0 }; } catch { return { new: 0, rev: 0 }; } }
 function addExt(did, kind, n) { S.mainQ = null; const day = timingToday(nowSecs(), S.meta).daysElapsed; const e = getExt(day, did); e[kind] += n; try { localStorage.setItem(extKey(day, did), JSON.stringify(e)); } catch {} }
-function countsFor(did) {
-  if (did === 'session') return sessionCounts();
+function countsFor(did, home = null) {
   const now = nowSecs(); const timing = timingToday(now, S.meta);
+  if (isFDeck(did)) {   // フィルターデッキ: 中のカードだけを、中での期日・種類で（上限なし）
+    const ahead = S.meta.config.collapseTime ?? 1200;
+    const q = filteredQueues(did, S.cards, { today: timing.daysElapsed, nextDayAt: timing.nextDayAt, learnAheadSecs: ahead });
+    return { q, c: [q.counts.new, q.learning.filter(c => fdue(c) <= now + ahead).length + (q.counts.learn - q.learning.length), q.counts.review] };
+  }
   const counts = todayCounts(S.revlog, S.byId, (timing.nextDayAt - 86400) * 1000);
   const extend = new Map(S.meta.decks.map(d => [d.id, getExt(timing.daysElapsed, d.id)]).filter(([, e]) => e.new || e.rev));
   const ahead = S.meta.config.collapseTime ?? 1200;   // 学習中を先取りする秒数（Anki の「先取りの時間」）
-  const q = buildQueues({ selectedDid: did, decks: S.meta.decks, presets: S.meta.presets, cards: S.cards, timing, now, counts, extend, learnAheadSecs: ahead, newIgnoresReviewLimit: !!S.meta.config.newCardsIgnoreReviewLimit, applyAllParentLimits: !!S.meta.config.applyAllParentLimits, fsrs: !!S.meta.config.fsrs });
+  const q = buildQueues({ selectedDid: did, decks: S.meta.decks, presets: S.meta.presets, cards: home || homeCards(), timing, now, counts, extend, learnAheadSecs: ahead, newIgnoresReviewLimit: !!S.meta.config.newCardsIgnoreReviewLimit, applyAllParentLimits: !!S.meta.config.applyAllParentLimits, fsrs: !!S.meta.config.fsrs });
   const learnNow = q.learning.filter(c => c.due <= now + ahead).length + (q.counts.learn - q.learning.length);
   return { q, c: [q.counts.new, learnNow, q.counts.review] };
 }
@@ -322,26 +417,30 @@ function showDecks() {
   if (typeof stopAv === 'function') stopAv();
   S.deck = null; document.body.dataset.view = 'decks'; sp?.setCard(null); S.auto = false; autoClear();
   checkDay();
-  const decks = [...S.meta.decks].sort(deckCmp);
+  // フィルターデッキも名前の順に並べて青字にする（AnkiMobile と同じ）。親が無いもの（Anki で親を消したなど）は一番上に名前全体で出す
+  const fds = [...S.fdecks.values()].filter(f => !f.removed).map(f => ({ id: f.id, name: f.name, dyn: 1 }));
+  const decks = [...S.meta.decks, ...fds].sort(deckCmp), names = new Set(decks.map(d => d.name));
+  const parentOf = n => (n.includes('::') ? n.slice(0, n.lastIndexOf('::')) : null);
   const kids = name => decks.filter(d => d.name.startsWith(name + '::') && !d.name.slice(name.length + 2).includes('::'));
+  const home = homeCards();
   const ul = $('#decklist'); ul.innerHTML = '';
   const chev = '<svg width="7.7" height="12.8" viewBox="0 0 9 15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 1.5 7.5 7.5 1.5 13.5"/></svg>';
   const row = (group, d, depth) => {
     const ch = kids(d.name); const el = document.createElement('div'); el.className = 'row'; el.style.setProperty('--depth', depth);
-    const [n, l, r] = countsFor(d.id).c; const due = l + r;
+    const [n, l, r] = countsFor(d.id, home).c; const due = l + r;
     el.innerHTML = `${ch.length ? `<button class="tw">${S.open.has(d.id) ? '−' : '+'}</button>` : ''}<button class="dname"></button>
       <span class="nums" lang="en"><span class="${due ? 'due' : 'zero'}">${due}</span><span class="${n ? 'newc' : 'zero'}">${n}</span></span><button class="chev" title="デッキの設定">${chev}</button>`;
-    el.querySelector('.dname').textContent = d.name.split('::').pop(); if (d.dyn) el.querySelector('.dname').classList.add('dyn');
+    el.querySelector('.dname').textContent = depth === 0 && d.dyn && parentOf(d.name) ? d.name : d.name.split('::').pop(); if (d.dyn) el.querySelector('.dname').classList.add('dyn');
     el.querySelector('.dname').onclick = () => startStudy(d.id);
+    if (d.dyn) el.querySelector('.chev').onclick = () => openFDeck(d.id);   // フィルターデッキは右の「›」で設定（直す・再構築・削除）の画面
     const tw = el.querySelector('.tw'); if (tw) tw.onclick = () => { S.open.has(d.id) ? S.open.delete(d.id) : S.open.add(d.id); try { localStorage.setItem('openDecks', JSON.stringify([...S.open])); } catch {} showDecks(); };
     group.appendChild(el);
     if (S.open.has(d.id)) for (const c of ch) row(group, c, depth + 1);
   };
-  // AnkiMobile と同じく、カスタム学習セッションも名前の順に並べて青字にする。空の「デフォルト」は出さない
+  // 空の「デフォルト」は出さない
   const used = new Set(S.cards.map(c => c.did));
-  const tops = decks.filter(d => !d.name.includes('::') && !(d.id === 1 && !used.has(1) && !kids(d.name).length));
-  if (loadSession() && sessionCards().length) tops.push({ id: 'session', name: SESSION_NAME, dyn: true });
-  for (const d of tops.sort(deckCmp)) {
+  const tops = decks.filter(d => (!parentOf(d.name) || (d.dyn && !names.has(parentOf(d.name)))) && !(d.id === 1 && !used.has(1) && !kids(d.name).length));
+  for (const d of tops) {
     const g = document.createElement('li'); g.className = 'group'; ul.appendChild(g); row(g, d, 0);
   }
 }
@@ -411,7 +510,7 @@ function openBrowseActions() {
 }
 // 「並び替える」（新規カードの位置を変える。Anki の「位置（新規カード番号）を変更」の小窓と同じ項目・既定。rslib sort_cards と同じ結果）
 async function repositionAction(cs) {
-  const news = S.all.filter(c => c.type === 0 && !c.inDyn && !c.gone).map(c => c.due);
+  const news = S.all.filter(c => c.type === 0 && !fltOf(c) && !c.gone).map(c => c.due);
   const minP = Math.max(news.length ? Math.min(...news) : 0, 0), maxP = news.length ? Math.max(...news) : 0;
   const lsb = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v === '1'; } catch { return d; } };
   const r = await iosPrompt({ title: '位置（新規カード番号）を変更', message: `先頭: ${minP}\n最後: ${maxP}`,
@@ -421,7 +520,7 @@ async function repositionAction(cs) {
   const clampN = (v, lo, hi, d) => { const n = Math.trunc(+v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
   const start = clampN(r.numbers[0], 0, 1000000, 0), step = clampN(r.numbers[1], 1, 10000, 1), [random, shift] = r.toggles;
   try { localStorage.setItem('randomOrderReposition', random ? '1' : '0'); localStorage.setItem('shiftPositionOfExistingCards', shift ? '1' : '0'); } catch {}
-  const { changes, count } = repositionNew(cs, S.all.filter(c => !c.gone), { start, step, random, shift });
+  const { changes, count } = repositionNew(cs, S.all.filter(c => !c.gone), { start, step, random, shift }, Math.random, fltOf);
   const touched = S.all.filter(c => changes.has(c.id));
   if (!touched.length) { toast(`新規カードの位置を${count}枚変更しました。`); return; }
   await changeCards(touched, c => Object.assign(c, changes.get(c.id)), `新規カードの位置を${count}枚変更しました。`, '並び替える', false);
@@ -490,14 +589,15 @@ function openAnkiPage(route, title, did) {
 function rebuildLB() {
   if (S.meta.config.loadBalancerEnabled === false) { S.lb = null; return; }
   const t = timingToday(nowSecs(), S.meta);
-  const cards = S.all.filter(c => !c.gone).map(c => ({ due: c.due, nid: c.nid, conf: c.inDyn ? null : S.decksById.get(c.did)?.conf }));
+  const cards = S.all.filter(c => !c.gone).map(c => ({ due: c.due, nid: c.nid, conf: fltOf(c) ? null : S.decksById.get(c.did)?.conf }));   // フィルターデッキの中のカードは数えない（そのデッキにプリセットが無い）
   for (const [due, conf, nid] of S.meta.lbExtra || []) cards.push({ due, conf, nid });
   S.lb = buildLoadBalancer(cards, t.daysElapsed, t.nextDayAt, S.meta.presets);
 }
 function startStudy(did) { if (typeof did === 'number') { S.lastDeck = did; try { localStorage.setItem('lastDeck', String(did)); } catch {} } S.deck = did; S.mainQ = null; S.auto = false; autoClear(); document.body.dataset.view = 'study'; rebuildLB(); advance(); }
 // 下の帯の「新規 + 学習中 + 復習」。今のカードの種類に下線（AnkiMobile と同じ）
 function paintCounts(c, card) {
-  const cur = !card ? null : card.queue === 0 ? 'new' : (card.queue === 1 || card.queue === 3) ? 'lrn' : 'rev';
+  const qq = !card ? null : isFDeck(S.deck) ? fq(card) : card.queue;   // フィルターデッキでは中での種類（プレビューのデッキなら復習、繰り返しは学習中）
+  const cur = qq == null ? null : qq === 0 ? 'new' : (qq === 1 || qq === 3 || qq === 4) ? 'lrn' : 'rev';
   $('#counts').innerHTML = `<span class="c-new ${cur === 'new' ? 'cur' : ''}">${c[0]}</span> + <span class="c-lrn ${cur === 'lrn' ? 'cur' : ''}">${c[1]}</span> + <span class="c-rev ${cur === 'rev' ? 'cur' : ''}">${c[2]}</span>`;
 }
 // force: 元に戻したカード。並びから選び直さずにそのカードを出す（Anki と同じ。選び直すと期限の来た学習中のカードが先に出てしまう）
@@ -516,10 +616,12 @@ function fixMain(q) {
 }
 function advance(force = null) {
   checkDay();
+  if (!S.decksById.has(S.deck) && !isFDeck(S.deck)) { showDecks(); return; }   // 開いていたフィルターデッキを（ほかの端末で）消した
+  const inF = isFDeck(S.deck);
   let { q, c } = countsFor(S.deck);
-  if (S.deck !== 'session') { fixMain(q); c = [q.counts.new, q.learning.filter(x => x.due <= nowSecs() + q.learnAheadSecs).length + (q.counts.learn - q.learning.length), q.counts.review]; }
+  if (!inF) { fixMain(q); c = [q.counts.new, q.learning.filter(x => x.due <= nowSecs() + q.learnAheadSecs).length + (q.counts.learn - q.learning.length), q.counts.review]; }
   S.q = q;
-  const nx = force ? { card: force } : nextCard(q, nowSecs());
+  const nx = force ? { card: force } : inF ? nextFilteredCard(q, nowSecs()) : nextCard(q, nowSecs());
   $('#donebox').classList.toggle('show', !nx);
   if (!nx) {
     S.card = null; S.side = 'q'; pen.clear(); sp?.setCard(null); autoClear(); paintCounts(c, null); setButtons('q'); ask.onCard(null); paintMarks();
@@ -566,9 +668,9 @@ function pressButton(el, fn) {
 }
 function ctxFor(card) {
   let last = null; for (const r of S.revlog) if (r.cid === card.id && (!last || r.id > last.id)) last = r;
-  // 負荷分散はフィルターデッキ（カスタム学習セッション・Anki 側でフィルターデッキにあるカード）では使わない（デッキにプリセットが無いため）
-  const lb = S.deck === 'session' || card.inDyn ? null : S.lb;
-  return makeContext(card, presetOf(card.did), cfg(), nowSecs(), last ? Math.floor(last.id / 1000) : null, { lb, conf: S.decksById.get(card.did)?.conf, filtered: S.deck === 'session' });
+  // 負荷分散はフィルターデッキでは使わない（デッキにプリセットが無いため）。フィルターデッキの中のカードは期日を今日に詰めない（ans_current.rs）
+  const inF = !!fltOf(card), lb = inF ? null : S.lb;
+  return makeContext(card, presetOf(card.did), cfg(), nowSecs(), last ? Math.floor(last.id / 1000) : null, { lb, conf: S.decksById.get(card.did)?.conf, filtered: inF });
 }
 async function rate(g, byKey = false) {
   if (!S.card || S.side !== 'a' || S.busy) return;
@@ -579,12 +681,19 @@ async function rate(g, byKey = false) {
 async function rateInner(g) {
   const prev = structuredClone(S.card);
   const maxMs = (presetOf(S.card.did).maxTaken || 60) * 1000;   // 解答時間の上限（デッキのオプション。既定 60 秒）
-  const res = answer(S.card, g, ctxFor(S.card), Math.min(maxMs, Math.round(performance.now() - S.shownAt)), Date.now());
+  const taken = Math.min(maxMs, Math.round(performance.now() - S.shownAt)), at = Date.now(), fd = fdeckOf(S.card);
+  let res;
+  if (fd && !fd.resched) {   // プレビュー（再スケジュールしないフィルターデッキ）: 元のデッキでの状態は変えない
+    const ctx = ctxFor(S.card), t = timingToday(Math.floor(at / 1000), S.meta);
+    res = answerPreview(S.card, g, fd, { nextDayAt: t.nextDayAt, now: Math.floor(at / 1000), takenMillis: taken, answeredAtMs: at, decay: ctx.fsrsOn ? ctx.decay : null });
+  } else {
+    res = answer(S.card, g, ctxFor(S.card), taken, at);
+    if (fd) res.card = afterRescheduling(res.card, res.state.kind);   // 復習になったら元のデッキへ、学習中ならデッキに残る
+  }
   const c = S.byId.get(prev.id); Object.assign(c, res.card); c.rev = res.revlog.id; addRev(res.revlog); flashTick(g);
   if (res.card.leeched && res.card.lapses !== prev.lapses) toast(c.queue === -1 ? '回答したカードは「leech」（苦戦、忘却多発）のカードです。 カードを休止しました' : '回答したカードは「leech」（苦戦、忘却多発）のカードです。');
-  if (c.queue === 2 && S.lb && S.deck !== 'session' && !c.inDyn) lbAdd(S.lb, c.nid, S.decksById.get(c.did)?.conf, c.ivl); // 復習になったら負荷分散の数に足す（answer_card_inner）
-  if (S.deck === 'session') leaveSessionIfDone(c);
-  const sibs = burySiblings(prev);   // 兄弟を翌日まで埋める（プリセットの「兄弟を埋める」）
+  if (c.queue === 2 && S.lb && !fd && !fltOf(c)) lbAdd(S.lb, c.nid, S.decksById.get(c.did)?.conf, c.ivl); // 復習になったら負荷分散の数に足す（answer_card_inner。フィルターデッキで答えたときは足さない）
+  const sibs = burySiblings(fltOf(prev) ? { ...prev, queue: fq(prev) } : prev);   // 兄弟を翌日まで埋める（元のデッキのプリセットの「兄弟を埋める」。フィルターデッキでは中での種類で）
   S.undo.push({ prev, revlogId: res.revlog.id, sibs }); if (S.undo.length > 30) S.undo.shift(); // 続けて戻せるように（30回まで）
   await store.addOp({ t: 'ans', r: res.revlog, c: { id: c.id, st: pickState(c), rev: c.rev } });
   const base = lastRevIds(sibs.map(s => s.id));
@@ -697,7 +806,9 @@ function unburyOld() {
 // AnkiMobile はカードを出したときに状態を計算しておき、答えたときの状態と違えば「card was modified」で答えを断る（日付をまたいだ・同期で中身が変わった）。
 // 状態の作り方は ans_current.rs current_card_state。学習中の経過秒は比べない（set_elapsed_secs_equal）。カスタム学習セッションはフィルターデッキ扱い
 function curState(card, now) {
-  const t = timingToday(now, S.meta), p = presetOf(card.did), filtered = S.deck === 'session';
+  const fd = fdeckOf(card);
+  if (fd && !fd.resched) return { k: 'Preview', v: { scheduled_secs: fd.previewAgain ?? 60, finished: false }, filtered: true };   // プレビュー（current_card_state）
+  const t = timingToday(now, S.meta), p = presetOf(card.did), filtered = !!fd;
   const mem = card.data && card.data.s != null ? { stability: card.data.s, difficulty: card.data.d } : null;
   const rem = (card.left || 0) % 1000;
   const learn = steps => { const sec = steps.currentDelay(rem);
@@ -722,6 +833,7 @@ function rustDebug(st) {
   const inner = (n) => st.k === 'New' ? struct('NewState', [['position', st.v.position]], n) : st.k === 'Learning' ? learnS(st.v, n) : st.k === 'Review' ? reviewS(st.v, n)
     : struct('RelearnState', [['learning', learnS(st.v.learning, n + 1)], ['review', reviewS(st.v.review, n + 1)]], n);
   const normal = b => `${st.k}(\n${I(b + 1)}${inner(b + 1)},\n${I(b)})`;
+  if (st.k === 'Preview') return `Filtered(\n${I(1)}Preview(\n${I(2)}${struct('PreviewState', [['scheduled_secs', st.v.scheduled_secs], ['finished', st.v.finished]], 2)},\n${I(1)}),\n)`;
   return st.filtered ? `Filtered(\n${I(1)}Rescheduling(\n${I(2)}ReschedulingFilterState {\n${I(3)}original_state: ${normal(3)},\n${I(2)}},\n${I(1)}),\n)` : `Normal(\n${I(1)}${normal(1)},\n)`;
 }
 function checkModified(card) {
@@ -771,7 +883,7 @@ function freshRevId() { let id = Date.now(); while (S.revIds.has(id)) id++; retu
 // 手で決めた期日・リセット（記録は種類 4「手動」）を、答えと同じ形で残して送る（元に戻すでも戻せる）
 async function applyManual(prevCard, res, msg, quiet = false) {
   const c = S.byId.get(prevCard.id), prev = structuredClone(prevCard);
-  Object.assign(c, res.card); if (!('inDyn' in res.card)) delete c.inDyn; c.rev = res.revlog.id; addRev(res.revlog);
+  Object.assign(c, res.card); c.rev = res.revlog.id; addRev(res.revlog);
   S.undo.push({ prev, revlogId: res.revlog.id, sibs: [] }); if (S.undo.length > 30) S.undo.shift();
   await store.addOp({ t: 'ans', r: res.revlog, c: { id: c.id, st: pickState(c), rev: c.rev } });
   if (quiet) return;   // ブラウザでまとめてするとき（最後に一度だけ知らせる）
@@ -1207,13 +1319,15 @@ function setButtons(mode) {
   // 問題の面は AnkiMobile と同じくカードをタップで答え。下の帯は枚数だけ
   $('#counts').hidden = mode === 'a'; box.hidden = mode !== 'a';
   if (mode === 'a') {
-    const { next } = nextStates(S.card, ctxFor(S.card));
     // 1日の境目をまたぐ学習ステップは日に直してから書く（describe_next_states と同じ）
     const t = timingToday(nowSecs(), S.meta); const untilRollover = t.nextDayAt - nowSecs();
-    const secsOf = st => { if (st.kind === 'review') return st.days * 86400; const x = st.kind === 'relearn' ? st.learn.secs : st.secs; return x >= untilRollover ? (Math.floor((x - untilRollover) / 86400) + 1) * 86400 : x; };
+    const asDays = x => (x >= untilRollover ? (Math.floor((x - untilRollover) / 86400) + 1) * 86400 : x);
+    const fd = fdeckOf(S.card), pv = fd && !fd.resched ? previewDelays(fd) : null;   // プレビュー: それぞれの秒数（0＝終わり）
+    const next = pv ? null : nextStates(S.card, ctxFor(S.card)).next;
+    const secsOf = st => { if (st.kind === 'review') return st.days * 86400; const x = st.kind === 'relearn' ? st.learn.secs : st.secs; return asDays(x); };
     const collapse = S.meta.config.collapseTime ?? 1200;
     [[1, 'もう一度', 'again'], [2, '難しい', 'hard'], [3, '正解', 'good'], [4, '簡単', 'easy']].forEach(([g, name, cls]) => {
-      const b = document.createElement('button'); b.className = `rate ${cls}`; b.innerHTML = `<span>${fmtIvl(secsOf(next[g]), collapse)}</span><span>${name}</span>`; pressButton(b, () => rate(g)); box.appendChild(b);
+      const b = document.createElement('button'); b.className = `rate ${cls}`; b.innerHTML = `<span>${fmtIvl(pv ? asDays(pv[g]) : secsOf(next[g]), collapse)}</span><span>${name}</span>`; pressButton(b, () => rate(g)); box.appendChild(b);
     });
   }
 }
@@ -1298,37 +1412,68 @@ function startTimer() {
 }
 
 // ---------- カスタム学習の画面（rslib scheduler/filtered/custom_study.rs と同じ動き。見た目は AnkiMobile） ----------
+// 上限の上乗せ以外は、Anki と同じく「カスタム学習セッション」というフィルターデッキを作る（あれば作り直す）
 function openCustom() {
-  const did = S.deck === 'session' ? loadSession()?.from : S.deck; if (!did) return;
-  const d = S.decksById.get(did);
+  const did = S.deck;
+  if (isFDeck(did)) { iosAlert('Error', 'deck not normal'); return; }   // custom_study_defaults はふつうのデッキでないと断る
+  const d = S.decksById.get(did); if (!d) return;
   // 上乗せ可能＝そのデッキそのものにある新規（子デッキは含まない。custom_study_defaults の available_new と同じ）
-  const own = q => S.cards.filter(c => c.did === did && q(c)).length;
+  const own = q => homeCards().filter(c => c.did === did && q(c)).length;
   const t = timingToday(nowSecs(), S.meta);
   const availNew = own(c => c.queue === 0), availRev = own(c => c.queue === 2 && c.due <= t.daysElapsed);
-  const last = k => { try { return +localStorage.getItem(`cs:${k}:${did}`) || 0; } catch { return 0; } };
+  const last = (k, dflt) => { try { return +localStorage.getItem(`cs:${k}:${did}`) || dflt; } catch { return dflt; } };
   const OPT = {
-    new: ['今日の新規カードの上限に上乗せ', last('new') || d.extendNew || 0, `上乗せ可能な新規カード: ${availNew} 枚`],
-    rev: ['今日の復習カードの上限に上乗せ', last('rev') || d.extendRev || 0, `上乗せ可能な復習カード: ${availRev} 枚`],
-    ahead: ['先取りする日数', last('ahead') || 1, ''],
+    new: ['今日の新規カードの上限に上乗せ', last('new', d.extendNew || 0), `上乗せ可能な新規カード: ${availNew} 枚`],
+    rev: ['今日の復習カードの上限に上乗せ', last('rev', d.extendRev || 0), `上乗せ可能な復習カード: ${availRev} 枚`],
+    forgot: ['もう一度と回答したカードを復習: 直近', last('forgot', 1), '日'],
+    ahead: ['先取りする日数', last('ahead', 1), ''],
+    preview: ['新規カードのプレビュー: 追加日が過去', last('preview', 1), '日'],
+  };
+  for (const k of ['tagnew', 'tagdue', 'tagrev', 'tagall']) OPT[k] = ['このデッキから', last('cram', 100), '枚のカードを抽出する'];
+  // タグ（そのデッキと子デッキのカードのノートのタグ。選んだものはデッキごとに覚える＝Anki の customStudyIncludeTags/ExcludeTags）
+  const sub = new Set(S.meta.decks.filter(x => x.name === d.name || x.name.startsWith(d.name + '::')).map(x => x.id));
+  const tagMap = new Map(); for (const c of S.cards) if (sub.has(c.did)) for (const tg of c.tags || []) tagMap.set(tg.toLowerCase(), tagMap.get(tg.toLowerCase()) ?? tg);
+  const allTags = [...tagMap.values()].sort((a, b) => a.localeCompare(b));
+  let sel = { inc: [], exc: [] }; try { sel = { inc: [], exc: [], ...JSON.parse(localStorage.getItem(`cs:tags:${did}`) || '{}') }; } catch {}
+  const paintTags = () => {
+    for (const [ul, key] of [[$('#cp-inc'), 'inc'], [$('#cp-exc'), 'exc']]) {
+      ul.innerHTML = '';
+      for (const tg of allTags) {
+        const li = document.createElement('li'); li.textContent = tg; li.classList.toggle('on', sel[key].includes(tg));
+        li.onclick = () => { sel[key] = sel[key].includes(tg) ? sel[key].filter(x => x !== tg) : [...sel[key], tg]; li.classList.toggle('on'); };
+        ul.append(li);
+      }
+    }
   };
   const pick = k => {
     if (!OPT[k]) return;
     document.querySelectorAll('#cp-types li').forEach(li => li.classList.toggle('on', li.dataset.k === k));
     $('#cp-label').textContent = OPT[k][0]; $('#cp-n').value = OPT[k][1]; $('#cp-foot').textContent = OPT[k][2];
     $('#customPage').dataset.k = k;
+    const tags = k.startsWith('tag'); $('#cp-tags').hidden = !tags; if (tags) paintTags();
   };
   document.querySelectorAll('#cp-types li').forEach(li => li.onclick = () => pick(li.dataset.k));
   pick('new');
   const close = () => $('#customPage').classList.remove('open');
   $('#cp-back').onclick = close;
-  $('#cp-done').onclick = () => {
+  $('#cp-done').onclick = async () => {
     const k = $('#customPage').dataset.k; const n = Math.max(1, Math.min(9999, parseInt($('#cp-n').value, 10) || 0));
-    if (k === 'ahead' && !createReviewAhead(did, n)) { iosAlert('Error', '指定した条件に一致するカードはありませんでした。'); return; } // rslib CustomStudyError::NoMatchingCards。画面はそのまま
-    try { localStorage.setItem(`cs:${k}:${did}`, n); } catch {}
-    close();
-    if (k === 'new') addExt(did, 'new', n); else if (k === 'rev') addExt(did, 'rev', n);
-    else if (k === 'ahead') { startStudy('session'); return; }
-    if (document.body.dataset.view === 'study') advance(); else showDecks();
+    if (k === 'new' || k === 'rev') {
+      try { localStorage.setItem(`cs:${k}:${did}`, n); } catch {}
+      close(); addExt(did, k, n);
+      if (document.body.dataset.view === 'study') advance(); else showDecks();
+      return;
+    }
+    const def = customStudyDeck(k, d.name, { days: n, limit: n, include: sel.inc, exclude: sel.exc }); if (!def || S.busy) return;
+    // 同じ名前のデッキがあればそれを作り直す（ふつうのデッキなら Anki と同じく断る）
+    if (S.meta.decks.some(x => x.name === CUSTOM_STUDY_NAME)) { iosAlert('Error', 'すでに存在しているカスタム学習デッキの名前を変更してください。'); return; }
+    const old = [...S.fdecks.values()].find(f => !f.removed && f.name === CUSTOM_STUDY_NAME);
+    const id = old ? old.id : Date.now();
+    let picked; try { picked = await computeFDeck(id, def); } catch (e) { iosAlert('Error', displayText(String(e && e.message || e))); return; }
+    if (!picked.size) { iosAlert('Error', '指定した条件に一致するカードはありませんでした。'); return; }   // CustomStudyError::NoMatchingCards。画面はそのまま
+    try { localStorage.setItem(`cs:${k.startsWith('tag') ? 'cram' : k}:${did}`, n); if (k.startsWith('tag')) localStorage.setItem(`cs:tags:${did}`, JSON.stringify(sel)); } catch {}
+    S.busy = true; try { await saveConf('fdeck:' + id, def, Date.now()); await writeFlt(id, picked); } finally { S.busy = false; }
+    close(); startStudy(id);
   };
   $('#customPage').classList.add('open');
 }
@@ -1338,7 +1483,7 @@ const ACTIONS = [
   ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => [`ua${n}`, `User Action ${n}`, null]),
   ['redo', 'やり直す', null],
   ['off', 'オフ', () => {}],
-  ['options', 'オプション', () => { if (typeof S.deck === 'number') openAnkiPage('deck-options', 'オプション', S.deck); }],
+  ['options', 'オプション', () => { if (isFDeck(S.deck)) openFDeck(S.deck); else if (typeof S.deck === 'number') openAnkiPage('deck-options', 'オプション', S.deck); }],
   ['custom', 'カスタム学習', () => openCustom()],
   ['auto', 'カードの自動送り', () => toggleAuto()],
   ['reset', 'カードをリセット', () => resetAction()],
@@ -1348,14 +1493,14 @@ const ACTIONS = [
   ['info', 'カード情報', () => cardInfo(S.card)],
   ['tools', 'ツールアイコン', () => openTools()],
   ['decks', 'デッキ', () => showDecks()],
-  ['stats', 'デッキの統計', () => openAnkiPage('graphs', S.deck === 'session' ? 'カスタム学習セッション' : S.decksById.get(S.deck)?.name.split('::').pop() || '統計', S.deck)],
+  ['stats', 'デッキの統計', () => openAnkiPage('graphs', deckName(S.deck).split('::').pop() || '統計', S.deck)],
   ['unburyDeck', 'デッキ内非表示解除', () => window.ankiBridge('unbury')],
   ['topbar', 'トップバー', () => flipPref('topbar')],
   ['night', 'ナイトモード', () => { try { localStorage.setItem('theme', isDark() ? 'light' : 'dark'); } catch {} applyTheme(); }],
   ['buryNote', 'ノートを今日は非表示', () => buryNote()],
   ['suspendNote', 'ノートを休止', () => suspendNote()],
   ['deleteNote', 'ノートを削除', () => notes.deleteFrom(S.card)],
-  ['filter', 'フィルター / 詰め込み', null],
+  ['filter', 'フィルター / 詰め込み', () => openFDeck(null)],
   ...[1, 2, 3, 4, 5, 6, 7].map(n => [`flag${n}`, `フラグ${n}`, () => setFlag(n)]),
   ['browse', 'ブラウザ', () => openBrowse('deck:current')],
   ['bottombar', 'ボトムバー', () => flipPref('bottombar')],
@@ -1365,7 +1510,7 @@ const ACTIONS = [
   ['scrollUp', '上にスクロール', () => scrollCard(-1)],
   ['scrollDown', '下にスクロール', () => scrollCard(1)],
   ['undo', '元に戻す', () => undoAnswer()],
-  ['rebuild', '再構築', null],
+  ['rebuild', '再構築', () => fdeckAction('rebuild')],
   ['sync', '同期', () => runSync(true)],
   ['again', '回答 (もう一度)', () => answerBy(1)],
   ['good', '回答 (正解)', () => answerBy(3)],
@@ -1375,11 +1520,11 @@ const ACTIONS = [
   ['spSize', '手書きサイズ', () => sp.cycleSize()],
   ['scratchpad', '手書きパッド', () => sp.toggle()],
   ['due', '期日を指定', () => dueAction()],
-  ['empty', '空にする', null],
+  ['empty', '空にする', () => fdeckAction('empty')],
   ['edit', '編集', () => notes.openEdit(S.card)],
   ['show', '解答を表示', () => { if (S.side === 'q') showAnswer(); }],
   ['showGood', '解答を表示 / 回答 (正解)', () => { if (S.side === 'q') showAnswer(); else answerBy(3); }],
-  ['add', '追加', () => notes.openAdd({ did: typeof S.deck === 'number' ? S.deck : null })],
+  ['add', '追加', () => notes.openAdd({ did: S.decksById.has(S.deck) ? S.deck : null })],   // フィルターデッキにはノートを足せない
   ['playRec', '録音した声を再生', null],
   ['recMenu', '録音メニュー', null],
   ['fwd5', '音声 +5秒', () => avSeek(5)],
@@ -1480,7 +1625,7 @@ function autoFire(card, side) {
 
 window.ankiBridge = cmd => {
   if (cmd === 'customStudy') openCustom();
-  else if (cmd === 'unbury' && typeof S.deck === 'number') {
+  else if (cmd === 'unbury' && S.decksById.has(S.deck)) {
     const root = S.decksById.get(S.deck); const ids = new Set(S.meta.decks.filter(d => d.name === root.name || d.name.startsWith(root.name + '::')).map(d => d.id));
     changeCards(S.cards.filter(c => ids.has(c.did) && (c.queue === -2 || c.queue === -3)), c => { c.queue = c.type === 0 ? 0 : c.type === 2 ? 2 : (c.due > 1e9 ? 1 : 3); }, '非表示のカードを戻しました', '非表示を戻す');
   }
@@ -1528,8 +1673,7 @@ function setupTools() {
     const a = b.dataset.act; closeMenu();
     if (a === 'undo') undoAnswer();
     else if (a === 'decks') showDecks();
-    else if (a === 'options' && typeof S.deck === 'number') openAnkiPage('deck-options', 'オプション', S.deck);
-    else if (a === 'stats') openAnkiPage('graphs', S.deck === 'session' ? 'カスタム学習セッション' : S.decksById.get(S.deck)?.name.split('::').pop() || '統計', S.deck);
+    else if (a === 'options' || a === 'stats' || a === 'filter') ACT.get(a)[2]();
     else if (a === 'custom') openCustom();
     else if (a === 'scratchpad') sp.toggle();
     else if (a === 'topbar') { try { localStorage.setItem('pref:topbar', pref('topbar') ? '0' : '1'); } catch {} applyPrefs(); }

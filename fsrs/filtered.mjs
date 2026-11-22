@@ -15,20 +15,34 @@ export function fltIn(fdecks, c) {
   const d = fdecks?.get(f.d); return d && !d.removed ? f : null;
 }
 
-// 新しいフィルターデッキの既定（decks/filtered.rs new_filtered・filtered/mod.rs new_filtered_deck_for_adding）
+// 新しいフィルターデッキの既定（decks/filtered.rs new_filtered・filtered/mod.rs new_filtered_deck_for_adding。名前は Anki でも英語の "Filtered Deck 時:分"）
 export function newFilteredDeck(currentDeckName, nowDate = new Date()) {
   const hh = String(nowDate.getHours()).padStart(2, '0'), mm = String(nowDate.getMinutes()).padStart(2, '0');
-  const ds = currentDeckName ? deckSearch(currentDeckName) : '';
+  const ds = currentDeckName ? writeNode('deck', currentDeckName) : '';
   return {
     name: `Filtered Deck ${hh}:${mm}`,
     terms: [{ search: ds ? `${ds} is:due` : '', limit: 100, order: ORDER.RANDOM }, { search: ds ? `${ds} is:new` : '', limit: 20, order: ORDER.DUE }],
     second: false, resched: true, previewAgain: 60, previewHard: 600, previewGood: 0,
   };
 }
-// search/writer.rs deck_search: deck:"名前"（" と \ と * _ をエスケープ）
-export function deckSearch(name) {
-  const esc = String(name).replace(/[\\"]/g, m => '\\' + m).replace(/\*/g, '\\*').replace(/_/g, '\\_');
-  return `deck:"${esc}"`;
+// search/writer.rs と同じ書き方: 値の \ " * _ を逃がし、空白・かっこがあれば全体を "" で囲む（deck:P・"deck:P::A b"・deck:a\_b）
+export function writeNode(prefix, text) {
+  const s = `${prefix}:${String(text).replace(/[\\"*_]/g, m => '\\' + m)}`;
+  return /[\s()]/.test(s) || s.startsWith('-') ? `"${s}"` : s;
+}
+export const CUSTOM_STUDY_NAME = 'カスタム学習セッション';
+// カスタム学習で作るフィルターデッキ（filtered/custom_study.rs の forgot_config・ahead_config・preview_config・cram_config）。上限は既定 99999
+export function customStudyDeck(kind, deckName, { days = 1, limit = 100, include = [], exclude = [] } = {}) {
+  const dk = writeNode('deck', deckName);
+  const make = (resched, search, order, lim = 99999) => ({ name: CUSTOM_STUDY_NAME, terms: [{ search, limit: lim, order }], second: false, resched, previewAgain: 60, previewHard: 600, previewGood: 0 });
+  if (kind === 'forgot') return make(false, `rated:${days}:1 ${dk}`, ORDER.RANDOM);
+  if (kind === 'ahead') return make(true, `prop:due<=${days} ${dk}`, ORDER.DUE);
+  if (kind === 'preview') return make(false, `is:new added:${days} ${dk}`, ORDER.ADDED);
+  const cram = { tagnew: [true, 'is:new', ORDER.ADDED], tagdue: [true, 'is:due', ORDER.DUE], tagrev: [true, '-is:new', ORDER.RANDOM], tagall: [false, '', ORDER.RANDOM] }[kind];
+  if (!cram) return null;
+  const inc = include.map(t => writeNode('tag', t)), exc = exclude.map(t => '-' + writeNode('tag', t));
+  const tags = [inc.length > 1 ? `(${inc.join(' OR ')})` : inc[0], ...exc].filter(Boolean).join(' ');
+  return make(cram[0], [cram[1], dk, tags].filter(Boolean).join(' '), cram[2], limit);
 }
 
 // storage/card/filtered.rs order_and_limit_for_search の並び（最後に fnvhash(c.id, c.mod)）。SQL と同じく NULL は小さいものとして扱う
