@@ -13,6 +13,7 @@ import { typeQuestion, typeAnswer } from './typeans.mjs';
 import { createScratchpad, spPref, SP_WIDTH, SP_SIZE, SP_ALPHA } from './scratchpad.mjs';
 import { repositionNew } from '../fsrs/reposition.mjs';
 import { createNotes } from './notes.mjs';
+import { createDecks, attachSwipe } from './decks.mjs';
 import { updateMemoryState, Rescheduler } from '../fsrs/memory.mjs';
 import * as fsrsJobs from './fsrsjobs.mjs';
 
@@ -130,6 +131,8 @@ function applyOp(op) {
 function applyConf(rows) {
   if (!Array.isArray(rows)) return;
   if (rows.length) S.mainQ = null;   // 上限・並びが変わるので組み直す
+  const dn = rows.filter(r => r.k.startsWith('dname:'));   // デッキの作成・名前変更・削除（app/decks.mjs）。作ったデッキのオプション（deck:<id>）が引けるように先に
+  if (dn.length && deckOps.applyRows(dn) && S.all.length) refreshCards();
   for (const { k, v, rev } of rows) {
     if (k.startsWith('preset:')) {
       const id = +k.slice(7), cur = S.meta.presets[id];
@@ -146,6 +149,19 @@ function applyConf(rows) {
   }
 }
 async function saveConf(k, v, rev) { applyConf([{ k, v, rev }]); await store.addOp({ t: 'conf', k, v, rev }); }
+// デッキの作成・名前変更・削除（app/decks.mjs。記録は conf の dname:<id>。スワイプで開いた行は1つだけ）
+let swipeRow = null;
+const deckOps = createDecks({ S,
+  commitConf: async rows => { applyConf(rows); for (const r of rows) await store.addOp({ t: 'conf', ...r }); },
+  pushUndo: e => { S.undo.push(e); if (S.undo.length > 30) S.undo.shift(); },
+  prompt: o => iosPrompt(o), alert: (t, m) => iosAlert(t, m),
+  saveOpen: () => { try { localStorage.setItem('openDecks', JSON.stringify([...S.open])); } catch {} },
+  defaultName: () => S.meta.presets?.[1]?.name || 'Default',   // 既定のデッキを消したときの名前（Anki はパソコンの言語の「デフォルト」。アドオンが同期で正しい名前を返す）
+  done: msg => { deckDone(); if (msg) toast(msg); },
+  fdecks: () => [...S.fdecks.values()].filter(f => !f.removed),
+  renameFDeck: async (id, name, rev) => { const f = S.fdecks.get(id); if (!f || f.removed) return; const { rev: r0, ...def } = f; await saveConf('fdeck:' + id, { ...def, name }, Math.max(rev, (r0 || 0) + 1)); },
+  deleteFDeck: id => deleteFDeck(id) });
+function deckDone() { S.mainQ = null; refreshCards(); if (document.body.dataset.view === 'decks') showDecks(); scheduleSync(); }
 // Anki の「デッキのオプション」画面で保存したとき（rslib deckconfig/update.rs と同じ考え方）
 async function updateDeckConfigs(req) {
   // 保存の前の、デッキごとのパラメータ・望ましい保持率・楽な日（rslib update_deck_configs_inner。変わったデッキの記憶の値を計算し直す）
@@ -234,7 +250,8 @@ function applyServer(cards, revlog) {
   for (const row of cards) { const c = S.byId.get(row.id); if (c) applyState(c, row.st, row.rev); }
   for (const r of revlog) { if (r.del) delRev(r.id); else addRev(r); }
 }
-const refreshCards = () => { S.cards = S.all.filter(c => c.type != null && !c.gone); };   // gone＝消したノートのカード
+const alive = c => !c.gone && !deckOps.hides(c);   // gone＝消したノートのカード。hides＝消したデッキのカード
+const refreshCards = () => { S.cards = S.all.filter(c => c.type != null && alive(c)); };
 async function load() {
   $('#status').textContent = '読み込み中…';
   const man = await fetchJSON(BUNDLE + 'manifest.json');
@@ -245,6 +262,7 @@ async function load() {
     fetchJSON(BUNDLE + man.base.state), fetchJSON(BUNDLE + man.base.revlog)]);
   S.meta = meta; S.manifest = man; S.decksById = new Map(meta.decks.map(d => [d.id, d]));
   S.fdecks = new Map((meta.fdecks || []).map(f => [f.id, { ...f, rev: (f.mod || 0) * 1000 }]));   // Anki のフィルターデッキ（書き出した時点の定義）
+  deckOps.reset();   // 束のデッキの名前と mod を覚えておく（端末での名前変更・削除は、これより新しいものだけ重ねる）
   // 「今のデッキ」（統計・ブラウザの deck:current）: この端末で最後に開いたデッキ、無ければ Anki の curDeck（Anki と同じく開き直しても覚えている）
   if (typeof S.lastDeck !== 'number') { let d = null; try { d = +localStorage.getItem('lastDeck') || null; } catch {} if (!S.decksById.has(d)) d = meta.config?.curDeck; if (S.decksById.has(d)) S.lastDeck = d; }
   // 開いた親デッキは開き直しても残す（AnkiMobile と同じ）。この端末で一度も触っていなければ Anki の「畳んだ」印に従う
@@ -265,6 +283,7 @@ async function load() {
   applyServer(await store.getAll('srv_cards'), (await store.getAll('srv_revlog')).sort((a, b) => a.seq - b.seq));
   applyConf(await store.get('kv', 'conf')); applyConf((await store.outbox()).map(x => x.op).filter(o => o.t === 'conf'));
   for (const { op } of await store.outbox()) applyOp(op);
+  if (S.lastDeck != null && S.decksById.get(S.lastDeck)?.gone) S.lastDeck = 1;   // 今のデッキを消していたら、既定のデッキ（Anki と同じ）
   refreshCards();
   checkDay(true);
   $('#status').textContent = '';
@@ -497,7 +516,7 @@ function showDecks() {
   const parentOf = n => (n.includes('::') ? n.slice(0, n.lastIndexOf('::')) : null);
   const kids = name => decks.filter(d => d.name.startsWith(name + '::') && !d.name.slice(name.length + 2).includes('::'));
   const home = homeCards();
-  const ul = $('#decklist'); ul.innerHTML = '';
+  const ul = $('#decklist'); ul.innerHTML = ''; swipeRow = null;
   const chev = '<svg width="7.7" height="12.8" viewBox="0 0 9 15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 1.5 7.5 7.5 1.5 13.5"/></svg>';
   const row = (group, d, depth) => {
     const ch = kids(d.name); const el = document.createElement('div'); el.className = 'row'; el.style.setProperty('--depth', depth);
@@ -508,6 +527,8 @@ function showDecks() {
     el.querySelector('.dname').onclick = () => startStudy(d.id);
     if (d.dyn) el.querySelector('.chev').onclick = () => openFDeck(d.id);   // フィルターデッキは右の「›」で設定（直す・再構築・削除）の画面
     const tw = el.querySelector('.tw'); if (tw) tw.onclick = () => { S.open.has(d.id) ? S.open.delete(d.id) : S.open.add(d.id); try { localStorage.setItem('openDecks', JSON.stringify([...S.open])); } catch {} showDecks(); };
+    el.swipe = attachSwipe(el, { onAct: k => (k === 'rename' ? deckOps.rename(d.id) : k === 'delete' ? deckOps.remove(d.id) : null), isOpen: () => swipeRow === el,
+      setOpen: r => { if (swipeRow && swipeRow !== r) swipeRow.swipe?.close(); swipeRow = r; } });
     group.appendChild(el);
     if (S.open.has(d.id)) for (const c of ch) row(group, c, depth + 1);
   };
@@ -584,7 +605,7 @@ function openBrowseActions() {
 }
 // 「並び替える」（新規カードの位置を変える。Anki の「位置（新規カード番号）を変更」の小窓と同じ項目・既定。rslib sort_cards と同じ結果）
 async function repositionAction(cs) {
-  const news = S.all.filter(c => c.type === 0 && !fltOf(c) && !c.gone).map(c => c.due);
+  const news = S.all.filter(c => c.type === 0 && !fltOf(c) && alive(c)).map(c => c.due);
   const minP = Math.max(news.length ? Math.min(...news) : 0, 0), maxP = news.length ? Math.max(...news) : 0;
   const lsb = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v === '1'; } catch { return d; } };
   const r = await iosPrompt({ title: '位置（新規カード番号）を変更', message: `先頭: ${minP}\n最後: ${maxP}`,
@@ -594,7 +615,7 @@ async function repositionAction(cs) {
   const clampN = (v, lo, hi, d) => { const n = Math.trunc(+v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
   const start = clampN(r.numbers[0], 0, 1000000, 0), step = clampN(r.numbers[1], 1, 10000, 1), [random, shift] = r.toggles;
   try { localStorage.setItem('randomOrderReposition', random ? '1' : '0'); localStorage.setItem('shiftPositionOfExistingCards', shift ? '1' : '0'); } catch {}
-  const { changes, count } = repositionNew(cs, S.all.filter(c => !c.gone), { start, step, random, shift }, Math.random, fltOf);
+  const { changes, count } = repositionNew(cs, S.all.filter(alive), { start, step, random, shift }, Math.random, fltOf);
   const touched = S.all.filter(c => changes.has(c.id));
   if (!touched.length) { toast(`新規カードの位置を${count}枚変更しました。`); return; }
   await changeCards(touched, c => Object.assign(c, changes.get(c.id)), `新規カードの位置を${count}枚変更しました。`, '並び替える', false);
@@ -714,7 +735,7 @@ function openAnkiPage(route, title, did) {
 function rebuildLB() {
   if (S.meta.config.loadBalancerEnabled === false) { S.lb = null; return; }
   const t = timingToday(nowSecs(), S.meta);
-  const cards = S.all.filter(c => !c.gone).map(c => ({ due: c.due, nid: c.nid, conf: fltOf(c) ? null : S.decksById.get(c.did)?.conf }));   // フィルターデッキの中のカードは数えない（そのデッキにプリセットが無い）
+  const cards = S.all.filter(alive).map(c => ({ due: c.due, nid: c.nid, conf: fltOf(c) ? null : S.decksById.get(c.did)?.conf }));   // フィルターデッキの中のカードは数えない（そのデッキにプリセットが無い）
   for (const [due, conf, nid] of S.meta.lbExtra || []) cards.push({ due, conf, nid });
   S.lb = buildLoadBalancer(cards, t.daysElapsed, t.nextDayAt, S.meta.presets);
 }
@@ -836,6 +857,7 @@ async function undoAnswer() {
 async function undoInner() {
   const top = S.undo[S.undo.length - 1];
   if (top.kind === 'note') { S.undo.pop(); await notes.undo(top); toast(`元に戻しました（${top.label}）`); return; }   // ノートの追加・編集・削除
+  if (top.kind === 'deck') { S.undo.pop(); await deckOps.undo(top); deckDone(); toast(`元に戻しました（${top.label}）`); return; }   // デッキの作成・名前変更・削除
   if (top.kind === 'set') { // 非表示・休止・フラグ・マークを戻す（新しい時刻で前の状態を送る）
     S.undo.pop(); const now = Date.now();
     const base = lastRevIds(top.prevs.map(p => p.id));
@@ -973,7 +995,7 @@ function checkModified(card) {
 }
 // iOS の警告の小窓（AnkiMobile のエラー表示と同じ見た目: 幅270pt・見出し太字・本文13pt中央・区切り線の下に OK）
 // iOS の確認の小窓（見出し・説明・入力欄かスイッチ・キャンセル／OK）。OK なら { value, toggles }、キャンセルなら null
-function iosPrompt({ title, message = '', input = null, toggles = [], numbers = [], texts = [], ok = 'OK', cancel = 'キャンセル' }) {
+function iosPrompt({ title, message = '', input = null, toggles = [], numbers = [], texts = [], ok = 'OK', cancel = 'キャンセル', danger = false }) {
   let el = $('#iosDialog');
   if (!el) {
     const st = document.createElement('style');
@@ -988,14 +1010,14 @@ function iosPrompt({ title, message = '', input = null, toggles = [], numbers = 
 #iosDialog .txl{font-size:12px;color:var(--al-sub,#8e8e93);padding:0 16px 3px}
 #iosDialog .num{display:flex;align-items:center;gap:8px;font-size:13px;padding:0 16px 10px} #iosDialog .num span{flex:1} #iosDialog .num input{width:90px;height:26px;border:.5px solid var(--al-line);border-radius:7px;padding:0 6px;font-size:13px;background:var(--al-bg);color:var(--al-text);text-align:right}
 #iosDialog .bt{display:flex;border-top:.5px solid var(--al-line)} #iosDialog .bt button{flex:1;height:44px;font-size:17px;color:var(--al-blue)}
-#iosDialog .bt button+button{border-left:.5px solid var(--al-line);font-weight:600}`;
+#iosDialog .bt button+button{border-left:.5px solid var(--al-line);font-weight:600} #iosDialog .bt button.danger{color:#ff3b30}`;
     document.head.append(st);
     el = document.createElement('div'); el.id = 'iosDialog'; el.hidden = true;
     el.innerHTML = '<div class="box"><div class="t"></div><div class="m"></div><div class="f"></div><div class="bt"><button class="no">キャンセル</button><button class="yes">OK</button></div></div>';
     document.body.append(el);
   }
   el.querySelector('.t').textContent = title; el.querySelector('.m').textContent = message;
-  el.querySelector('.no').textContent = cancel; el.querySelector('.yes').textContent = ok;
+  el.querySelector('.no').textContent = cancel; el.querySelector('.yes').textContent = ok; el.querySelector('.yes').classList.toggle('danger', danger);
   const f = el.querySelector('.f'); f.innerHTML = '';
   let inp = null; const tgs = [], nums = [], txs = [];
   for (const t of texts) { const l = document.createElement('div'); l.className = 'txl'; l.textContent = t.label; const c = document.createElement('input'); c.type = 'text'; c.value = t.value ?? ''; c.placeholder = t.placeholder ?? ''; f.append(l, c); txs.push(c); }
@@ -2001,6 +2023,9 @@ function setupTools() {
     mk('キャンセル', 'sel-cancel', () => setBrowseSelect(false)); }
   // 一覧の左下「追加/エクスポート」（AnkiMobile と同じ吹き出し。中の機能はまだ）
   $('#nav-add').onclick = () => { $('#addpop').hidden = false; document.body.classList.add('addopen'); };
+  // スワイプで行を開いているときに、ほかのところを押したら閉じるだけ（iOS の表と同じ）
+  document.addEventListener('click', e => { if (swipeRow && !swipeRow.contains(e.target)) { e.stopPropagation(); e.preventDefault(); swipeRow.swipe?.close(); swipeRow = null; } }, true);
+  $('#addpop .newdeck').onclick = () => { $('#addpop').hidden = true; document.body.classList.remove('addopen'); deckOps.create(); };
   $('#addpop').onclick = e => { if (e.target.id === 'addpop') { $('#addpop').hidden = true; document.body.classList.remove('addopen'); } };
   setupAskButton();
   ask = createAsk({ getCard: () => S.card, getSide: () => S.side, deckName: did => S.decksById.get(did)?.name || '', penImage: () => pen.image(isDark() ? '#000000' : '#ffffff'), hasStrokes: () => pen.state.strokes.length > 0, cardById: id => S.byId.get(id) });
