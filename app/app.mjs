@@ -1960,15 +1960,18 @@ async function checkDatabase() {
 }
 // メディアをチェック: カードが使っているファイルと、配った束にあるファイルを比べる（Anki の「メディアをチェック」の報告と同じ書き方）
 async function checkMedia() {
-  let have = [];
-  try { have = await fetchJSON(BUNDLE + S.manifest.media); } catch {}
-  const names = new Set((Array.isArray(have) ? have : Object.keys(have || {})).map(x => (Array.isArray(x) ? x[0] : x)));
+  // ある画像・音声: 束の一覧＋サーバー（端末で足した・読み込んだもの）＋まだ送っていないもの（xui の mediaIndex）
+  let names = new Set();
+  try { names = new Set((await xchg.mediaIndex()).keys()); } catch {
+    try { const have = await fetchJSON(BUNDLE + S.manifest.media); names = new Set((Array.isArray(have) ? have : Object.keys(have || {})).map(x => (Array.isArray(x) ? x[0] : x))); } catch {}
+  }
   const used = new Set(), re = /<img[^>]+src=["']?([^"'>\s]+)|\[sound:([^\]]+)\]/gi;
   for (const c of S.all) {
+    if (c.gone) continue;   // 消したカード
     for (const h of [c.q, c.a]) for (const m of String(h || '').matchAll(re)) { const n = decodeURIComponent((m[1] || m[2] || '').trim()); if (n && !/^(https?:|data:)/i.test(n)) used.add(n); }
     for (const av of [...(c.qav || []), ...(c.aav || [])]) if (av?.sound) used.add(av.sound);
   }
-  const missing = [...used].filter(n => !names.has(n)).sort(), unused = [...names].filter(n => !used.has(n)).sort();
+  const missing = [...used].filter(n => !names.has(n)).sort(), unused = [...names].filter(n => !used.has(n) && !n.startsWith('_')).sort();   // _ で始まるものは Anki と同じく数えない（テンプレートから使うもの）
   const lines = [`欠落しているファイル：${missing.length}個`, `使用されていないファイル：${unused.length}個`];
   if (missing.length) lines.push('', '▼ 次のファイルを参照しているカードがありますが、該当するファイルがメディアフォルダ内にありません', ...missing.map(n => `実物なし（欠落）：${n}`));
   if (unused.length) lines.push('', '▼ 次のファイルはメディアフォルダ内に存在していますが、どのカードにも使用されていません', ...unused.map(n => `使用なし：${n}`));
