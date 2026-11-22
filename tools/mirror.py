@@ -147,6 +147,15 @@ def apply_notes():
     if n['need_addon']: log('端末で追加したノート・カードが増える編集', n['need_addon'], '件は、Anki のアドオン「暗記と同期」で入れる（ここでは書かない）')
     return n
 
+def count_decks():
+    """端末で作った・名前を変えた・消したデッキ（conf の dname:<id>）は、AnkiConnect ではデッキの id を端末と合わせられないので書かない。数えてログに出すだけ
+    （Anki に入れるのはアドオン「暗記と同期」。手順 8-A）"""
+    rows = api('pull?cs=999999999999&ci=0&rs=999999999999&ri=0&n=1').get('conf', [])
+    n = sum(1 for k, v, rev, src, _ in rows if k.startswith('dname:') and src == 'app')
+    if n: log(f'端末で作った・名前を変えた・消したデッキが {n} 件あります。Anki に入れるにはアドオン「暗記と同期」を使ってください（この書き戻しでは書きません）')
+    return n
+
+
 def apply_conf(exp):
     """アプリで変えたデッキのオプション（サーバーの conf 表、src='app'）を Anki に書く。
     プリセットの中身は saveDeckConfig、アプリで作ったプリセットは cloneDeckConfigId で作ってから、デッキへの割り当ては setDeckConfigId。
@@ -208,6 +217,8 @@ def main():
         snap.sync_anki()
         try: nnote = apply_notes(); summary['notes'] = nnote; log('ノート', nnote)
         except Exception as e: log('ノートを書けなかった（続ける）', repr(e)); summary['note_fail'] = repr(e)[:200]
+        try: summary['decks_need_addon'] = count_decks()
+        except Exception as e: log('デッキの記録を読めなかった（続ける）', repr(e))
         info = snap.take('mirror'); log('写し', info['dir'], 'カード', info['cards'], '記録', info['revlog'])
         # 2. 書き出し
         exp = os.path.join(ST, 'export_new')

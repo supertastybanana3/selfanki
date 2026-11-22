@@ -201,6 +201,145 @@ def write_card(col, cid, st):
 
 
 # ---------- ノート（端末で追加・編集・削除したもの） ----------
+# ---------- デッキの作成・名前変更・削除（端末の conf の dname:<id>。app/decks.mjs） ----------
+TMP = 'selfanki-tmp-'   # 名前を入れ替えるとき（A と B を取り替えたなど）だけ、いったん付ける名前
+
+
+def deck_recs(conf_rows):
+    """dname:<id> の行 → {デッキの id: {v, rev, src}}"""
+    out = {}
+    for k, v, rev, src, _ in conf_rows:
+        if k.startswith('dname:'): out[int(k[6:])] = {'v': json.loads(v), 'rev': rev, 'src': src}
+    return out
+
+
+def _no(cid, did): return False
+
+
+def gone_cards(recs):
+    """端末で消したデッキのカードか（そこに端末で足したカードは、Anki にも作らない＝消したのと同じ）。既定のデッキ（id 1）は、消したときに入っていた（id < cleared）カード"""
+    dids = {did for did, r in recs.items() if r['v'].get('removed')}
+    cl = (recs.get(1) or {}).get('v', {}).get('cleared') or 0
+    if not dids and not cl: return _no
+    return lambda cid, did: did in dids or (did == 1 and cid < cl)
+
+
+def _depth(name): return name.count('::')
+
+
+def _ensure_parents(col, name):
+    """足りない親を Anki の id で作る（端末で作った親は、先に端末の id で作ってある）"""
+    parts = name.split('::')
+    for i in range(1, len(parts)):
+        p = '::'.join(parts[:i])
+        if not col.decks.id_for_name(p): col.decks.id(p)
+
+
+def apply_decks(col, srv, recs, log, dry=False, mods0=None):
+    """暗記の端末で作った・名前を変えた・消したデッキを Anki に書く。決まりは「新しいほう」＝端末の記録の rev と Anki のデッキの mod（秒）。
+      消した   … Anki のデッキより新しければ col.decks.remove（子のデッキ・カード・カードが無くなったノートも消える。Anki の「デッキを削除」と同じ）
+                  既定のデッキ（id 1）は消えずに、そのとき入っていたカード（id < cleared）が消え、名前が「デフォルト」に戻る（rslib remove_single_deck）
+      作った   … Anki に無ければ、端末の id のまま作る（端末で足したカードの did がそのまま使える）
+      名前     … Anki のデッキより新しければ col.decks.rename（子のデッキの名前も変わる）
+    Anki の名前が端末の記録と違って終わったとき（Anki のほうが新しい・名前が重なって「+」が付いた）は、Anki の名前を端末へ返す。
+    Anki で消したデッキの名前変更は何もしない（束を配り直すと端末からも消える）"""
+    n = {'created': 0, 'renamed': 0, 'removed': 0, 'cards_removed': 0, 'anki_newer': 0, 'gone_in_anki': 0}
+    recs = {did: r for did, r in recs.items() if r['src'] != 'anki'}   # アドオンが返したものは、もう Anki の姿
+    if not recs: return n
+    anki = {d['id']: d for d in col.decks.all()}
+    mods0 = mods0 or {did: d.get('mod', 0) for did, d in anki.items()}
+    newer = lambda did, r: r['rev'] > mods0.get(did, 0) * 1000
+    push = {}; now = int(time.time() * 1000)
+
+    def back(did, r, name):
+        v = {kk: vv for kk, vv in r['v'].items() if kk in ('created', 'cleared')}; v['name'] = name
+        push[did] = {'t': 'conf', 'src': 'anki', 'k': f'dname:{did}', 'v': v, 'rev': max(now, r['rev'] + 1)}
+
+    # 1. 消す（先に消して名前を空ける。端末で同じ名前のデッキを作り直した・別のデッキをその名前にした、に備える）
+    rm = []
+    for did, r in recs.items():
+        v = r['v']; d = anki.get(did)
+        if did == 1 and v.get('cleared'):
+            cids = col.db.list('select id from cards where (did = 1 or odid = 1) and id < ?', v['cleared'])
+            if cids:
+                n['cards_removed'] += len(cids)
+                if not dry: col.remove_cards_and_orphaned_notes(cids)
+        if not v.get('removed') or d is None or did == 1: continue
+        if newer(did, r): rm.append(did)
+        else: n['anki_newer'] += 1; back(did, r, d['name'])
+    if rm:
+        if dry: n['removed'] += len(rm)
+        else:
+            alive = [x for x in rm if col.decks.get(x, default=False)]
+            if alive: n['cards_removed'] += col.decks.remove(alive).count
+            n['removed'] += len(rm)
+    if not dry: anki = {d['id']: d for d in col.decks.all()}
+
+    # 2. 作る・名前を変える（親から順に。行き先の名前を、これから名前を変えるデッキが使っていたら、そちらを先に）
+    todo = []
+    for did, r in recs.items():
+        v = r['v']
+        if v.get('removed'): continue
+        d = anki.get(did)
+        want = v['name']
+        if did == 1 and v.get('cleared') and r['rev'] == v['cleared']: want = col.tr.deck_config_default_name()   # 消したあと名前を変えていない
+        if d is None:
+            if v.get('created'): todo.append((did, want, r, 'create'))
+            else: n['gone_in_anki'] += 1
+            continue
+        if d['name'] == want: continue
+        if newer(did, r) or d['name'].startswith(TMP): todo.append((did, want, r, 'rename'))
+        else: n['anki_newer'] += 1; back(did, r, d['name'])
+    todo.sort(key=lambda t: (_depth(t[1]), t[2]['rev']))
+    if dry:
+        n['created'] += sum(1 for t in todo if t[3] == 'create'); n['renamed'] += sum(1 for t in todo if t[3] == 'rename')
+        return n
+    fold = lambda x: x.casefold()
+    while todo:
+        done_any = False
+        for t in list(todo):
+            did, want, r, kind = t
+            others = [u for u in todo if u is not t]
+            cur = {x.id: x.name for x in col.decks.all_names_and_ids()}
+            occ = col.decks.id_for_name(want)
+            if kind == 'rename' and cur.get(did) == want: todo.remove(t); done_any = True; continue   # 親の名前を変えたときに一緒に変わった
+            if occ and occ != did and any(u[0] == occ and u[3] == 'rename' for u in others): continue   # その名前のデッキが、これから名前を変える
+            if any(fold(want).startswith(fold(u[1]) + '::') for u in others): continue                    # 親になるデッキがまだ
+            _ensure_parents(col, want)
+            if kind == 'create':
+                dk = col.decks.new_deck_legacy(False)
+                dk.update({'id': did, 'name': want, 'mod': r['rev'] // 1000, 'usn': -1})
+                col.decks.update(dk, preserve_usn=True); n['created'] += 1
+            else:
+                col.decks.rename(did, want); n['renamed'] += 1
+            got = col.decks.get(did)['name']
+            if got != r['v']['name']: back(did, r, got)
+            todo.remove(t); done_any = True
+        if todo and not done_any:   # 取り替え（A→B と B→A）: 1つをいったん仮の名前にする
+            t = next((u for u in todo if u[3] == 'rename'), todo[0])
+            if t[3] == 'rename': col.decks.rename(t[0], f'{TMP}{t[0]}')
+            else: break
+    for did, r in recs.items():   # 消したデッキの子だったなどで、もう無いデッキへは返さない
+        if did in push and not col.decks.get(did, default=False): push.pop(did)
+    col.db.execute('update col set mod = ?', now)   # AnkiWeb との同期で上がるように
+    if push: srv.push(list(push.values()))
+    if any(n.values()): log('デッキ', n)
+    return n
+
+
+def check_profile(col, scards, notes):
+    """取り違えの見張り（何も書く前に）: サーバーが知っているカードの大半がこのコレクションに無ければ、別のプロファイル・別のコレクション。
+    このコレクションで消したカード（graves。デッキやノートを消した）と、端末で足してまだ Anki に無いカードは数えない"""
+    ids = set(scards)
+    for rec in notes.values():
+        if rec['added']: ids -= {c[0] for c in rec['cards']}
+    if not ids: return
+    ids -= set(col.db.list('select oid from graves where type = 0'))
+    have = set(col.db.list('select id from cards'))
+    if ids and len(ids & have) < 0.5 * len(ids):
+        raise SyncError(f'このプロファイルには、暗記のカード {len(ids)} 枚のうち {len(ids & have)} 枚しかありません。別のプロファイルか、別の暗記につないでいるようです。止めました。')
+
+
 def note_wire(rec, **kw):
     return {**{k: rec[k] for k in ('id', 'mid', 'flds', 'tags', 'did', 'cards', 'rev', 'del', 'added')}, **kw}
 
@@ -220,7 +359,7 @@ def _fix_cards(col, rec, before, log):
     if top >= (col.get_config('nextPos', 0) or 0): col.set_config('nextPos', top + 1)
 
 
-def _add_note(col, rec, log):
+def _add_note(col, rec, log, gone=_no):
     """端末で作ったノートを Anki に足し、ノートとカードの id を端末の id に付け替える（Anki は id を決めて足させてくれないので、足してから書き換える）"""
     m = col.models.get(rec['mid'])
     if not m: log('ノートタイプが Anki に無いので、足せなかった', rec['id']); return False
@@ -233,6 +372,9 @@ def _add_note(col, rec, log):
     col.db.execute('update notes set id = ? where id = ?', rec['id'], note.id)
     col.db.execute('update cards set nid = ? where nid = ?', rec['id'], note.id)
     _fix_cards(col, rec, set(), log)
+    if gone is not _no:   # 端末で消したデッキに入るカード（テンプレートのデッキ指定で、ほかのカードと別のデッキ）は消す
+        drop = [c[0] for c in rec['cards'] if gone(c[0], c[2]) and col.db.scalar('select count() from cards where id = ?', c[0])]
+        if drop: col.remove_cards_and_orphaned_notes(drop)
     return True
 
 
@@ -253,13 +395,13 @@ def _written(col, rec):
     return note_wire(rec, flds=list(note.fields), tags=' '.join(note.tags), rev=max(rec['rev'], note.mod * 1000), **{'del': 0})
 
 
-def apply_notes(col, srv, notes, log, dry=False):
+def apply_notes(col, srv, notes, log, dry=False, gone=_no):
     """暗記の端末で追加・編集・削除したノート（サーバーの notes）を Anki に書く。決まりは「新しいほう」＝端末の記録の rev と Anki のノートの mod（秒）。
       消した   … Anki のノートより新しければ消す
       Anki に無い … 端末で作ったノートなら足す（id を合わせる）。Anki に入れたことがある・前から Anki にあったノートなら、Anki で消したので端末でも消す
       Anki にある … 端末の記録のほうが新しければ、フィールドとタグを書く（増えるカードの id を合わせる）。Anki のほうが新しければ書かない
     カードの状態を比べる前に呼ぶ（端末で作ったカードを先に Anki に入れておくため）"""
-    n = {'added': 0, 'updated': 0, 'removed': 0, 'gone_in_anki': 0, 'anki_newer': 0, 'skipped': 0}
+    n = {'added': 0, 'updated': 0, 'removed': 0, 'gone_in_anki': 0, 'anki_newer': 0, 'skipped': 0, 'in_removed_deck': 0}
     if not notes: return n
     ids = list(notes); amod = {}
     for i in range(0, len(ids), 500):
@@ -274,9 +416,11 @@ def apply_notes(col, srv, notes, log, dry=False):
                 n['removed'] += 1
             continue
         if mod is None:
+            if rec['added'] and rec['src'] != 'anki' and rec['cards'] and all(gone(c[0], c[2]) for c in rec['cards']):
+                n['in_removed_deck'] += 1; continue   # 端末で足したあと、そのデッキを消した（Anki のデッキの削除と同じく、カードが無くなったノートは消える）
             if rec['added'] and rec['src'] != 'anki':
                 if dry: n['added'] += 1
-                elif _add_note(col, rec, log): n['added'] += 1; push.append(_written(col, rec))
+                elif _add_note(col, rec, log, gone): n['added'] += 1; push.append(_written(col, rec))
                 else: n['skipped'] += 1
             else:
                 n['gone_in_anki'] += 1
@@ -293,7 +437,7 @@ def apply_notes(col, srv, notes, log, dry=False):
     return n
 
 
-def apply_conf(col, srv, conf_rows, log, dry=False):
+def apply_conf(col, srv, conf_rows, log, dry=False, mods0=None):
     """暗記で変えたデッキのオプション（サーバーの conf、src='app'）を Anki に書く。プリセットの削除はしない（Anki の次の同期が一方向になることがあるため）"""
     presets = {c['id']: c for c in col.decks.all_config()}
     now = int(time.time() * 1000); remap = {}; push = []; n = {'preset': 0, 'new': 0, 'removed_skipped': 0, 'deck': 0}
@@ -325,7 +469,7 @@ def apply_conf(col, srv, conf_rows, log, dry=False):
         if not d or d.get('dyn') or 'conf' not in v: continue
         conf = remap.get(v['conf'], v['conf'])
         if conf != v['conf']: push.append({'t': 'conf', 'src': 'anki', 'k': k, 'v': {**v, 'conf': conf}, 'rev': now})
-        if src == 'app' and d.get('conf') != conf and rev > d.get('mod', 0) * 1000 and (conf in presets or conf in remap.values() or dry):
+        if src == 'app' and d.get('conf') != conf and rev > (mods0 or {}).get(did, d.get('mod', 0)) * 1000 and (conf in presets or conf in remap.values() or dry):
             if not dry: d['conf'] = conf; col.decks.save(d)
             n['deck'] += 1
     if push and not dry: srv.push(push)
@@ -337,24 +481,29 @@ def run(col, site_url, token, dry=False, log=print):
     t0 = time.time()
     srv = Server(site_url, token)
     scards, srevs, conf_rows, snotes = server_view(srv)
+    check_profile(col, scards, snotes)   # 何も書く前に、別のプロファイルにつないでいないか
+    # デッキ → ノートの順に書く（端末で作ったデッキに端末で足したノートを入れられるように。消したデッキに足したノートは足さない）
+    drecs = deck_recs(conf_rows); mods0 = {d['id']: d.get('mod', 0) for d in col.decks.all()}
+    try: ndeck = apply_decks(col, srv, drecs, log, dry=dry, mods0=mods0)
+    except SyncError: raise
+    except Exception as e: ndeck = None; log('デッキを書けなかった', repr(e)); deck_fail = repr(e)[:200]
+    else: deck_fail = None
     # 端末で追加・編集・削除したノートを先に書く（端末で作ったカードを、カードの状態を比べる前に Anki に入れておく）
-    try: nnote = apply_notes(col, srv, snotes, log, dry=dry)
+    try: nnote = apply_notes(col, srv, snotes, log, dry=dry, gone=gone_cards(drecs))
     except SyncError: raise
     except Exception as e: nnote = None; log('ノートを書けなかった', repr(e)); note_fail = repr(e)[:200]
     else: note_fail = None
     acards = anki_view(col, set(scards))
-    # 取り違えの見張り: サーバーが知っているカードの大半がこのコレクションに無ければ、別のプロファイル・別のコレクション
-    if scards and len(acards) < 0.5 * len(scards):
-        raise SyncError(f'このプロファイルには、暗記のカード {len(scards)} 枚のうち {len(acards)} 枚しかありません。別のプロファイルか、別の暗記につないでいるようです。止めました。')
     ids = set(acards)
     anki_rev_ids = set(col.db.list('select id from revlog'))
     anki_revlog = [r for r in col.db.all('select id, cid, ease, ivl, lastIvl, factor, time, type from revlog') if r[1] in ids]
     p = plan(scards, srevs, acards, anki_rev_ids, anki_revlog)
-    summary = {k: len(v) for k, v in p.items()}; summary['dry'] = dry; summary['notes'] = nnote
+    summary = {k: len(v) for k, v in p.items()}; summary['dry'] = dry; summary['notes'] = nnote; summary['decks'] = ndeck
     if note_fail: summary['note_fail'] = note_fail
+    if deck_fail: summary['deck_fail'] = deck_fail
     log('比べた: Anki へ カード {to_anki} 記録 {rev_to_anki} ／暗記へ カード {to_srv} 記録 {rev_to_srv}'.format(**summary))
     if dry:
-        try: summary['conf'] = apply_conf(col, srv, conf_rows, log, dry=True)
+        try: summary['conf'] = apply_conf(col, srv, conf_rows, log, dry=True, mods0=mods0)
         except Exception as e: summary['conf_fail'] = repr(e)[:200]
         summary['secs'] = round(time.time() - t0, 1); return summary
     # Anki に書く: カード → 記録 → タグ → オプション（記録を先に入れて途中で止まると、次の同期で「Anki のほうが新しい」に見えてしまう）
@@ -367,7 +516,7 @@ def run(col, site_url, token, dry=False, log=print):
     if p['leech']: col.tags.bulk_add(p['leech'], 'leech')
     if p['mark_add']: col.tags.bulk_add(p['mark_add'], 'marked')
     if p['mark_del']: col.tags.bulk_remove(p['mark_del'], 'marked')
-    try: summary['conf'] = apply_conf(col, srv, conf_rows, log)
+    try: summary['conf'] = apply_conf(col, srv, conf_rows, log, mods0=mods0)
     except Exception as e: summary['conf_fail'] = repr(e)[:200]; log('オプションを書けなかった', repr(e))
     # 暗記へ送る（Anki 側のほうが新しかったもの）
     # base＝その状態が知っている最後の答え。サーバーは、それより新しい答えが端末から届いていたら、この状態を捨てる
@@ -379,6 +528,6 @@ def run(col, site_url, token, dry=False, log=print):
     ng = [cid for cid, st, _ in p['to_anki'] if not same(st, after[cid]['st'])]
     summary['verify_ng'] = len(ng)
     if ng: log('書いた値が違うカード', len(ng), ng[:3])
-    summary['ok'] = not ng and not summary.get('conf_fail') and not summary.get('note_fail')
+    summary['ok'] = not ng and not summary.get('conf_fail') and not summary.get('note_fail') and not summary.get('deck_fail')
     summary['secs'] = round(time.time() - t0, 1)
     return summary

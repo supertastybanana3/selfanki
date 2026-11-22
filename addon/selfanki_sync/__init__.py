@@ -42,6 +42,9 @@ _T = {
     'notes': ('\n暗記で変えたノート: 追加 {added}・編集 {updated}・削除 {removed}（Anki で消してあった {gone_in_anki}・Anki のほうが新しかった {anki_newer}・書けなかった {skipped}）',
               '\nNotes changed in selfanki: added {added}, edited {updated}, deleted {removed} (already deleted in Anki {gone_in_anki}, newer in Anki {anki_newer}, not written {skipped})'),
     'warn_note': ('\n\nノートを書けませんでした: {e}', '\n\nCould not write notes: {e}'),
+    'decks': ('\n暗記で変えたデッキ: 作成 {created}・名前の変更 {renamed}・削除 {removed}（消えたカード {cards_removed} 枚・Anki のほうが新しかった {anki_newer}）',
+              '\nDecks changed in selfanki: created {created}, renamed {renamed}, deleted {removed} (cards deleted {cards_removed}, newer in Anki {anki_newer})'),
+    'warn_deck': ('\n\nデッキを書けませんでした: {e}', '\n\nCould not write decks: {e}'),
     'busy': ('暗記との同期は、もう動いています。', 'A selfanki sync is already running.'),
     'pairing': ('暗記につないでいます…', 'Connecting to selfanki…'),
     'failed': ('暗記と同期できませんでした。\n\n{e}', 'Could not sync with selfanki.\n\n{e}'),
@@ -108,9 +111,12 @@ def _message(s, dry):
     s = {**s, 'to_src': s.get('to_srv', 0)}
     marks = s.get('mark_add', 0) + s.get('mark_del', 0); conf = sum((s.get('conf') or {}).get(k, 0) for k in ('preset', 'new', 'deck'))
     nn = s.get('notes') or {}; nsum = sum(nn.get(k, 0) for k in ('added', 'updated', 'removed', 'gone_in_anki', 'skipped'))
-    if not dry and not any(s.get(k) for k in ('to_anki', 'rev_to_anki', 'to_srv', 'rev_to_srv', 'verify_ng', 'conf_fail', 'note_fail')) and not marks and not conf and not nsum: return None
+    dd = s.get('decks') or {}; dsum = sum(dd.get(k, 0) for k in ('created', 'renamed', 'removed', 'cards_removed', 'anki_newer'))
+    if not dry and not any(s.get(k) for k in ('to_anki', 'rev_to_anki', 'to_srv', 'rev_to_srv', 'verify_ng', 'conf_fail', 'note_fail', 'deck_fail')) and not marks and not conf and not nsum and not dsum: return None
     m = t('dry_done' if dry else 'done', **s)
     if marks or conf: m += t('extra', marks=marks, conf=conf)
+    if dsum: m += t('decks', **{k: dd.get(k, 0) for k in ('created', 'renamed', 'removed', 'cards_removed', 'anki_newer')})
+    if s.get('deck_fail'): m += t('warn_deck', e=s['deck_fail'])
     if nsum: m += t('notes', **{k: nn.get(k, 0) for k in ('added', 'updated', 'removed', 'gone_in_anki', 'anki_newer', 'skipped')})
     if s.get('note_fail'): m += t('warn_note', e=s['note_fail'])
     if s.get('verify_ng'): m += t('warn_ng', n=s['verify_ng'])
@@ -146,7 +152,7 @@ def sync(dry=False, auto=False):
         s = result.get('s') or {}
         m = _message(s, dry)
         if m is None: tooltip(t('nothing'))
-        elif auto and not s.get('verify_ng') and not s.get('conf_fail') and not s.get('note_fail'): tooltip(m.replace('\n\n', '\n'), period=6000)
+        elif auto and not s.get('verify_ng') and not s.get('conf_fail') and not s.get('note_fail') and not s.get('deck_fail'): tooltip(m.replace('\n\n', '\n'), period=6000)
         else: showInfo(m, parent=mw)
 
     def failed(e):
