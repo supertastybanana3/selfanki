@@ -39,7 +39,7 @@ export async function onRequestPost({ request, env }) {
     }
     if (o.t === 'conf') {
       // デッキのオプション。今より新しい（rev が大きいか同じ）ときだけ置き換える
-      if (typeof o.k !== 'string' || !/^(preset|deck|fdeck):-?\d+$|^global$/.test(o.k) || !isInt(o.rev) || typeof o.v !== 'object' || !o.v) return Response.json({ error: 'bad conf' }, { status: 400 });
+      if (typeof o.k !== 'string' || !/^(preset|deck|fdeck|dname):-?\d+$|^global$/.test(o.k) || !isInt(o.rev) || typeof o.v !== 'object' || !o.v) return Response.json({ error: 'bad conf' }, { status: 400 });
       st.push(DB.prepare(`insert into conf(k, v, rev, src, seq) values (?1, ?2, ?3, ?4, ${SEQ}) on conflict(k) do update set v = excluded.v, rev = excluded.rev, src = excluded.src, seq = excluded.seq where excluded.rev >= conf.rev`)
         .bind(o.k, JSON.stringify(o.v), o.rev, src));
       continue;
