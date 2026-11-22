@@ -41,7 +41,7 @@ const barDark = () => { try { return localStorage.getItem('barDark') || 'translu
 // 入れた機能は「設定」→「このアプリ独自の機能」で端末ごとに切れる
 const FEAT = { pen: '', autoSync: false, lang: 'ja' };   // lang … 画面の言語（Anki の言語の番号の形 ja・de-DE など。tools/build_site.py が config.json の language から入れる）
 let DESIGN = null;   // 読み込んだ書き込みのデザイン（mount の返り値）
-const PREF_DEFAULT = { badge: false, pastePng: false, pasteResize: false, autoCap: true, autoCorrect: true, drawNoFinger: false, syncMedia: true, neverType: false, replayBtn: true, stopQAudio: true, topbar: true, bottombar: true, counts: true, answerBtn: true, ivl: true, pen: true, autoSync: false, ticks: true, ticksByType: false, toolsBtn: true, noPad: false, extLinks: true };
+const PREF_DEFAULT = { videoLoop: false, videoControls: true, badge: false, pastePng: false, pasteResize: false, autoCap: true, autoCorrect: true, drawNoFinger: false, syncMedia: true, neverType: false, replayBtn: true, stopQAudio: true, topbar: true, bottombar: true, counts: true, answerBtn: true, ivl: true, pen: true, autoSync: false, ticks: true, ticksByType: false, toolsBtn: true, noPad: false, extLinks: true };
 // autoSync: 既定は本家の Anki と同じく、下の「同期」を押したときだけ送受信する。オンにすると、答えるたびに数秒後に送り、開いたとき・戻ったとき・5分ごとにも同期する（このアプリ独自の方式）
 const lsRaw = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch { return d; } };
 const pref = k => { try { const v = localStorage.getItem('pref:' + k); return v == null ? PREF_DEFAULT[k] : v === '1'; } catch { return PREF_DEFAULT[k]; } };
@@ -1523,7 +1523,7 @@ function darkify(doc) {
   doc.getElementById('sa-dark').textContent = out.join('\n');
   base.textContent = BASE_DARK;
 }
-if (new URLSearchParams(location.search).has('debug')) window.__selfanki = { S, setFrame, darkText, darkBg, parseColor, get ask() { return ask; } };
+if (new URLSearchParams(location.search).has('debug')) window.__selfanki = { S, playAv, stopAv, setFrame, darkText, darkBg, parseColor, get ask() { return ask; } };
 // 音声。殻（0.7〜）が鳴らせるときは殻に任せる: 殻は「ほかの音と混ぜる」で鳴らすので、裏で流している音楽などを止めずに上に重なる。
 // WKWebView の中で鳴らすと WebKit が音声の扱いを切り替えて、ほかのアプリの再生を止めてしまう。
 // 音声ファイルはページが端末の控え（Service Worker）から取り出して渡すので、オフラインでも鳴る
@@ -1573,7 +1573,21 @@ const nativeAudio = () => NATIVE_AUDIO.ok && window.webkit?.messageHandlers?.sa;
 function b64(buf) { const u = new Uint8Array(buf); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); }
 let avActive = false;   // 音声の列を鳴らしている最中か（カードの自動送りの「音声を待つ」で使う）
 function avDone() { avActive = false; const f = aaWaitAudio; aaWaitAudio = null; if (f) setTimeout(f, 100); }
-function stopAv() { avActive = false; avSeq++; avWait = null; waStopSrc(); WA.buf = null; WA.onend = null; if (audio) { audio.pause(); audio = null; } try { if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel(); } catch {} const n = nativeAudio(); if (n) n.postMessage({ audio: 'stop' }); }
+// 動画（[sound:x.mp4] など）は、カードの上に動画として出す（設定＞学習の「動画をループ再生」「動画再生コントローラーを表示」）。終わったら次の音へ。外を押すと止める
+const VIDEO_RE = /\.(mp4|m4v|mov|webm|mkv|avi|ogv|mpe?g)$/i;
+let vidBox = null;
+function stopVideo() { if (!vidBox) return; const v = vidBox.querySelector('video'); try { v.pause(); v.removeAttribute('src'); v.load(); } catch {} vidBox.remove(); vidBox = null; }
+function playVideo(url, my, step) {
+  stopVideo();
+  const box = document.createElement('div'); box.id = 'avvideo';
+  const v = document.createElement('video'); v.src = url; v.playsInline = true; v.setAttribute('playsinline', ''); v.controls = pref('videoControls'); v.loop = pref('videoLoop');
+  const next = () => { if (my !== avSeq || vidBox !== box) return; stopVideo(); step(); };
+  v.onended = next; v.onerror = next;
+  box.onclick = e => { if (e.target === box) { e.stopPropagation(); next(); } };
+  box.append(v); $('#cardhost').append(box); vidBox = box;
+  v.play().catch(() => { v.controls = true; });   // 自動で始められないとき（ブラウザの決まり）は、コントローラーを出して押してもらう
+}
+function stopAv() { stopVideo(); avActive = false; avSeq++; avWait = null; waStopSrc(); WA.buf = null; WA.onend = null; if (audio) { audio.pause(); audio = null; } try { if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel(); } catch {} const n = nativeAudio(); if (n) n.postMessage({ audio: 'stop' }); }
 function playAv(list) {
   stopAv();
   const items = (list || []).filter(Boolean); let i = 0; const my = avSeq;
@@ -1581,6 +1595,7 @@ function playAv(list) {
   const step = async () => {
     if (my !== avSeq) return;
     const it = items[i++]; if (!it) { avDone(); return; }
+    if (it.sound && VIDEO_RE.test(it.sound)) { playVideo(MEDIA + encodeURIComponent(it.sound), my, step); return; }
     const n = nativeAudio();
     if (!NATIVE_AUDIO.logged) { NATIVE_AUDIO.logged = true; diag({ ev: 'av', nat: !!n, sa: !!window.webkit?.messageHandlers?.sa }); }
     if (n) {
@@ -1848,8 +1863,8 @@ function flipPref(k) { try { localStorage.setItem('pref:' + k, pref(k) ? '0' : '
 function answerBy(g) { if (S.card && S.side === 'a') rate(g); }
 async function markThen(fn) { if (!S.card) return; if (!isMarked(S.card)) await changeCards(siblings(S.card), c => { c.mark = true; }, 'マークを付けました', 'マーク', false, false); fn(); }
 function scrollCard(dir) { const d = $('#card').contentDocument, se = d?.scrollingElement; if (se) se.scrollBy({ top: dir * se.clientHeight * 0.8, behavior: 'smooth' }); }
-function avPause() { if (nativeAudio()) nativeAudio().postMessage({ audio: 'pause' }); else if (waPauseToggle()) {} else if (audio) audio.paused ? audio.play().catch(() => {}) : audio.pause(); else if (speechSynthesis.speaking) speechSynthesis.paused ? speechSynthesis.resume() : speechSynthesis.pause(); }
-function avSeek(d) { if (nativeAudio()) nativeAudio().postMessage({ audio: 'seek', d }); else if (waSeek(d)) {} else if (audio) audio.currentTime = Math.max(0, audio.currentTime + d); }
+function avPause() { if (vidBox) { const v = vidBox.querySelector('video'); v.paused ? v.play().catch(() => {}) : v.pause(); return; } if (nativeAudio()) nativeAudio().postMessage({ audio: 'pause' }); else if (waPauseToggle()) {} else if (audio) audio.paused ? audio.play().catch(() => {}) : audio.pause(); else if (speechSynthesis.speaking) speechSynthesis.paused ? speechSynthesis.resume() : speechSynthesis.pause(); }
+function avSeek(d) { if (vidBox) { const v = vidBox.querySelector('video'); v.currentTime = Math.max(0, v.currentTime + d); return; } if (nativeAudio()) nativeAudio().postMessage({ audio: 'seek', d }); else if (waSeek(d)) {} else if (audio) audio.currentTime = Math.max(0, audio.currentTime + d); }
 // タップ（9区画×表裏）・スワイプ・トップバーの割り当て。既定は AnkiMobile のマニュアルと実機のとおり
 const ZONE_N = 9;
 const TAP_DEF = { q: Array(ZONE_N).fill('show'), a: ['again', 'off', 'good', 'again', 'off', 'good', 'again', 'off', 'good'] };
@@ -2092,7 +2107,7 @@ function setupTools() {
       [tgl('音声再生ボタンを表示', 'replayBtn', () => { if (S.card) setFrame(cardHtml(S.card, S.side), S.card.mid, S.card.ord, S.side === 'a'); }),
        tgl('質問の音声・動画の再生を解答表示で停止', 'stopQAudio'),
        { t: 'サイレントモードでも音声を自動再生', tg: true, off: 1 }, { t: '他アプリの音（BGMなど）の音量を常に抑えめにする', tg: false, off: 1 }],
-      [{ t: '動画をループ再生', tg: false, off: 1 }, { t: '動画再生コントローラーを表示', tg: true, off: 1 }],
+      [tgl('動画をループ再生', 'videoLoop'), tgl('動画再生コントローラーを表示', 'videoControls')],
       [tgl('文字入力で解答しない', 'neverType', () => { if (S.card && S.side === 'q') setFrame(cardHtml(S.card, 'q'), S.card.mid, S.card.ord); }),
        tgl('手書きパッドを表示しない', 'noPad', () => sp.refresh())],
       [{ t: 'シェイクアクション', v: actName(shakeAct()), go: 'shake' }, { t: 'ダブルタップ防止', v: DTP[dtpKey()][0], go: 'dtp' }, tgl('リンクをこのアプリの外部で開く', 'extLinks')]] }),
