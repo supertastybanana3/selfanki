@@ -132,7 +132,7 @@ for m in col.models.all():
         for u in re.findall(r'url\(["\']?([^"\')]+)["\']?\)', m['css']): media[u] += 1
 used_conf = {decks[did].get('conf') for did in keep_deck}
 presets = {c['id']: c for c in col.decks.all_config() if c['id'] in used_conf}
-conf_keys = ['rollover', 'collapseTime', 'newCardsIgnoreReviewLimit', 'dayLearnFirst', 'newSpread', 'applyAllParentLimits', 'creationOffset', 'localOffset', 'fsrs',
+conf_keys = ['savedFilters', 'flagLabels', 'rollover', 'collapseTime', 'newCardsIgnoreReviewLimit', 'dayLearnFirst', 'newSpread', 'applyAllParentLimits', 'creationOffset', 'localOffset', 'fsrs',
              'loadBalancerEnabled', 'fsrsShortTermWithStepsEnabled', 'sched2021', 'nextPos', 'ignoreAccentsInSearch', 'normalize_note_text', 'curDeck', 'restorePositionReviewer', 'resetCountsReviewer', 'randomOrderReposition', 'shiftPositionOfExistingCards', 'setDueReviewer', 'curModel',
              'lastFsrsOptimize', 'fsrsHealthCheck', 'fsrsLegacyEvaluate']
 conf_keys += [f'_nt_{m["id"]}_lastDeck' for m in col.models.all()]   # ノートタイプごとに最後に足したデッキ（端末でノートタイプを変えたときに、新しいカードを入れるデッキ。rslib の get_last_deck_added_to_for_notetype）

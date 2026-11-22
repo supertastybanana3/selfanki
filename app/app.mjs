@@ -15,6 +15,7 @@ import { createScratchpad, spPref, SP_WIDTH, SP_SIZE, SP_ALPHA } from './scratch
 import { repositionNew } from '../fsrs/reposition.mjs';
 import { createNotes } from './notes.mjs';
 import { createNtScreen } from './ntscreen.mjs';
+import { createFilter } from './bfilter.mjs';
 import { createDecks, attachSwipe } from './decks.mjs';
 import { setupExchange } from './xui.mjs';
 import { ntFrom11 } from './exchange.mjs';
@@ -1710,7 +1711,7 @@ function onKey(e) {
   if ($('#iosDialog') && !$('#iosDialog').hidden) return;   // 確認の小窓（入力欄・OK はその中で受ける）
   if (!$('#iosAlert').hidden) { if (['Enter', 'Escape'].includes(e.key) || e.code === 'Space' || keyOf(e) === ' ') { e.preventDefault(); $('#iosAlert').hidden = true; } return; }
   // ブラウザ・設定・統計などを開いているあいだは、下の出題に答えない（Esc で閉じる）
-  const over = ['#ntpage', '#editor', '#bprev', '#browse', '#awpage', '#prefs'].map(q => $(q)).find(el => el && !el.hidden);
+  const over = ['#bfilter', '#ntpage', '#editor', '#bprev', '#browse', '#awpage', '#prefs'].map(q => $(q)).find(el => el && !el.hidden);
   if (over) { if (e.key === 'Escape') { e.preventDefault(); over.querySelector('.back')?.click(); } return; }
   // 日本語入力のままのキーボードで、処理しなかったキー（表の面の数字など）を iPad が文字入力として変換に回し、候補が出て
   // 以後のキーが全部変換に吸われてしまう。入力欄の外では、文字・数字・スペース・Enter・Backspace は全部ここで止める
@@ -2251,6 +2252,9 @@ function setupTools() {
     if (BR.sel) { if (BR.sel.has(c.id)) BR.sel.delete(c.id); else BR.sel.add(c.id); paintBrowseTitle(); paintBrowse(true); return; }
     notes.openEdit(c);   // 行を押すとそのノートの編集（プレビューは編集の画面の目のボタン）
   });
+  // 「絞り込み」（app/bfilter.mjs。押す＝検索を置き換え、スワイプ＝今の検索に足す）
+  const bfilter = createFilter({ S, loadNotes: () => loadNotes(S, BUNDLE), current: () => $('#bq').value, apply: q => { $('#bq').value = q; runBrowse(); } });
+  { const fb = $('#browse > .pnav .nr [title="絞り込み"]'); fb.disabled = false; fb.onclick = () => bfilter.open(); }
   { const nr = $('#browse > .pnav .nr'); const selBtn = nr.querySelector('[title="選択"]'); selBtn.disabled = false; selBtn.onclick = () => setBrowseSelect(true);
     const mk = (t, cls, fn) => { const b = document.createElement('button'); b.className = 'tx ' + cls; b.textContent = t; b.onclick = fn; nr.append(b); };
     mk('アクション', 'sel-act', openBrowseActions);
