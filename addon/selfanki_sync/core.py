@@ -353,18 +353,20 @@ def nt_from_wire(v):
 
 
 def _match(cur, want):
-    """端末のフィールド（テンプレート）の並び want の、それぞれが Anki の今の並び cur の何番目か（無ければ None）。id で、id が無ければ名前で、それも無ければ位置で合わせる"""
+    """端末のフィールド（テンプレート）の並び want の、それぞれが Anki の今の並び cur の何番目か（無ければ None）。
+    まず id で、id で決まらないものは、残っている Anki のものと名前で、id も名前も無いものは位置で合わせる（id の違うノートタイプを、全部消して足し直すことにしない）"""
+    out, used = [None] * len(want), set()
     by_id = {x.get('id'): i for i, x in enumerate(cur) if x.get('id')}
-    by_name = {x['name']: i for i, x in enumerate(cur)}
-    out, used = [], set()
     for i, w in enumerate(want):
         j = by_id.get(w.get('id')) if w.get('id') else None
-        if j is None and not w.get('id'):
-            j = by_name.get(w.get('name'))
-            if j is None and i < len(cur) and not cur[i].get('id'): j = i
-        if j in used: j = None
-        if j is not None: used.add(j)
-        out.append(j)
+        if j is not None and j not in used: out[i] = j; used.add(j)
+    by_name = {}
+    for i, x in enumerate(cur):
+        if i not in used: by_name.setdefault(x['name'], i)
+    for i, w in enumerate(want):
+        if out[i] is None and w.get('name') in by_name and by_name[w['name']] not in used: out[i] = by_name[w['name']]; used.add(out[i])
+    for i, w in enumerate(want):
+        if out[i] is None and not w.get('id') and i < len(cur) and i not in used: out[i] = i; used.add(i)
     return out
 
 
