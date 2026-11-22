@@ -132,7 +132,7 @@ function applyConf(rows) {
   if (!Array.isArray(rows)) return;
   if (rows.length) S.mainQ = null;   // 上限・並びが変わるので組み直す
   const dn = rows.filter(r => r.k.startsWith('dname:'));   // デッキの作成・名前変更・削除（app/decks.mjs）。作ったデッキのオプション（deck:<id>）が引けるように先に
-  if (dn.length && decks.applyRows(dn) && S.all.length) refreshCards();
+  if (dn.length && deckOps.applyRows(dn) && S.all.length) refreshCards();
   for (const { k, v, rev } of rows) {
     if (k.startsWith('preset:')) {
       const id = +k.slice(7), cur = S.meta.presets[id];
@@ -151,7 +151,7 @@ function applyConf(rows) {
 async function saveConf(k, v, rev) { applyConf([{ k, v, rev }]); await store.addOp({ t: 'conf', k, v, rev }); }
 // デッキの作成・名前変更・削除（app/decks.mjs。記録は conf の dname:<id>。スワイプで開いた行は1つだけ）
 let swipeRow = null;
-const decks = createDecks({ S,
+const deckOps = createDecks({ S,
   commitConf: async rows => { applyConf(rows); for (const r of rows) await store.addOp({ t: 'conf', ...r }); },
   pushUndo: e => { S.undo.push(e); if (S.undo.length > 30) S.undo.shift(); },
   prompt: o => iosPrompt(o), alert: (t, m) => iosAlert(t, m),
@@ -250,7 +250,7 @@ function applyServer(cards, revlog) {
   for (const row of cards) { const c = S.byId.get(row.id); if (c) applyState(c, row.st, row.rev); }
   for (const r of revlog) { if (r.del) delRev(r.id); else addRev(r); }
 }
-const alive = c => !c.gone && !decks.hides(c);   // gone＝消したノートのカード。hides＝消したデッキのカード
+const alive = c => !c.gone && !deckOps.hides(c);   // gone＝消したノートのカード。hides＝消したデッキのカード
 const refreshCards = () => { S.cards = S.all.filter(c => c.type != null && alive(c)); };
 async function load() {
   $('#status').textContent = '読み込み中…';
@@ -262,7 +262,7 @@ async function load() {
     fetchJSON(BUNDLE + man.base.state), fetchJSON(BUNDLE + man.base.revlog)]);
   S.meta = meta; S.manifest = man; S.decksById = new Map(meta.decks.map(d => [d.id, d]));
   S.fdecks = new Map((meta.fdecks || []).map(f => [f.id, { ...f, rev: (f.mod || 0) * 1000 }]));   // Anki のフィルターデッキ（書き出した時点の定義）
-  decks.reset();   // 束のデッキの名前と mod を覚えておく（端末での名前変更・削除は、これより新しいものだけ重ねる）
+  deckOps.reset();   // 束のデッキの名前と mod を覚えておく（端末での名前変更・削除は、これより新しいものだけ重ねる）
   // 「今のデッキ」（統計・ブラウザの deck:current）: この端末で最後に開いたデッキ、無ければ Anki の curDeck（Anki と同じく開き直しても覚えている）
   if (typeof S.lastDeck !== 'number') { let d = null; try { d = +localStorage.getItem('lastDeck') || null; } catch {} if (!S.decksById.has(d)) d = meta.config?.curDeck; if (S.decksById.has(d)) S.lastDeck = d; }
   // 開いた親デッキは開き直しても残す（AnkiMobile と同じ）。この端末で一度も触っていなければ Anki の「畳んだ」印に従う
@@ -527,7 +527,7 @@ function showDecks() {
     el.querySelector('.dname').onclick = () => startStudy(d.id);
     if (d.dyn) el.querySelector('.chev').onclick = () => openFDeck(d.id);   // フィルターデッキは右の「›」で設定（直す・再構築・削除）の画面
     const tw = el.querySelector('.tw'); if (tw) tw.onclick = () => { S.open.has(d.id) ? S.open.delete(d.id) : S.open.add(d.id); try { localStorage.setItem('openDecks', JSON.stringify([...S.open])); } catch {} showDecks(); };
-    el.swipe = attachSwipe(el, { onAct: k => (k === 'rename' ? decks.rename(d.id) : k === 'delete' ? decks.remove(d.id) : null), isOpen: () => swipeRow === el,
+    el.swipe = attachSwipe(el, { onAct: k => (k === 'rename' ? deckOps.rename(d.id) : k === 'delete' ? deckOps.remove(d.id) : null), isOpen: () => swipeRow === el,
       setOpen: r => { if (swipeRow && swipeRow !== r) swipeRow.swipe?.close(); swipeRow = r; } });
     group.appendChild(el);
     if (S.open.has(d.id)) for (const c of ch) row(group, c, depth + 1);
@@ -805,7 +805,7 @@ async function undoAnswer() {
 async function undoInner() {
   const top = S.undo[S.undo.length - 1];
   if (top.kind === 'note') { S.undo.pop(); await notes.undo(top); toast(`元に戻しました（${top.label}）`); return; }   // ノートの追加・編集・削除
-  if (top.kind === 'deck') { S.undo.pop(); await decks.undo(top); deckDone(); toast(`元に戻しました（${top.label}）`); return; }   // デッキの作成・名前変更・削除
+  if (top.kind === 'deck') { S.undo.pop(); await deckOps.undo(top); deckDone(); toast(`元に戻しました（${top.label}）`); return; }   // デッキの作成・名前変更・削除
   if (top.kind === 'set') { // 非表示・休止・フラグ・マークを戻す（新しい時刻で前の状態を送る）
     S.undo.pop(); const now = Date.now();
     const base = lastRevIds(top.prevs.map(p => p.id));
@@ -1971,7 +1971,7 @@ function setupTools() {
   $('#nav-add').onclick = () => { $('#addpop').hidden = false; document.body.classList.add('addopen'); };
   // スワイプで行を開いているときに、ほかのところを押したら閉じるだけ（iOS の表と同じ）
   document.addEventListener('click', e => { if (swipeRow && !swipeRow.contains(e.target)) { e.stopPropagation(); e.preventDefault(); swipeRow.swipe?.close(); swipeRow = null; } }, true);
-  $('#addpop .newdeck').onclick = () => { $('#addpop').hidden = true; document.body.classList.remove('addopen'); decks.create(); };
+  $('#addpop .newdeck').onclick = () => { $('#addpop').hidden = true; document.body.classList.remove('addopen'); deckOps.create(); };
   $('#addpop').onclick = e => { if (e.target.id === 'addpop') { $('#addpop').hidden = true; document.body.classList.remove('addopen'); } };
   setupAskButton();
   ask = createAsk({ getCard: () => S.card, getSide: () => S.side, deckName: did => S.decksById.get(did)?.name || '', penImage: () => pen.image(isDark() ? '#000000' : '#ffffff'), hasStrokes: () => pen.state.strokes.length > 0, cardById: id => S.byId.get(id) });
