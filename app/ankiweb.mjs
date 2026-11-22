@@ -68,7 +68,7 @@ function writeConfig(w, p) {
 }
 function readConfig(m, base) {
   const p = structuredClone(base || {}); p.new ||= {}; p.rev ||= {}; p.lapse ||= {};
-  p.new.delays = floatsOf(m[1]); p.lapse.delays = floatsOf(m[2]); p.fsrsWeights = floatsOf(m[3]); p.easyDaysPercentages = floatsOf(m[4]); p.fsrsParams5 = floatsOf(m[5]); p.fsrsParams6 = floatsOf(m[6]);
+  p.new.delays = floatsOf(m[1]); p.lapse.delays = floatsOf(m[2]); p.fsrsWeights = f32sOf(m[3]); p.easyDaysPercentages = floatsOf(m[4]); p.fsrsParams5 = f32sOf(m[5]); p.fsrsParams6 = f32sOf(m[6]);   // パラメータは f32 のまま（Anki と同じ値で計算する）
   p.new.perDay = f1(m, 9); p.rev.perDay = f1(m, 10); p.new.initialFactor = Math.round(r6(f1(m, 11, 2.5)) * 1000); p.rev.ease4 = r6(f1(m, 12)); p.rev.hardFactor = r6(f1(m, 13)); p.lapse.mult = r6(f1(m, 14)); p.rev.ivlFct = r6(f1(m, 15));
   p.rev.maxIvl = f1(m, 16); p.lapse.minInt = f1(m, 17); p.new.ints = [f1(m, 18), f1(m, 19), (p.new.ints || [])[2] ?? 0];
   p.new.order = f1(m, 20) === 1 ? 0 : 1; p.lapse.leechAction = f1(m, 21); p.lapse.leechFails = f1(m, 22); p.autoplay = !f1(m, 23); p.maxTaken = f1(m, 24); p.timer = f1(m, 25) ? 1 : 0;

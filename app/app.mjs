@@ -142,7 +142,7 @@ async function saveConf(k, v, rev) { applyConf([{ k, v, rev }]); await store.add
 async function updateDeckConfigs(req) {
   // 保存の前の、デッキごとのパラメータ・望ましい保持率・楽な日（rslib update_deck_configs_inner。変わったデッキの記憶の値を計算し直す）
   const before = new Map(), fsrsBefore = !!S.meta.config.fsrs;
-  for (const d of S.meta.decks) if (!d.dyn) { const p = S.meta.presets[d.conf]; before.set(d.id, { params: JSON.stringify(fsrsJobs.presetParams(p)), dr: d.desiredRetention ?? p?.desiredRetention ?? null, easy: JSON.stringify(p?.easyDaysPercentages || []) }); }
+  for (const d of S.meta.decks) if (!d.dyn) { const p = S.meta.presets[d.conf]; before.set(d.id, { params: JSON.stringify(fsrsJobs.presetParams(p).map(Math.fround)), dr: d.desiredRetention ?? p?.desiredRetention ?? null, easy: JSON.stringify(p?.easyDaysPercentages || []) }); }
   if (req.mode === 2) await computeAllParams(req);   // 「すべてのプリセットを最適化」
   // FSRS-6 のパラメータを空にしたら、古い形のパラメータも消す（空のときに古いものへ戻らないように）
   for (const p of req.configs) if (!(p.fsrsParams6 || []).length) { p.fsrsParams5 = []; p.fsrsWeights = []; }
@@ -188,7 +188,7 @@ async function recomputeMemory(before, fsrsBefore, req) {
   for (const d of S.meta.decks) {
     if (d.dyn) continue;
     const p = S.meta.presets[d.conf], b = before.get(d.id);
-    const cur = { params: JSON.stringify(fsrsJobs.presetParams(p)), dr: d.desiredRetention ?? p?.desiredRetention ?? null, easy: JSON.stringify(p?.easyDaysPercentages || []) };
+    const cur = { params: JSON.stringify(fsrsJobs.presetParams(p).map(Math.fround)), dr: d.desiredRetention ?? p?.desiredRetention ?? null, easy: JSON.stringify(p?.easyDaysPercentages || []) };
     if (toggled || !b || b.params !== cur.params || b.dr !== cur.dr || (req.fsrsReschedule && b.easy !== cur.easy)) { if (!groups.has(d.conf)) groups.set(d.conf, []); groups.get(d.conf).push(d.id); }
   }
   if (!groups.size) return 0;
