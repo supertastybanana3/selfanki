@@ -5,6 +5,7 @@ import { buildFiltered, filteredQueues, nextFilteredCard, afterRescheduling, ans
 import { installAnkiBackend } from './ankiweb.mjs';
 import { compileSearch, loadNotes, displayText } from './search.mjs';
 import * as store from './store.mjs';
+import { parseBackupName } from './backup.mjs';
 import * as sync from './sync.mjs';
 import { createPen } from './pen.mjs';
 import { cardsRequired as tmplCardsRequired } from './template.mjs';
@@ -338,6 +339,22 @@ function scheduleSync(ms = 4000) {
 const autoSyncOn = () => !!FEAT.autoSync && pref('autoSync');
 const syncNeverDone = () => { try { return !localStorage.getItem('syncedOnce'); } catch { return false; } };
 // 手で同期したときの小窓（AnkiMobile 25.09 の実機と同じ「同期中... 追加/変更: N↑ N↓ 削除: N↑ N↓」）。キャンセルは小窓を閉じるだけ（同期は続く）
+// バックアップの印（変わったかどうかだけ分かればよい）: 記録の数・カードと記録とノートの最後の変更・デッキとプリセットの中身
+function collectionSig() {
+  let m = 0; for (const c of S.all) { if ((c.rev || 0) > m) m = c.rev; if ((c.mod || 0) * 1000 > m) m = c.mod * 1000; }
+  let n = 0; for (const r of S.noteRecs?.values?.() || []) if ((r.rev || 0) > n) n = r.rev;
+  const str = JSON.stringify([S.meta.presets || {}, (S.meta.decks || []).map(d => [d.id, d.name, d.conf]), [...(S.fdecks?.values() || [])].map(f => [f.id, f.name, f.rev])]);
+  let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return [S.revlog.length, S.all.length, S.all.reduce((a, c) => a + (c.gone ? 1 : 0), 0), m, n, h].join(':');
+}
+// 自動: アプリを閉じた（隠れた）とき。間隔と変更は xchg.backup が見る
+async function autoBackup() { if (!S.all?.length || !xchg || S.busy) return; try { await xchg.backup(false, collectionSig()); } catch (e) { console.warn('バックアップ', e); } }
+async function backupNow() {
+  try {
+    const r = await xchg.backup(true, collectionSig());
+    if (r === 'unchanged') toast('直近のバックアップから変更がありません。'); else if (r === 'created') toast('バックアップを作成しました。');
+  } catch (e) { iosAlert('バックアップ', String(e?.message || e)); }
+}
 async function runSync(manual = false) {
   const btn = $('#nav-sync'); btn.classList.add('busy');
   let dlg = null;
@@ -388,6 +405,7 @@ function startSyncLoop() {
   const btn = $('#nav-sync'); btn.disabled = false; btn.onclick = () => runSync(true);
   const auto = autoSyncOn;
   window.addEventListener('online', () => { if (auto()) scheduleSync(500); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) autoBackup(); });   // 閉じたときのバックアップ
   document.addEventListener('visibilitychange', () => { if (!document.hidden && document.body.dataset.view === 'decks') checkRemote(true); if (!auto()) return; if (!document.hidden) scheduleSync(500); else runSync(); });
   setInterval(() => { if (auto() && !document.hidden) runSync(); }, 5 * 60 * 1000);
   scheduleSync(300); paintSync();
@@ -2037,9 +2055,22 @@ function setupTools() {
       [{ t: '英字入力時に文頭を自動で大文字にする', tg: true, off: 1 }, { t: 'オートコレクト', tg: true, off: 1 }, { t: 'スマート引用符とダッシュを自動変換', tg: true, off: 1 }],
       [{ t: '手書きスクリーンで指での入力を無視', tg: false, off: 1 }]] }),
     profile: () => ({ title: 'プロファイル', groups: [[{ t: 'ユーザー 1', ck: true }]] }),
-    backup: () => ({ title: 'バックアップ', groups: [
-      [{ t: '自動バックアップの間隔（分）', v: '30', off: 1 }, { t: '各日代表のバックアップ保管数（何日分）', v: '12', off: 1 }, { t: '各週代表のバックアップ保管数（何週分）', v: '10', off: 1 }, { t: '各月代表のバックアップ保管数（何か月分）', v: '9', off: 1 }],
-      { note: 'このアプリにはバックアップの機能がありません。パソコンの Anki に書き戻している場合は、Anki 側のバックアップに入ります。' }] }),
+    // バックアップ（Anki と同じ決まりで、画像・音声を含めない .colpkg を端末に置く。app/backup.mjs）。押すとそのバックアップに戻す（.colpkg の読み込みと同じ確認）
+    backup: () => {
+      const lim = xchg.bkLimits(), list = xchg.backupsCached();
+      if (!list) xchg.backups().then(() => { if (!$('#prefs').hidden && stack.at(-1) === 'backup') renderPrefs(); });
+      const num = (t, k) => ({ t, v: String(lim[k]), run: async () => {
+        const r = await iosPrompt({ title: t, numbers: [{ label: t, value: String(lim[k]) }] }); if (!r) return;
+        xchg.setBkLimit(k, r.numbers[0]); renderPrefs();
+      } });
+      const when = n => { const d = parseBackupName(n); return d ? d.toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : n; };
+      const mb = b => b.size >= 1048576 ? `${(b.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b.size / 1024))} KB`;
+      return { title: 'バックアップ', groups: [
+        [{ t: 'バックアップを作成', act: 1, run: () => backupNow().then(() => { if (!$('#prefs').hidden && stack.at(-1) === 'backup') renderPrefs(); }) }],
+        [num('自動バックアップの間隔（分）', 'mins'), num('各日代表のバックアップ保管数（何日分）', 'daily'), num('各週代表のバックアップ保管数（何週分）', 'weekly'), num('各月代表のバックアップ保管数（何か月分）', 'monthly')],
+        { note: 'このアプリは一定時間（分）ごとに、アプリを閉じたとき（ほかのアプリに切り替えたとき）にコレクションのバックアップを作成しています。各期間（日／週／月）の代表として保管するバックアップ以外のバックアップは、ディスク領域を空けるために、作成から2日以上経過した後に削除していきます。画像・音声は含みません。' },
+        ...(list && list.length ? [list.map(b => ({ t: when(b.name), v: mb(b), run: () => { closePrefs(); xchg.restoreBackup(b.name); } }))] : [])] };
+    },
     about: () => ({ title: 'このアプリについて', about: ['Anki のカードと学習の記録をそのまま使う暗記アプリです。', '復習の間隔の計算と出題の順番は、Anki のソースコード（AGPL）をもとに書き直したもので、Anki 本体と同じ結果になることを確かめています。', '答えた記録をパソコンの Anki に書き戻せば、Anki や AnkiMobile と並行して使えます。'] }),
     sync: () => ({ title: '同期', groups: [
       [{ t: '音声と画像を同期', tg: true, off: 1 }, { t: 'メディア同期の進捗を表示', tg: true, off: 1 }],
