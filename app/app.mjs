@@ -40,7 +40,7 @@ const barDark = () => { try { return localStorage.getItem('barDark') || 'translu
 // 入れた機能は「設定」→「このアプリ独自の機能」で端末ごとに切れる
 const FEAT = { pen: '', autoSync: false, lang: 'ja' };   // lang … 画面の言語（Anki の言語の番号の形 ja・de-DE など。tools/build_site.py が config.json の language から入れる）
 let DESIGN = null;   // 読み込んだ書き込みのデザイン（mount の返り値）
-const PREF_DEFAULT = { pastePng: false, pasteResize: false, autoCap: true, autoCorrect: true, drawNoFinger: false, syncMedia: true, neverType: false, replayBtn: true, stopQAudio: true, topbar: true, bottombar: true, counts: true, answerBtn: true, ivl: true, pen: true, autoSync: false, ticks: true, ticksByType: false, toolsBtn: true, noPad: false, extLinks: true };
+const PREF_DEFAULT = { badge: false, pastePng: false, pasteResize: false, autoCap: true, autoCorrect: true, drawNoFinger: false, syncMedia: true, neverType: false, replayBtn: true, stopQAudio: true, topbar: true, bottombar: true, counts: true, answerBtn: true, ivl: true, pen: true, autoSync: false, ticks: true, ticksByType: false, toolsBtn: true, noPad: false, extLinks: true };
 // autoSync: 既定は本家の Anki と同じく、下の「同期」を押したときだけ送受信する。オンにすると、答えるたびに数秒後に送り、開いたとき・戻ったとき・5分ごとにも同期する（このアプリ独自の方式）
 const lsRaw = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch { return d; } };
 const pref = k => { try { const v = localStorage.getItem('pref:' + k); return v == null ? PREF_DEFAULT[k] : v === '1'; } catch { return PREF_DEFAULT[k]; } };
@@ -406,7 +406,7 @@ function startSyncLoop() {
   const btn = $('#nav-sync'); btn.disabled = false; btn.onclick = () => runSync(true);
   const auto = autoSyncOn;
   window.addEventListener('online', () => { if (auto()) scheduleSync(500); });
-  document.addEventListener('visibilitychange', () => { if (document.hidden) autoBackup(); });   // 閉じたときのバックアップ
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { setBadge(); autoBackup(); } });   // 閉じたときのバックアップ
   document.addEventListener('visibilitychange', () => { if (!document.hidden && document.body.dataset.view === 'decks') checkRemote(true); if (!auto()) return; if (!document.hidden) scheduleSync(500); else runSync(); });
   setInterval(() => { if (auto() && !document.hidden) runSync(); }, 5 * 60 * 1000);
   scheduleSync(300); paintSync();
@@ -528,6 +528,14 @@ function openFDeck(id = null) {
 const extKey = (day, did) => `ext:${day}:${did}`;
 function getExt(day, did) { try { return JSON.parse(localStorage.getItem(extKey(day, did)) || 'null') || { new: 0, rev: 0 }; } catch { return { new: 0, rev: 0 }; } }
 function addExt(did, kind, n) { S.mainQ = null; const day = timingToday(nowSecs(), S.meta).daysElapsed; const e = getExt(day, did); e[kind] += n; try { localStorage.setItem(extKey(day, did), JSON.stringify(e)); } catch {} }
+// アプリのアイコンの課題枚数（Badging API。iOS 16.4 以降のホーム画面のアプリは、通知の許可が要る）。数はデッキ一覧のいちばん上の段の 新規＋学習中＋復習 の和
+function setBadge() {
+  if (!pref('badge') || !navigator.setAppBadge || !S.meta?.decks) return;
+  try {
+    let n = 0; for (const d of [...S.meta.decks, ...(S.fdecks?.values() || [])]) if (!d.name.includes('::')) { const [a, b, c] = countsFor(d.id).c; n += a + b + c; }
+    (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
+  } catch (e) { console.warn('バッジ', e); }
+}
 function countsFor(did, home = null) {
   const now = nowSecs(); const timing = timingToday(now, S.meta);
   if (isFDeck(did)) {   // フィルターデッキ: 中のカードだけを、中での期日・種類で（上限なし）
@@ -581,6 +589,7 @@ function showDecks() {
   for (const d of tops) {
     const g = document.createElement('li'); g.className = 'group'; ul.appendChild(g); row(g, d, 0);
   }
+  if (pref('badge')) setTimeout(setBadge, 0);
 }
 
 // ---------- 出題 ----------
@@ -2077,7 +2086,12 @@ function setupTools() {
     toolspos: () => ({ title: 'ツールアイコンの配置', groups: [[['left', '左側'], ['right', '右側']].map(([k, t]) => ({ t, ck: (toolsLeft() ? 'left' : 'right') === k, run: () => { setLS('toolsPos', k); applyPrefs(); } }))] }),
     dtp: () => ({ title: 'ダブルタップ防止', groups: [Object.entries(DTP).map(([k, [t]]) => ({ t, ck: dtpKey() === k, run: () => setLS('dtp', k) }))] }),
     notify: () => ({ title: '通知', groups: [
-      [{ t: 'アプリのアイコンに課題枚数を表示', tg: false, off: 1 }],
+      [navigator.setAppBadge ? tgl('アプリのアイコンに課題枚数を表示', 'badge', async () => {
+        if (!pref('badge')) { navigator.clearAppBadge?.().catch(() => {}); return; }
+        try { if (window.Notification && Notification.permission === 'default') await Notification.requestPermission(); } catch {}
+        setBadge();
+      }) : { t: 'アプリのアイコンに課題枚数を表示', tg: false, off: 1 }],
+      ...(navigator.setAppBadge ? [] : [{ note: 'この端末（ブラウザ）では、アイコンに数を出せません。iPhone・iPad はホーム画面に追加したアプリ（iOS 16.4 以降）で使えます。' }]),
       [{ t: '定時に、課題があれば枚数を通知', tg: false, off: 1 }, { t: '通知時刻', v: '10:00', go: 'x', off: 1 }]] }),
     topbar: () => ({ title: 'トップバー', groups: [
       [tgl('トップバーを表示', 'topbar', applyPrefs)],
