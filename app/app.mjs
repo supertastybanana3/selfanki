@@ -11,6 +11,8 @@ import { typeQuestion, typeAnswer } from './typeans.mjs';
 import { createScratchpad, spPref, SP_WIDTH, SP_SIZE, SP_ALPHA } from './scratchpad.mjs';
 import { repositionNew } from '../fsrs/reposition.mjs';
 import { createNotes } from './notes.mjs';
+import { updateMemoryState, Rescheduler } from '../fsrs/memory.mjs';
+import * as fsrsJobs from './fsrsjobs.mjs';
 
 const BUNDLE = new URL('../bundle/', location.href).href;
 const MEDIA = BUNDLE + 'media/';
@@ -120,7 +122,7 @@ function applyOp(op) {
   const c = S.byId.get(op.c?.id); if (!c) return;
   if (op.t === 'ans') { applyState(c, op.c.st, op.c.rev); addRev(op.r); }
   else if (op.t === 'undo') { applyState(c, op.c.st, op.c.rev); delRev(op.rid); }
-  else if (op.t === 'set') applyState(c, op.c.st, op.c.rev);   // 休止・非表示・フラグ・マーク・元に戻す
+  else if (op.t === 'set') { applyState(c, op.c.st, op.c.rev); if (op.r) addRev(op.r); }   // 休止・非表示・フラグ・マーク・元に戻す・記憶の値の計算し直し（期日の付け直しは記録も）
 }
 // ---------- デッキのオプション（サーバーの conf 表）。Anki 側（配った中身）より新しいものだけ重ねる ----------
 function applyConf(rows) {
@@ -140,6 +142,12 @@ function applyConf(rows) {
 async function saveConf(k, v, rev) { applyConf([{ k, v, rev }]); await store.addOp({ t: 'conf', k, v, rev }); }
 // Anki の「デッキのオプション」画面で保存したとき（rslib deckconfig/update.rs と同じ考え方）
 async function updateDeckConfigs(req) {
+  // 保存の前の、デッキごとのパラメータ・望ましい保持率・楽な日（rslib update_deck_configs_inner。変わったデッキの記憶の値を計算し直す）
+  const before = new Map(), fsrsBefore = !!S.meta.config.fsrs;
+  for (const d of S.meta.decks) if (!d.dyn) { const p = S.meta.presets[d.conf]; before.set(d.id, { params: JSON.stringify(fsrsJobs.presetParams(p).map(Math.fround)), dr: d.desiredRetention ?? p?.desiredRetention ?? null, easy: JSON.stringify(p?.easyDaysPercentages || []) }); }
+  if (req.mode === 2) await computeAllParams(req);   // 「すべてのプリセットを最適化」
+  // FSRS-6 のパラメータを空にしたら、古い形のパラメータも消す（空のときに古いものへ戻らないように）
+  for (const p of req.configs) if (!(p.fsrsParams6 || []).length) { p.fsrsParams5 = []; p.fsrsWeights = []; }
   const rev = Date.now(), today = timingToday(nowSecs(), S.meta).daysElapsed; let lastId = null, n = 0;
   for (const p of req.configs) { const id = p.id || rev + n++; await saveConf('preset:' + id, { ...p, id }, rev); lastId = id; }
   for (const id of req.removed) if (id !== 1) await saveConf('preset:' + id, { removed: true }, rev);
@@ -154,10 +162,67 @@ async function updateDeckConfigs(req) {
     await saveConf('deck:' + deck.id, dv, rev);
     if (req.mode === 1 && lastId != null) for (const d of S.meta.decks) if (d.name.startsWith(deck.name + '::') && !d.dyn) await saveConf('deck:' + d.id, { conf: lastId }, rev);
   }
-  await saveConf('global', { fsrs: req.fsrs, applyAllParentLimits: req.applyAllParentLimits, newCardsIgnoreReviewLimit: req.newCardsIgnoreReviewLimit }, rev);
+  await saveConf('global', { fsrs: req.fsrs, applyAllParentLimits: req.applyAllParentLimits, newCardsIgnoreReviewLimit: req.newCardsIgnoreReviewLimit, fsrsHealthCheck: req.fsrsHealthCheck, ...(req.mode === 2 ? { lastFsrsOptimize: today } : {}) }, rev);
+  const nMem = await recomputeMemory(before, fsrsBefore, req);
   scheduleSync(500);
   if (document.body.dataset.view === 'decks') showDecks(); else if (S.card) { const { c } = countsFor(S.deck); paintCounts(c, S.card); }
-  toast('オプションを保存しました');
+  toast(nMem ? `オプションを保存しました（${nMem}枚の記憶の値を計算し直しました）` : 'オプションを保存しました');
+}
+// 「すべてのプリセットを最適化」（rslib compute_all_params）。送られてこなかったプリセットも足し、今のプリセットを最後に
+async function computeAllParams(req) {
+  if (!req.fsrs) throw new Error('FSRS must be enabled');
+  const ids = new Set(req.configs.map(p => p.id)), last = req.configs.pop();
+  for (const p of Object.values(S.meta.presets)) if (!ids.has(p.id)) req.configs.push(structuredClone(p));
+  req.configs.push(last);
+  const total = req.configs.length;
+  for (const [i, p] of req.configs.entries()) {
+    const search = (p.paramSearch ?? p.weightSearch ?? '').trim() ? (p.paramSearch ?? p.weightSearch) : `preset:"${String(p.name).replace(/["\\]/g, m => '\\' + m)}" -is:suspended`;
+    try {
+      const r = await fsrsJobs.computeFsrsParams(S, req.target, { search, currentParams: fsrsJobs.presetParams(p), ignoreBeforeMs: fsrsJobs.ignoreBeforeMs(p), numRelearningSteps: (p.lapse?.delays || []).length, healthCheck: false }, { preset: i + 1, presets: total });
+      p.fsrsParams6 = r.params;
+    } catch (e) { if (String(e.message) === 'Interrupted') throw e; console.warn(p.name, e); }
+  }
+}
+// 保存のあと: パラメータ・望ましい保持率（・付け直すなら楽な日）が変わったデッキのカードの記憶の値を計算し直し、'set' で送る（rslib update_memory_state）
+async function recomputeMemory(before, fsrsBefore, req) {
+  const t = timingToday(nowSecs(), S.meta), toggled = fsrsBefore !== !!req.fsrs;
+  const groups = new Map();   // プリセット → デッキ
+  for (const d of S.meta.decks) {
+    if (d.dyn) continue;
+    const p = S.meta.presets[d.conf], b = before.get(d.id);
+    const cur = { params: JSON.stringify(fsrsJobs.presetParams(p).map(Math.fround)), dr: d.desiredRetention ?? p?.desiredRetention ?? null, easy: JSON.stringify(p?.easyDaysPercentages || []) };
+    if (toggled || !b || b.params !== cur.params || b.dr !== cur.dr || (req.fsrsReschedule && b.easy !== cur.easy)) { if (!groups.has(d.conf)) groups.set(d.conf, []); groups.get(d.conf).push(d.id); }
+  }
+  if (!groups.size) return 0;
+  const deckDr = new Map(); for (const d of S.meta.decks) if (!d.dyn && d.desiredRetention != null) deckDr.set(d.id, d.desiredRetention);
+  const byCard = new Map(); for (const r of S.revlog) { let a = byCard.get(r.cid); if (!a) byCard.set(r.cid, a = []); a.push(r); }
+  for (const a of byCard.values()) a.sort((x, y) => x.id - y.id);
+  const confOf = did => S.decksById.get(did)?.conf;
+  const lbOn = S.meta.config.loadBalancerEnabled !== false;
+  const now = Date.now(), ops = [];
+  let ms = now; while (S.revIds.has(ms)) ms++;
+  for (const [conf, dids] of groups) {
+    const p = S.meta.presets[conf] || {}, set = new Set(dids);
+    const cards = S.cards.filter(c => set.has(c.did) && c.type !== 0).sort((a, b) => a.id - b.id);
+    const ereq = req.fsrs ? { params: fsrsJobs.presetParams(p), presetDr: p.desiredRetention ?? 0.9, deckDr, historicalRetention: p.sm2Retention ?? 0.9, maxInterval: p.rev?.maxIvl ?? 36500, reschedule: !!req.fsrsReschedule } : null;
+    const resch = ereq?.reschedule && lbOn ? new Rescheduler({ cards: S.cards, revlog: S.revlog, decksById: S.decksById, presets: S.meta.presets, today: t.daysElapsed, nextDayAt: t.nextDayAt, extra: (S.meta.lbExtra || []).map(([due, c]) => [due, c]) }) : null;
+    const base = lastRevIds(cards.map(c => c.id));
+    fsrsJobs.setProgress({ kind: 'computeMemory', current: 0, total: cards.length, label: '' });
+    const changes = updateMemoryState({ cards, req: ereq, ignoreBefore: fsrsJobs.ignoreBeforeMs(p) }, { revsOf: id => byCard.get(id), nextDayAt: t.nextDayAt, today: t.daysElapsed, rescheduler: resch, confOf, nowMs: ms,
+      onProgress: (i, n) => fsrsJobs.setProgress({ kind: 'computeMemory', current: i, total: n, label: '' }) });
+    for (const ch of changes) {
+      const c = S.byId.get(ch.id);
+      c.data = ch.data; if (ch.due != null) { c.due = ch.due; c.ivl = ch.ivl; }
+      c.rev = now;
+      const op = { t: 'set', c: { id: c.id, st: pickState(c), rev: now }, base: base.get(c.id) || 0 };
+      if (ch.revlog) { while (S.revIds.has(ch.revlog.id)) ch.revlog.id++; op.r = ch.revlog; addRev(ch.revlog); ms = Math.max(ms, ch.revlog.id + 1); }
+      ops.push(op);
+    }
+  }
+  fsrsJobs.setProgress(null);
+  await store.addOps(ops);
+  if (ops.length) { S.mainQ = null; if (S.lb) rebuildLB(); }
+  return ops.length;
 }
 function applyServer(cards, revlog) {
   for (const row of cards) { const c = S.byId.get(row.id); if (c) applyState(c, row.st, row.rev); }

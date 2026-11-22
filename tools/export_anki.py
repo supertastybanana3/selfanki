@@ -112,7 +112,8 @@ for m in col.models.all():
 used_conf = {decks[did].get('conf') for did in keep_deck}
 presets = {c['id']: c for c in col.decks.all_config() if c['id'] in used_conf}
 conf_keys = ['rollover', 'collapseTime', 'newCardsIgnoreReviewLimit', 'dayLearnFirst', 'newSpread', 'applyAllParentLimits', 'creationOffset', 'localOffset', 'fsrs',
-             'loadBalancerEnabled', 'fsrsShortTermWithStepsEnabled', 'sched2021', 'nextPos', 'ignoreAccentsInSearch', 'normalize_note_text', 'curDeck', 'restorePositionReviewer', 'resetCountsReviewer', 'randomOrderReposition', 'shiftPositionOfExistingCards', 'setDueReviewer', 'curModel']
+             'loadBalancerEnabled', 'fsrsShortTermWithStepsEnabled', 'sched2021', 'nextPos', 'ignoreAccentsInSearch', 'normalize_note_text', 'curDeck', 'restorePositionReviewer', 'resetCountsReviewer', 'randomOrderReposition', 'shiftPositionOfExistingCards', 'setDueReviewer', 'curModel',
+             'lastFsrsOptimize', 'fsrsHealthCheck', 'fsrsLegacyEvaluate']
 meta = {'exported_at': int(time.time()), 'source': os.path.basename(SRC), 'crt': col.crt, 'config': {k: col.get_config(k, None) for k in conf_keys},
         'decks': [decks[d] for d in sorted(keep_deck, key=lambda d: decks[d]['name'])], 'presets': presets, 'notetypes': notetypes,
         # 負荷分散（rslib load_balancer.rs）は同じプリセットの全カードを数えるので、移していないデッキのカードの期日も送る（[期日, プリセット, ノート]）
