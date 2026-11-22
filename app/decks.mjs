@@ -33,7 +33,7 @@ function matchOrCreateParents(W, deck, newId, made) {
   const comps = deck.name.split('::');
   const p = firstExistingParent(W, deck.name);
   if (p) {
-    if (p.dyn) throw new DeckError('フィルターデッキの下にはデッキを作れません。');
+    if (p.dyn) throw new DeckError('フィルターデッキにサブデッキは作れません。')   // Anki の errors_filtered_parent_deck;
     const pc = p.name.split('::').length;
     deck.name = p.name + '::' + comps.slice(pc).join('::');
     if (pc !== comps.length - 1) createMissingParents(W, deck.name, newId, made);
@@ -184,7 +184,7 @@ export function createDecks(env) {
     const name = r?.value?.trim(); if (!name) return;
     const want = normalizeName(name);
     if (names().some(d => fold(d.name) === fold(want))) return;
-    let plan; try { plan = planAdd(names(), name); } catch (e) { env.alert('エラー', humanErr(e)); return; }
+    let plan; try { plan = planAdd(names(), name); } catch (e) { env.alert('Error', humanErr(e)); return; }
     await commit(plan, 'デッキの追加');
     for (const x of plan.created) S.open.add(x.id);   // 新しいデッキは開いた状態（Anki の collapsed: false）
     env.saveOpen(); env.done();
@@ -193,7 +193,7 @@ export function createDecks(env) {
     const d = deckOf(did); if (!d) return;
     const r = await env.prompt({ title: 'デッキ名の変更', message: '新しいデッキ名', input: d.name });
     const name = r?.value; if (!name || name === d.name) return;
-    let plan; try { plan = planRename(names(), did, name); } catch (e) { env.alert('エラー', humanErr(e)); return; }
+    let plan; try { plan = planRename(names(), did, name); } catch (e) { env.alert('Error', humanErr(e)); return; }
     await commit(plan, 'デッキ名の変更');
     for (const x of plan.created) S.open.add(x.id); env.saveOpen();
     env.done();
@@ -208,7 +208,7 @@ export function createDecks(env) {
     const plan = planRemove(names(), did, env.defaultName());
     const ids = new Set(plan.emptied), n = cardsIn(ids).length;
     await commit(plan, 'デッキを削除', { cleared: plan.emptied.filter(x => x === 1) });
-    if (S.lastDeck != null && !S.meta.decks.some(x => x.id === S.lastDeck)) S.lastDeck = 1;
+    if (S.lastDeck != null && S.decksById.get(S.lastDeck)?.gone) S.lastDeck = 1;   // 今のデッキを消したら既定のデッキ（フィルターデッキの id はそのまま）
     env.done(`デッキ「${d.name}」（カード${n}枚）を削除しました`);
   }
   return { reset, applyRows, rebuild, hides, create, rename, remove, undo, recs, base };
