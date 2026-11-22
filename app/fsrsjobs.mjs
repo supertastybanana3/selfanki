@@ -88,7 +88,8 @@ async function simCtx(S, req, did) {
   const t = timingToday(Math.floor(Date.now() / 1000), S.meta);
   const cards = await find(S, req.search, did);
   const intro = searchCards(S, `${req.search} introduced:1`, did).length;
-  return { cards: cards.map(slim), revlogs: revlogsFor(S, cards), daysElapsed: t.daysElapsed, nextDayAt: t.nextDayAt, introducedToday: intro,
+  // 記録から作る設定（押した時間・評価の割合）はここで作り、Worker には記録を送らない
+  return { cards: cards.map(slim), extracted: simlib.extractSimulatorConfig(revlogsFor(S, cards), t.nextDayAt, true), daysElapsed: t.daysElapsed, nextDayAt: t.nextDayAt, introducedToday: intro,
     loadBalancer: S.meta.config?.loadBalancerEnabled !== false, mems: memsFor(S, cards, t.nextDayAt, true) };
 }
 
@@ -161,7 +162,7 @@ export async function computeOptimalRetention(S, did, req) {
 export async function getRetentionWorkload(S, did, w, search) {
   const t = timingToday(Math.floor(Date.now() / 1000), S.meta);
   const cards = await find(S, search, did);
-  const ctx = { cards: cards.map(slim), revlogs: revlogsFor(S, cards), daysElapsed: t.daysElapsed, nextDayAt: t.nextDayAt, mems: memsFor(S, cards, t.nextDayAt, false) };
+  const ctx = { cards: cards.map(slim), extracted: simlib.extractSimulatorConfig(revlogsFor(S, cards), t.nextDayAt, true), daysElapsed: t.daysElapsed, nextDayAt: t.nextDayAt, mems: memsFor(S, cards, t.nextDayAt, false) };
   const drs = []; for (let dr = 70; dr <= 99; dr++) drs.push(dr);
   if (!canWork()) return simlib.retentionWorkload(w, ctx);
   return withWorkers(Math.min(poolSize(), drs.length), async ws => {

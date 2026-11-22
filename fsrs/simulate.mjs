@@ -514,7 +514,8 @@ export function convertCard(c, daysElapsed, ms) {
 }
 const memOf = (mems, c) => { const m = mems[c.id]; return m ? { s: m[0], d: m[1] } : null; };
 const sm2State = (params, ease, ivl, ret) => { try { return memoryStateFromSm2(clipParameters(fillParams(params), 1, false), ease, ivl, ret); } catch { return null; } };
-export function requestToConfig({ req, cards, revlogs, daysElapsed, nextDayAt, introducedToday, loadBalancer, mems }) {
+// extracted: 記録から作った設定（extractSimulatorConfig の結果）。渡されなければ revlogs から作る（Worker に記録を全部送らなくてよいように）
+export function requestToConfig({ req, cards, revlogs, extracted, daysElapsed, nextDayAt, introducedToday, loadBalancer, mems }) {
   let newCards = req.deckSize; for (const c of cards) if (c.type === 0 && c.queue !== -1) newCards++;
   const converted = [];
   for (const c of cards) {
@@ -525,7 +526,7 @@ export function requestToConfig({ req, cards, revlogs, daysElapsed, nextDayAt, i
   }
   const intro = Math.min(introducedToday, req.newLimit);
   if (req.newLimit > 0) for (let i = 0; i < newCards; i++) converted.push({ id: -i, difficulty: -Infinity, stability: F(1e-8), lastDate: -Infinity, due: F(Math.floor((intro + i) / req.newLimit)), interval: -Infinity, lapses: 0 });
-  const p = extractSimulatorConfig(revlogs, nextDayAt, true);
+  const p = extracted || extractSimulatorConfig(revlogs, nextDayAt, true);
   const easy = parseEasyDays(req.easyDaysPercentages);
   const config = {
     ...p, deckSize: converted.length, learnSpan: req.daysToSimulate, maxCostPerday: 3.4028234663852886e38, maxIvl: F(req.maxInterval),
@@ -564,8 +565,8 @@ export function computeOptimalRetention(req, ctx, onProgress, shouldAbort) {
   return Math.min(0.95, Math.max(0.7, v));
 }
 // rslib get_retention_workload（記憶の値のあるカードだけ。デッキの大きさは検索に合った全部）
-export function workloadSetup({ cards, revlogs, daysElapsed, nextDayAt, mems }) {
-  const config = extractSimulatorConfig(revlogs, nextDayAt, true);
+export function workloadSetup({ cards, revlogs, extracted, daysElapsed, nextDayAt, mems }) {
+  const config = { ...(extracted || extractSimulatorConfig(revlogs, nextDayAt, true)) };
   const fc = [];
   for (const c of cards) { if (!isIncluded(c)) continue; const ms = memOf(mems, c); if (!ms) continue; const x = convertCard(c, daysElapsed, ms); if (x) fc.push(x); }
   config.deckSize = cards.length;
