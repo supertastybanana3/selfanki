@@ -129,9 +129,9 @@ def anki_view(col, ids):
         tags, nmod = notes.get(nid, ('', 0))
         tl = [t.lower() for t in tags.split()]
         hq, hdue, d = home_state(ctype, queue, due, odid, odue, data, did)
-        st = {'type': ctype, 'queue': hq, 'due': hdue, 'ivl': ivl, 'factor': factor, 'reps': reps, 'lapses': lapses,
+        st = {'did': odid or did, 'type': ctype, 'queue': hq, 'due': hdue, 'ivl': ivl, 'factor': factor, 'reps': reps, 'lapses': lapses,
               'left': left, 'data': d, 'flags': flags, 'mark': int('marked' in tl)}
-        out[cid] = {'st': st, 'nid': nid, 'odid': odid, 'nmod': nmod, 'leech': 'leech' in tl, 'ver': max(mod * 1000, last.get(cid) or 0), 'home': odid or did}
+        out[cid] = {'st': st, 'nid': nid, 'odid': odid, 'nmod': nmod, 'leech': 'leech' in tl, 'ver': max(mod * 1000, last.get(cid) or 0)}
     return out
 
 
@@ -139,6 +139,7 @@ def same(a, b):
     """a＝サーバー側、b＝Anki 側。間隔・期日・記憶の値に加えて、サーバー側にフラグがあればフラグも比べる（マークは別に比べる）"""
     for k in ('type', 'queue', 'due', 'ivl', 'factor', 'reps', 'lapses', 'left'):
         if a.get(k) != b.get(k): return False
+    if 'did' in a and 'did' in b and a['did'] != b['did']: return False   # 端末の「デッキの変更」で動かしたカード（サーバー側に did があるときだけ比べる）
     if 'flags' in a and (a['flags'] & 7) != (b.get('flags', 0) & 7): return False
     da, db = a.get('data') or {}, b.get('data') or {}
     for k, tol in (('s', 2e-4), ('d', 2e-3)):
@@ -151,6 +152,11 @@ def same(a, b):
 # 「答え」として数える記録の種類: 学習・復習・再学習・早めの復習と、手で決めた期日（Forget・Set Due Date）。
 # 5（オプションを変えて計算し直した）は答えではないので数えない
 DECISIVE = (0, 1, 2, 3, 4)
+
+
+def out_of_filtered(s, a):
+    """端末でコレクションを置き換えた（.colpkg）とき: 状態に did があり、フィルターデッキの印（data.flt）が無いのに、Anki ではフィルターデッキに入っている → 元のデッキへ戻す（write_card が戻す）"""
+    return s['st'].get('did') is not None and bool(a['odid']) and 'flt' not in (s['st'].get('data') or {})
 
 
 def plan(scards, srevs, acards, anki_rev_ids, anki_revlog, fresh=()):
@@ -173,16 +179,14 @@ def plan(scards, srevs, acards, anki_rev_ids, anki_revlog, fresh=()):
         ast = a['st']; s = scards.get(cid)
         if s is None: continue
         if cid in fresh:   # この同期で Anki に作ったばかりのカード（端末で足した・.apkg から読み込んだ）は、端末の状態を正にする
-            if not same(s['st'], ast) or (s['st'].get('did') is not None and (s['st']['did'] != a['home'] or (a['odid'] and 'flt' not in (s['st'].get('data') or {})))): to_anki.append((cid, s['st'], s['rev']))
+            if not same(s['st'], ast) or out_of_filtered(s, a): to_anki.append((cid, s['st'], s['rev']))
             continue
         al, sl = a_last.get(cid, 0), s_last.get(cid, 0)
         sm = note_mark.get(a['nid'])
         if sm is not None and int(sm['st']['mark']) != ast['mark']:
             if sm['rev'] > a['nmod'] * 1000: (mark_add if sm['st']['mark'] else mark_del).add(a['nid'])
             elif same(s['st'], ast): to_srv.append((cid, {**s['st'], 'mark': ast['mark']}, max(a['ver'], a['nmod'] * 1000, s['rev']), al)); continue
-        # 端末でコレクションを置き換えたときだけ、状態に移る先のデッキ（did）が入る。フィルターデッキの外にいるはずのカードも、ここで元のデッキへ戻す
-        moved = s['st'].get('did') is not None and (s['st']['did'] != a['home'] or (a['odid'] and 'flt' not in (s['st'].get('data') or {})))
-        if same(s['st'], ast) and not moved: continue
+        if same(s['st'], ast) and not out_of_filtered(s, a): continue
         if al > sl: to_srv.append((cid, ast, max(a['ver'], s['rev'] + 1), al))
         elif sl > al or s['rev'] >= a['ver']: to_anki.append((cid, s['st'], s['rev']))
         else: to_srv.append((cid, ast, a['ver'], al))
@@ -200,12 +204,12 @@ def write_card(col, cid, st):
     c = col.get_card(cid)
     for k in ('type', 'queue', 'due', 'ivl', 'factor', 'reps', 'lapses', 'left'): setattr(c, k, st[k])
     if c.odid: c.did, c.odid, c.odue = c.odid, 0, 0
+    if st.get('did') and col.decks.get(st['did'], default=False) and not col.decks.get(st['did'])['dyn']: c.did = st['did']   # 端末でデッキを変えたカード
     d = st.get('data') or {}
     c.memory_state = FSRSMemoryState(stability=d['s'], difficulty=d['d']) if d.get('s') is not None and d.get('d') is not None else None
     c.desired_retention = d.get('dr'); c.decay = d.get('decay'); c.last_review_time = d.get('lrt')
     if d.get('pos') is not None: c.original_position = d['pos']
     if 'flags' in st: c.flags = st['flags']
-    if st.get('did') is not None and st['did'] != c.did and col.decks.get(st['did'], default=False) and not col.decks.get(st['did']).get('dyn'): c.did = st['did']   # コレクションの置き換え
     return c
 
 
@@ -643,7 +647,7 @@ def run(col, site_url, token, dry=False, log=print):
     srv.push(ops)
     # 確かめる: 書いたカードを読み直して、狙いどおりか
     after = anki_view(col, {cid for cid, _, _ in p['to_anki']})
-    ng = [cid for cid, st, _ in p['to_anki'] if not same(st, after[cid]['st']) or (st.get('did') is not None and col.decks.get(st['did'], default=False) and st['did'] != after[cid]['home'])]
+    ng = [cid for cid, st, _ in p['to_anki'] if not same(st, after[cid]['st'])]
     summary['verify_ng'] = len(ng)
     if ng: log('書いた値が違うカード', len(ng), ng[:3])
     # 端末で読み込んだ画像・音声を Anki に取ってくる

@@ -117,9 +117,9 @@ const cfg = () => ({ crt: S.meta.crt, meta: S.meta, fsrs: !!S.meta.config.fsrs, 
 // 「まだ送っていない自分の答え（outbox）」を順に重ねたもの
 const STATE_KEYS = ['type', 'queue', 'due', 'ivl', 'factor', 'reps', 'lapses', 'left', 'data'];
 // flags（フラグ）と mark（ノートのマーク＝タグ marked）も状態として運ぶ。mark はアプリで付け外ししたときだけ入る
-const pickState = c => { const o = {}; for (const k of STATE_KEYS) o[k] = c[k]; o.flags = c.flags || 0; if (c.mark !== undefined) o.mark = c.mark ? 1 : 0; if (c.leeched) o.leech = 1; return o; };
-// did はコレクションの置き換え（.colpkg の読み込み）でだけ入る（カードを別のデッキへ移す）
-function applyState(c, st, rev) { for (const k of STATE_KEYS) if (k in st) c[k] = st[k]; if ('flags' in st) c.flags = st.flags; if ('mark' in st) c.mark = !!st.mark; if (st.leech) c.leeched = true; if (st.did != null && S.decksById.has(st.did)) c.did = st.did; c.rev = rev; }
+// did（カードのデッキ）は、ブラウザの「デッキの変更」で動かしたカード（didSet）・コレクションの置き換え（.colpkg の読み込み）・Anki から届いた状態にあるときだけ送り・重ねる
+const pickState = c => { const o = {}; for (const k of STATE_KEYS) o[k] = c[k]; o.flags = c.flags || 0; if (c.mark !== undefined) o.mark = c.mark ? 1 : 0; if (c.leeched) o.leech = 1; if (c.didSet) o.did = c.did; return o; };
+function applyState(c, st, rev) { for (const k of STATE_KEYS) if (k in st) c[k] = st[k]; if ('flags' in st) c.flags = st.flags; if ('mark' in st) c.mark = !!st.mark; if (st.leech) c.leeched = true; if ('did' in st && S.decksById?.has(st.did)) { c.did = st.did; c.didSet = true; } c.rev = rev; }
 const REV_KEYS = ['id', 'cid', 'ease', 'ivl', 'lastIvl', 'factor', 'time', 'type'];
 function addRev(r) { if (S.revIds.has(r.id)) return; S.revIds.add(r.id); const o = {}; for (const k of REV_KEYS) o[k] = r[k]; S.revlog.push(o); }
 function delRev(id) { if (!S.revIds.delete(id)) return; S.revlog = S.revlog.filter(r => r.id !== id); }
@@ -597,7 +597,7 @@ function setBrowseSelect(on) {
 function paintBrowseTitle() { $('#browse > .pnav .ptitle').textContent = BR.sel ? `${BR.sel.size}/${BR.list.length} 件選択` : 'ブラウザ'; }
 // 「アクション」の一覧（実機の並び）。暗記で写せないもの（デッキ・タグ・ノートタイプの変更、検索して置換）は薄く出して押せない
 const BROWSE_ACTIONS = [
-  ['deck', 'デッキの変更', null],
+  ['deck', 'デッキの変更', cs => moveCards(cs)],
   ['flag', 'フラグを変更', cs => pickFlag(cs)],
   ['suspend', '休止 / 休止解除', cs => { const un = cs.length && cs[0].queue === -1; return changeCards(cs, c => { c.queue = un ? (c.type === 0 ? 0 : c.type === 2 ? 2 : (c.due > 1e9 ? 1 : 3)) : -1; }, un ? `${cs.length}枚の休止を解除しました` : `${cs.length}枚を休止しました`, '休止 / 休止解除', false); }],
   ['due', '期日を指定', cs => manualMany(cs, 'due')],
@@ -664,6 +664,18 @@ function recMenu() {
   const d = document.createElement('div'); d.id = 'flagdlg'; d.innerHTML = '<div class="box"><b>録音</b></div>';
   const add = (t, fn, cls) => { const b = document.createElement('button'); b.textContent = t; if (cls) b.className = cls; b.onclick = () => { d.remove(); fn && fn(); }; d.firstChild.append(b); };
   add(recording ? '録音を止める' : '声を録音', recToggle); add('録音した声を再生', recPlay); add('キャンセル', null, 'cancel');
+  document.body.append(d);
+}
+// 「デッキの変更」: デッキを選ぶ一覧（フィルターデッキは選べない）。フィルターデッキに入っているカードは、元のデッキが変わる（Anki の set_deck と同じ）
+function moveCards(cs) {
+  const d = document.createElement('div'); d.id = 'flagdlg'; d.innerHTML = '<div class="box decks"><b>デッキの変更</b><div class="lst"></div></div>';
+  const lst = d.querySelector('.lst');
+  for (const dk of [...S.meta.decks].filter(x => !x.dyn).sort(deckCmp)) {
+    const b = document.createElement('button'); b.textContent = dk.name.replace(/::/g, ' › ');
+    b.onclick = () => { d.remove(); changeCards(cs, c => { c.did = dk.id; c.didSet = true; }, `${cs.length}枚のカードを「${dk.name}」に移しました`, 'デッキの変更', false).then(() => paintBrowse(true)); };
+    lst.append(b);
+  }
+  const no = document.createElement('button'); no.textContent = 'キャンセル'; no.className = 'cancel'; no.onclick = () => d.remove(); d.firstChild.append(no);
   document.body.append(d);
 }
 // 「タグを追加」「タグを解除」（rslib add_tags_to_notes・remove_tags_from_notes と同じ: 大文字小文字を区別しない。外すほうは * が使え、子のタグ（親::子）も外れる）
@@ -882,10 +894,10 @@ async function undoInner() {
   const top = S.undo[S.undo.length - 1];
   if (top.kind === 'note') { S.undo.pop(); await notes.undo(top); toast(`元に戻しました（${top.label}）`); return; }   // ノートの追加・編集・削除
   if (top.kind === 'deck') { S.undo.pop(); await deckOps.undo(top); deckDone(); toast(`元に戻しました（${top.label}）`); return; }   // デッキの作成・名前変更・削除
-  if (top.kind === 'set') { // 非表示・休止・フラグ・マークを戻す（新しい時刻で前の状態を送る）
+  if (top.kind === 'set') { // 非表示・休止・フラグ・マーク・デッキを戻す（新しい時刻で前の状態を送る。デッキを動かしたカードは前のデッキも送る）
     S.undo.pop(); const now = Date.now();
     const base = lastRevIds(top.prevs.map(p => p.id));
-    for (const p of top.prevs) { const c = S.byId.get(p.id); Object.assign(c, p); c.rev = now; await store.addOp({ t: 'set', c: { id: c.id, st: pickState(c), rev: now }, base: base.get(c.id) || 0 }); }
+    for (const p of top.prevs) { const c = S.byId.get(p.id), moved = c.didSet; Object.assign(c, p); if (moved) c.didSet = true; c.rev = now; await store.addOp({ t: 'set', c: { id: c.id, st: pickState(c), rev: now }, base: base.get(c.id) || 0 }); }
     if (top.rebuild) S.mainQ = null;
     toast(`元に戻しました（${top.label}）`); advance(top.noForce ? null : S.byId.get(top.prevs[0].id)); scheduleSync(); return;
   }

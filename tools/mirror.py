@@ -103,7 +103,8 @@ def anki_params(cid, st, odid):
     vals += [{'stability': d['s'], 'difficulty': d['d']} if d.get('s') is not None and d.get('d') is not None else None, d.get('dr'), d.get('decay'), d.get('lrt')]
     if d.get('pos') is not None: keys.append('original_position'); vals.append(d['pos'])
     if 'flags' in st: keys.append('flags'); vals.append(st['flags'])
-    if odid: keys += ['did', 'odid', 'odue']; vals += [odid, 0, 0]  # フィルターデッキに入っていたら元のデッキに戻してから書く
+    if odid: keys += ['did', 'odid', 'odue']; vals += [st.get('did') or odid, 0, 0]  # フィルターデッキに入っていたら元のデッキに戻してから書く
+    elif st.get('did'): keys.append('did'); vals.append(st['did'])   # 端末でデッキを変えたカード
     return {'card': cid, 'keys': keys, 'newValues': vals, 'warning_check': True}
 
 # ---- 端末で追加・編集・削除したノート（サーバーの notes 表） ----
@@ -240,7 +241,7 @@ def main():
         to_srv, new_srv, view = [], 0, {}
         for cid, c in acards.items():
             tl = [t.lower() for t in c['tags']]
-            ast = {k: c[k] for k in STATE_KEYS}; ast['flags'] = c['flags']; ast['mark'] = int('marked' in tl)
+            ast = {k: c[k] for k in STATE_KEYS}; ast['flags'] = c['flags']; ast['mark'] = int('marked' in tl); ast['did'] = c['did']
             if cid not in scards: to_srv.append((cid, ast, aver[cid], last.get(cid, 0))); new_srv += 1; continue   # 移したあとに Anki で足したカード
             view[cid] = {'st': ast, 'nid': c['nid'], 'odid': odid.get(cid, 0), 'nmod': c.get('nmod', 0), 'leech': 'leech' in tl, 'ver': aver[cid]}
         p = acore.plan(scards, srevs, view, anki_rev_ids, [rr for rr in arevlog if rr[1] in view])
