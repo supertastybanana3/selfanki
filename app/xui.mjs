@@ -80,7 +80,7 @@ export function setupExchange(ctx) {
       if (idx.has(name)) return name;
     }
     await saveMedia(name, bytes);
-    try { await uploadPending(); } catch {}   // その場で送る（Service Worker が受け持っていなくても、サーバーから出せるように）。送れなければ次の同期で
+    if (ctx.syncMedia?.() !== false) try { await uploadPending(); } catch {}   // その場で送る（Service Worker が受け持っていなくても、サーバーから出せるように）。送れなければ次の同期で
     return name;
   }
   const sha1Of = bytes => sha1hex(bytes);

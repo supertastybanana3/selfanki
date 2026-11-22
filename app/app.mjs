@@ -40,7 +40,7 @@ const barDark = () => { try { return localStorage.getItem('barDark') || 'translu
 // 入れた機能は「設定」→「このアプリ独自の機能」で端末ごとに切れる
 const FEAT = { pen: '', autoSync: false, lang: 'ja' };   // lang … 画面の言語（Anki の言語の番号の形 ja・de-DE など。tools/build_site.py が config.json の language から入れる）
 let DESIGN = null;   // 読み込んだ書き込みのデザイン（mount の返り値）
-const PREF_DEFAULT = { neverType: false, replayBtn: true, stopQAudio: true, topbar: true, bottombar: true, counts: true, answerBtn: true, ivl: true, pen: true, autoSync: false, ticks: true, ticksByType: false, toolsBtn: true, noPad: false, extLinks: true };
+const PREF_DEFAULT = { syncMedia: true, neverType: false, replayBtn: true, stopQAudio: true, topbar: true, bottombar: true, counts: true, answerBtn: true, ivl: true, pen: true, autoSync: false, ticks: true, ticksByType: false, toolsBtn: true, noPad: false, extLinks: true };
 // autoSync: 既定は本家の Anki と同じく、下の「同期」を押したときだけ送受信する。オンにすると、答えるたびに数秒後に送り、開いたとき・戻ったとき・5分ごとにも同期する（このアプリ独自の方式）
 const pref = k => { try { const v = localStorage.getItem('pref:' + k); return v == null ? PREF_DEFAULT[k] : v === '1'; } catch { return PREF_DEFAULT[k]; } };
 // 学習の設定を画面に映す（トップバー・ボトムバー・残り枚数・回答ボタン・次回までの間隔）
@@ -323,7 +323,7 @@ async function prefetchAll(man) {
   const conn = navigator.connection;
   if (conn && !prefetchAll.hooked) { prefetchAll.hooked = true; conn.addEventListener?.('change', () => { if (conn.type !== 'cellular' && !conn.saveData) prefetchAll(man); }); }
   const metered = !!conn && (conn.type === 'cellular' || conn.saveData);
-  const names = metered ? [] : await fetchJSON(BUNDLE + man.media).catch(() => []);
+  const names = metered || !pref('syncMedia') ? [] : await fetchJSON(BUNDLE + man.media).catch(() => []);   // 「音声と画像を同期」オフなら、画像・音声は先に取らない
   const data = [man.meta, man.base.state, man.base.revlog, ...(man.base.add ? [man.base.add] : []), man.media, ...man.chunks.map(c => c.f), ...(man.notes || [])].map(f => BUNDLE + f);
   // 一覧は [名前, 中身の指紋]（古い形の 名前だけ にも対応）
   reg.active.postMessage({ type: 'prefetch', data, media: names.map(x => Array.isArray(x) ? { u: MEDIA + encodeURIComponent(x[0]), h: x[1] } : { u: MEDIA + encodeURIComponent(x), h: '' }) });
@@ -366,7 +366,7 @@ async function runSync(manual = false) {
     dlg.innerHTML = `<div class="box"><b>同期中...</b><p>追加/変更： ${up}↑ <span class="dn">0</span>↓<br>削除：${upDel}↑ <span class="dd">0</span>↓</p><svg class="spin" viewBox="0 0 36 36"><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.25" transform="rotate(0 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.36" transform="rotate(45 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.46" transform="rotate(90 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.57" transform="rotate(135 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.68" transform="rotate(180 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.79" transform="rotate(225 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.89" transform="rotate(270 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="1.00" transform="rotate(315 18 18)"/></svg><button>キャンセル</button></div>`;
     dlg.querySelector('button').onclick = () => dlg.remove(); document.body.append(dlg);
   }
-  try { await xchg?.uploadPending(); } catch (e) { console.warn(e); }   // .apkg から読み込んだ画像・音声を先に送る（ほかの端末と Anki が取れるように）
+  if (pref('syncMedia')) try { await xchg?.uploadPending(); } catch (e) { console.warn(e); }   // .apkg から読み込んだ画像・音声を先に送る（ほかの端末と Anki が取れるように）
   const t0 = Date.now(), got = await sync.syncNow();
   if (dlg) {
     if (got) { const nn = got.notes || []; dlg.querySelector('.dn').textContent = got.cards.length + got.revlog.filter(r => !r.del).length + nn.filter(n => !n.del).length; dlg.querySelector('.dd').textContent = got.revlog.filter(r => r.del).length + nn.filter(n => n.del).length; }
@@ -1988,7 +1988,7 @@ function setupNotes() {
 }
 // 書き出し・読み込み（app/xui.mjs・exchange.mjs・pkg.mjs）
 function setupXchg() {
-  xchg = setupExchange({ S, BUNDLE, MEDIA, API: new URL('../api/', location.href).href, alive: c => c.type != null && alive(c), loadNotes: () => loadNotes(S, BUNDLE), nextNewPos, store, notes,
+  xchg = setupExchange({ syncMedia: () => pref('syncMedia'), S, BUNDLE, MEDIA, API: new URL('../api/', location.href).href, alive: c => c.type != null && alive(c), loadNotes: () => loadNotes(S, BUNDLE), nextNewPos, store, notes,
     applyConf, applyOp, iosPrompt, iosAlert, toast,
     afterImport: async () => { await flushNt(); refreshCards(); S.mainQ = null; showDecks(); scheduleSync(500); } });
   window.__xchg = xchg;   // 試験用（画面の通し試験がここから呼ぶ）
@@ -2120,7 +2120,8 @@ function setupTools() {
     },
     about: () => ({ title: 'このアプリについて', about: ['Anki のカードと学習の記録をそのまま使う暗記アプリです。', '復習の間隔の計算と出題の順番は、Anki のソースコード（AGPL）をもとに書き直したもので、Anki 本体と同じ結果になることを確かめています。', '答えた記録をパソコンの Anki に書き戻せば、Anki や AnkiMobile と並行して使えます。'] }),
     sync: () => ({ title: '同期', groups: [
-      [{ t: '音声と画像を同期', tg: true, off: 1 }, { t: 'メディア同期の進捗を表示', tg: true, off: 1 }],
+      [tgl('音声と画像を同期', 'syncMedia', () => { if (pref('syncMedia') && S.manifest) prefetchAll(S.manifest); }), { t: 'メディア同期の進捗を表示', tg: true, off: 1 }],
+      { note: 'オフにすると、端末で足した画像・音声をサーバーへ送らず、オフラインのために画像・音声を先に取っておくこともしません（出てきたカードの分は、そのつど取ってきます）。' },
       [{ t: '今すぐ同期', act: 1, run: () => { closePrefs(); runSync(true); } }]] }),
   };
   // 割り当てを選ぶページ（AnkiMobile と同じく全アクションの一覧。まだ写していないものは薄く出して選べない）
