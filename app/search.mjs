@@ -336,6 +336,9 @@ export function compileSearch(S, query, currentDid) {
   const note = c => notes.get(c.nid) || { mid: c.mid, flds: '', sfld: '', tags: ' ' + (c.tags || []).join(' ') + ' ', mod: 0, csum: 0 };
   const nts = Object.entries(S.meta.notetypes || {}).map(([id, n]) => ({ id: +id, ...n })).sort((a, b) => a.id - b.id);
   const decks = S.meta.decks.map(d => ({ id: d.id, native: d.name.split('::').join('\x1f'), conf: d.conf, dyn: d.dyn }));
+  // フィルターデッキ（カードは動かさず data.flt で中にいることを表す）も、名前で探せるように
+  for (const [id, f] of S.fdecks || []) if (!f.removed) decks.push({ id, native: f.name.split('::').join('\x1f'), dyn: true });
+  const fltD = c => { const f = c.data?.flt; if (!f) return null; const d = S.fdecks?.get(f.d); return d && !d.removed ? f.d : null; };   // 今いるフィルターデッキ
   let revByCard = null;
   const revs = cid => { if (!revByCard) { revByCard = new Map(); for (const r of S.revlog) { const a = revByCard.get(r.cid); a ? a.push(r) : revByCard.set(r.cid, [r]); } } return revByCard.get(cid) || []; };
   const due0 = c => c.due; // 書き出しでは odue を due に入れてある（case when c.odue != 0 then c.odue else c.due end）
@@ -392,13 +395,14 @@ export function compileSearch(S, query, currentDid) {
   };
   const deckMatch = deck => {
     if (deck === '*') return () => true;
-    if (deck === 'filtered') return c => !!c.inDyn;
+    if (deck === 'filtered') return c => fltD(c) != null;
     let native;
-    if (deck === 'current') { const d = S.decksById.get(currentDid); native = reEscape((d ? d.name : 'Default').split('::').join('\x1f')); }
+    if (deck === 'current') { const d = S.decksById.get(currentDid) || (S.fdecks?.get(currentDid)?.removed ? null : S.fdecks?.get(currentDid)); native = reEscape((d ? d.name : 'Default').split('::').join('\x1f')); }
     else native = toRe(deck).split('::').map(x => x.replace(RUST_WS, '') || 'blank').join('\x1f');
     const re = rustRe(`(?i)^${native}($|\x1f)`); if (!re) return () => false;
     const ids = new Set(decks.filter(d => re.test(d.native)).map(d => d.id));
-    return c => ids.has(c.did);
+    // Anki: 今いるデッキ（フィルターデッキの中ならそのデッキ）か、元のデッキ（odid）が当たれば当たる
+    return c => ids.has(c.did) || ids.has(fltD(c));
   };
   const rated = (op, days, ease) => {
     const target = (t.nextDayAt + 86400 * days) * 1000, before = (t.nextDayAt + 86400 * (days - 1)) * 1000;

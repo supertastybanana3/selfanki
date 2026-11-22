@@ -297,9 +297,10 @@ export function currentState(card, ctx) {
   const mem = card.data && card.data.s != null ? { s: card.data.s, d: card.data.d } : null;
   const ease = fr(fr(card.factor) / 1000);
   if (card.type === 0) return { kind: 'new', position: Math.max(due, 0) };
-  if (card.type === 1) return { ...learn(card.left, ctx.steps.currentDelay(card.left), mem) };
+  const left = (card.left || 0) % 1000;   // 古い形の left（1001 など。千の位は昔の「今日中に残る数」）は下3桁だけ見る（card.rs remaining_steps）
+  if (card.type === 1) return { ...learn(left, ctx.steps.currentDelay(left), mem) };
   if (card.type === 2) return { kind: 'review', days: card.ivl, elapsedDays: Math.max(card.ivl - (due - t.daysElapsed), 0), ease, lapses: card.lapses, leeched: false, mem };
-  return { kind: 'relearn', learn: learn(card.left, ctx.relearnSteps.currentDelay(card.left), mem), review: { kind: 'review', days: card.ivl, elapsedDays: card.ivl, ease, lapses: card.lapses, leeched: false, mem } };
+  return { kind: 'relearn', learn: learn(left, ctx.relearnSteps.currentDelay(left), mem), review: { kind: 'review', days: card.ivl, elapsedDays: card.ivl, ease, lapses: card.lapses, leeched: false, mem } };
 }
 
 // ---- 1枚ぶんの文脈（answering/mod.rs card_state_updater） ----
