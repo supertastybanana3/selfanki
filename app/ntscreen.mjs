@@ -192,6 +192,7 @@ export function createNtScreen(env) {
   // ---------- 保存 ----------
   async function save() {
     keep();
+    if (!dirty()) { hide(); return; }   // 何も変えていなければ、何も送らない
     const mid = st.mid, prevNt = S.meta.notetypes[mid], w = clone(st.work);
     let plan;
     try { plan = prepareNotetype(w, prevNt); } catch (e) { env.alert('', e instanceof NtError ? e.message : String(e?.message || e)); return; }
@@ -230,7 +231,7 @@ export function createNtScreen(env) {
   async function openChange(cards) {
     const nids = [...new Set(cards.map(c => c.nid))];
     let oldMid; try { oldMid = singleNotetype(cards.map(c => +c.mid)); } catch (e) { env.alert('', e.message); return; }
-    const list = Object.entries(S.meta.notetypes).filter(([id]) => notes.ready() && Array.isArray(S.meta.notetypes[id].templates)).sort((a, b) => a[1].name.localeCompare(b[1].name));
+    const list = Object.entries(S.meta.notetypes).filter(([, n]) => Array.isArray(n.templates) && n.templates.length && n.templates.every(t => typeof t.qfmt === 'string')).sort((a, b) => a[1].name.localeCompare(b[1].name));
     st = { mode: 'chg', nids, oldMid, newMid: oldMid, fmap: null, tmap: null };
     build(); el.hidden = false;
     const reset = () => { const o = S.meta.notetypes[st.oldMid], n = S.meta.notetypes[st.newMid]; st.fmap = defaultFieldMap(o, n); st.tmap = defaultTemplateMap(o, n); };
