@@ -49,7 +49,9 @@ export function setupExchange(ctx) {
         for (let i = 0; i < parts; i++) {
           const u = `${ctx.API}media?name=${encodeURIComponent(m.name)}&i=${i}&n=${parts}&sha1=${m.sha1}&size=${bytes.length}`;
           const r = await fetch(u, { method: 'POST', body: bytes.subarray(i * PART, (i + 1) * PART), credentials: 'same-origin' });
+          if (r.status === 409 && (await r.clone().json().catch(() => ({}))).error === 'exists') { console.warn('同じ名前で中身の違うファイルがサーバーにあるので送らない', m.name); break; }   // ほかの端末が先に同じ名前で送った（相手のを守る）
           if (!r.ok) throw new Error(`画像・音声を送れませんでした（${r.status}）`);
+          if ((await r.clone().json().catch(() => ({}))).have) break;   // 同じ中身がもうある
         }
         q = (await queue()).filter(x => x.name !== m.name); await store.set('kv', q, 'mediaq'); uploadBytes.delete(m.name); n++;
       }
@@ -61,7 +63,7 @@ export function setupExchange(ctx) {
   async function mediaIndex() {
     const m = new Map();
     try { const list = await (await fetch(ctx.BUNDLE + S.manifest.media)).json(); for (const x of list) { if (Array.isArray(x)) m.set(x[0], x[1] || ''); else m.set(x, ''); } } catch {}
-    try { const r = await fetch(ctx.API + 'media', { cache: 'no-store', credentials: 'same-origin' }); if (r.ok) for (const [name, , sha1] of await r.json()) m.set(name, sha1); } catch {}
+    try { const r = await fetch(ctx.API + 'media', { cache: 'no-store', credentials: 'same-origin' }); if (r.ok) { for (const [name, , sha1] of await r.json()) m.set(name, sha1); m.serverOk = true; } } catch {}
     for (const x of await queue()) m.set(x.name, x.sha1);
     for (const [n, h] of localMedia) m.set(n, h);
     return m;
@@ -74,6 +76,8 @@ export function setupExchange(ctx) {
     const enc = new TextEncoder(); if (enc.encode(name).length > 120) { const dot = name.lastIndexOf('.'), ext = dot > 0 ? name.slice(dot) : ''; let stem = dot > 0 ? name.slice(0, dot) : name; while (enc.encode(stem + ext).length > 120) stem = stem.slice(0, -1); name = stem + ext; }
     const sha1 = await sha1hex(bytes), idx = await mediaIndex();
     const same = h => !!h && (h === sha1 || (h.length < 40 && sha1.startsWith(h)));   // 束の一覧は sha1 の先頭 10 桁
+    // サーバーの一覧が取れない（オフライン）ときは、ほかの端末が同じ名前で足したかもしれないので、元の名前に sha1 を付ける（中身で決まる名前は重ならない）
+    if (!idx.serverOk && !name.includes(sha1) && !idx.has(name)) { const dot = name.lastIndexOf('.'); name = dot > 0 ? `${name.slice(0, dot)}-${sha1}${name.slice(dot)}` : `${name}-${sha1}`; }
     if (idx.has(name)) {
       if (same(idx.get(name))) return name;
       const dot = name.lastIndexOf('.'); name = dot > 0 ? `${name.slice(0, dot)}-${sha1}${name.slice(dot)}` : `${name}-${sha1}`;
@@ -215,9 +219,15 @@ export function setupExchange(ctx) {
       quiet = !force; if (force) progress('バックアップを作成中…');
       let out; try { out = await ex.exportCollection({ media: false }); } finally { quiet = false; progress(null); }
       const name = backupName(now);
-      await store.set('kv', out.blob, 'bk:' + name);
+      // 置き場の上限: 端末の容量の目安の 1/4（分からなければ 500MB）までに収める。超えるなら古いものから消す（未送信の答えを入れる場所を食いつぶさないように）
+      let budget = 500 * 1048576; try { const est = await navigator.storage?.estimate?.(); if (est?.quota) budget = Math.min(budget * 4, est.quota / 4); } catch {}
+      if (out.blob.size > budget) return 'toolarge';
+      try { await store.set('kv', out.blob, 'bk:' + name); }
+      catch (e) { for (const b of [...list].sort((a, c) => a.name.localeCompare(c.name)).slice(0, 3)) await store.del('kv', 'bk:' + b.name).catch(() => {}); throw e; }   // 入りきらない: 古いものを少し消して、今回はあきらめる
       const all = [...list.filter(b => b.name !== name), { name, size: out.blob.size }];
       const gone = obsoleteBackups(all.map(b => ({ ...b, date: parseBackupName(b.name) })), now, lim);
+      let keep0 = all.filter(b => !gone.some(g => g.name === b.name)).sort((a, c) => a.name.localeCompare(c.name));
+      while (keep0.length > 1 && keep0.reduce((t, b) => t + (b.size || 0), 0) > budget) gone.push(keep0.shift());   // 間引いても多すぎるときは、古いものから
       for (const b of gone) await store.del('kv', 'bk:' + b.name);
       const keep = all.filter(b => !gone.some(g => g.name === b.name));
       await store.set('kv', keep, 'bk:list'); if (sig != null) await store.set('kv', sig, 'bk:sig');

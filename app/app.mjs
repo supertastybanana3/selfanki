@@ -354,7 +354,8 @@ const syncNeverDone = () => { try { return !localStorage.getItem('syncedOnce'); 
 function collectionSig() {
   let m = 0; for (const c of S.all) { if ((c.rev || 0) > m) m = c.rev; if ((c.mod || 0) * 1000 > m) m = c.mod * 1000; }
   let n = 0; for (const r of S.noteRecs?.values?.() || []) if ((r.rev || 0) > n) n = r.rev;
-  const str = JSON.stringify([S.meta.presets || {}, (S.meta.decks || []).map(d => [d.id, d.name, d.conf]), [...(S.fdecks?.values() || [])].map(f => [f.id, f.name, f.rev])]);
+  // デッキ（名前・説明・上限など全部）・プリセット・ノートタイプ（テンプレート・CSS）・全体の設定・フィルターデッキ
+  const str = JSON.stringify([S.meta.presets || {}, S.meta.decks || [], S.meta.notetypes || {}, S.meta.config || {}, [...(S.fdecks?.values() || [])]]);
   let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
   return [S.revlog.length, S.all.length, S.all.reduce((a, c) => a + (c.gone ? 1 : 0), 0), m, n, h].join(':');
 }
@@ -364,6 +365,7 @@ async function backupNow() {
   try {
     const r = await xchg.backup(true, collectionSig());
     if (r === 'unchanged') toast('直近のバックアップから変更がありません。'); else if (r === 'created') toast('バックアップを作成しました。');
+    else if (r === 'toolarge') iosAlert('バックアップ', 'コレクションが大きすぎて、この端末にはバックアップを置けません。パソコンの Anki のバックアップを使ってください。');
   } catch (e) { iosAlert('バックアップ', String(e?.message || e)); }
 }
 async function runSync(manual = false) {
@@ -1542,7 +1544,7 @@ function darkify(doc) {
   doc.getElementById('sa-dark').textContent = out.join('\n');
   base.textContent = BASE_DARK;
 }
-if (new URLSearchParams(location.search).has('debug')) window.__selfanki = { S, playAv, stopAv, setFrame, darkText, darkBg, parseColor, get ask() { return ask; } };
+if (new URLSearchParams(location.search).has('debug')) window.__selfanki = { S, playAv, stopAv, collectionSig, setFrame, darkText, darkBg, parseColor, get ask() { return ask; } };
 // 音声。殻（0.7〜）が鳴らせるときは殻に任せる: 殻は「ほかの音と混ぜる」で鳴らすので、裏で流している音楽などを止めずに上に重なる。
 // WKWebView の中で鳴らすと WebKit が音声の扱いを切り替えて、ほかのアプリの再生を止めてしまう。
 // 音声ファイルはページが端末の控え（Service Worker）から取り出して渡すので、オフラインでも鳴る

@@ -19,6 +19,9 @@ export async function onRequestPost({ request, env }) {
   if (body.length > PART) return Response.json({ error: 'too large' }, { status: 413 });
   const DB = env.DB;
   await ensureNotes(DB);
+  // 同じ名前がもうある: 中身が同じなら受け取ったことにし、違えば断る（かけらを書く前に。書くと、あるファイルの中身が置き換わってしまう）
+  const ex = await DB.prepare('select sha1 from media where name = ?1').bind(name).first();
+  if (ex) return ex.sha1 === sha1 ? Response.json({ ok: true, done: true, have: true }) : Response.json({ error: 'exists' }, { status: 409 });
   await DB.prepare('insert into media_part(name, i, data) values (?1, ?2, ?3) on conflict(name, i) do update set data = excluded.data').bind(name, i, body).run();
   if (i !== n - 1) return Response.json({ ok: true, part: i });
   // 最後のかけら: そろっているか（数と大きさ。20MB までは中身の sha1 も）確かめてから一覧に載せる
