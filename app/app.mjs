@@ -312,7 +312,7 @@ async function writeFlt(id, picked, undoLabel = null) {
     c.data = data; c.rev = at; ops.push({ t: 'set', c: { id: c.id, st: pickState(c), rev: at }, base: base.get(c.id) || 0 });
   }
   await store.addOps(ops);
-  if (undoLabel) { S.undo.push({ kind: 'set', prevs, label: undoLabel, rebuild: true }); if (S.undo.length > 30) S.undo.shift(); }
+  if (undoLabel) { S.undo.push({ kind: 'set', prevs, label: undoLabel, rebuild: true, noForce: true }); if (S.undo.length > 30) S.undo.shift(); }   // 戻したあとは並びから選び直す
   S.mainQ = null; scheduleSync();
   return picked.size;
 }
@@ -712,7 +712,7 @@ async function undoInner() {
     const base = lastRevIds(top.prevs.map(p => p.id));
     for (const p of top.prevs) { const c = S.byId.get(p.id); Object.assign(c, p); c.rev = now; await store.addOp({ t: 'set', c: { id: c.id, st: pickState(c), rev: now }, base: base.get(c.id) || 0 }); }
     if (top.rebuild) S.mainQ = null;
-    toast(`元に戻しました（${top.label}）`); advance(S.byId.get(top.prevs[0].id)); scheduleSync(); return;
+    toast(`元に戻しました（${top.label}）`); advance(top.noForce ? null : S.byId.get(top.prevs[0].id)); scheduleSync(); return;
   }
   const { prev, revlogId, sibs = [] } = S.undo.pop();
   const c = S.byId.get(prev.id); Object.assign(c, prev); if (!prev.leeched) delete c.leeched; delRev(revlogId);
