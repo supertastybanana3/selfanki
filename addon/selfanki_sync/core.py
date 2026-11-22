@@ -264,6 +264,7 @@ def apply_decks(col, srv, recs, log, dry=False, mods0=None):
             if cids:
                 n['cards_removed'] += len(cids)
                 if not dry: col.remove_cards_and_orphaned_notes(cids)
+            if d is not None: back(did, r, d['name'])   # 一度だけ（src='anki' にして、あとで既定のデッキに移したカードを消さない）。名前を変えたら下で返し直す
         if not v.get('removed') or d is None or did == 1: continue
         if newer(did, r): rm.append(did)
         else: n['anki_newer'] += 1; back(did, r, d['name'])
@@ -319,9 +320,11 @@ def apply_decks(col, srv, recs, log, dry=False, mods0=None):
             t = next((u for u in todo if u[3] == 'rename'), todo[0])
             if t[3] == 'rename': col.decks.rename(t[0], f'{TMP}{t[0]}')
             else: break
-    for did, r in recs.items():   # 消したデッキの子だったなどで、もう無いデッキへは返さない
-        if did in push and not col.decks.get(did, default=False): push.pop(did)
-    col.db.execute('update col set mod = ?', now)   # AnkiWeb との同期で上がるように
+    for did in list(push):   # 返すのは書き終えたあとの Anki の名前。消したデッキの子だったなどで、もう無いデッキへは返さない
+        d = col.decks.get(did, default=False)
+        if d: push[did]['v']['name'] = d['name']
+        else: push.pop(did)
+    if n['created'] or n['renamed'] or n['removed'] or n['cards_removed']: col.db.execute('update col set mod = ?', now)   # AnkiWeb との同期で上がるように
     if push: srv.push(list(push.values()))
     if any(n.values()): log('デッキ', n)
     return n

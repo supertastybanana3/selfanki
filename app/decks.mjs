@@ -208,7 +208,7 @@ export function createDecks(env) {
     const plan = planRemove(names(), did, env.defaultName());
     const ids = new Set(plan.emptied), n = cardsIn(ids).length;
     await commit(plan, 'デッキを削除', { cleared: plan.emptied.filter(x => x === 1) });
-    if (S.lastDeck != null && !S.meta.decks.some(x => x.id === S.lastDeck)) S.lastDeck = 1;
+    if (S.lastDeck != null && S.decksById.get(S.lastDeck)?.gone) S.lastDeck = 1;   // 今のデッキを消したら既定のデッキ（フィルターデッキの id はそのまま）
     env.done(`デッキ「${d.name}」（カード${n}枚）を削除しました`);
   }
   return { reset, applyRows, rebuild, hides, create, rename, remove, undo, recs, base };
