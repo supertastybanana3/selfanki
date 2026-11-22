@@ -7,6 +7,7 @@
 #   site/app, site/fsrs           アプリ本体（リポジトリの app/・fsrs/ から写す）
 #   site/sw.js                    オフライン用（app/ の sw.js を根元に置く）
 #   site/vendor/mathjax           MathJax 3.2.2（ネットが無くても数式が出るように。tools/fetch_vendor.py が cloud/vendor に入れる）
+#   site/vendor/sqljs・fzstd      sql.js 1.14.2・fzstd 0.1.1（.apkg・.colpkg の書き出しと読み込み。同じく tools/fetch_vendor.py が入れる）
 #   site/bundle/manifest.json     下のファイルの一覧（名前に中身のハッシュが入る）
 #   site/bundle/c/NNN.<h>.json    カードの中身（表・裏の HTML、デッキ、タグ）。カード id 順に約1000枚ずつ
 #   site/bundle/meta.<h>.json     デッキ・プリセット・ノートタイプの CSS・設定
@@ -76,7 +77,8 @@ def build(export_dir, rebase=False, fetch_media=True, log=print):
     shutil.copytree(os.path.join(ROOT, 'app'), os.path.join(out, 'app'), ignore=shutil.ignore_patterns('test', '*.bak*', '__pycache__'))
     shutil.copytree(os.path.join(ROOT, 'fsrs'), os.path.join(out, 'fsrs'), ignore=shutil.ignore_patterns('*.bak*'))
     if os.path.exists(os.path.join(out, 'app', 'sw.js')): shutil.move(os.path.join(out, 'app', 'sw.js'), os.path.join(out, 'sw.js'))
-    if not os.path.isfile(os.path.join(VENDOR, 'mathjax', 'tex-chtml.js')): raise SetupError('MathJax がありません。先に python tools/fetch_vendor.py を動かしてください。')
+    for sub, mark, what in (('mathjax', 'tex-chtml.js', 'MathJax'), ('sqljs', 'sql-wasm-browser.wasm', 'sql.js'), ('fzstd', 'index.mjs', 'fzstd')):
+        if not os.path.isfile(os.path.join(VENDOR, sub, mark)): raise SetupError(f'{what} がありません。先に python tools/fetch_vendor.py を動かしてください。')
     shutil.copytree(VENDOR, os.path.join(out, 'vendor'), copy_function=link_or_copy)
     # Anki 本体のウェブ画面（統計・デッキのオプションなど。aqt 25.9.4 の SvelteKit を取り出したもの）と日本語の文言
     aw = os.path.join(ROOT, 'ankiweb')
@@ -131,7 +133,7 @@ def build(export_dir, rebase=False, fetch_media=True, log=print):
     chunks = []
     for i in range(len(starts)):
         b = dump(groups.get(i, [])); chunks.append({'f': put(f'c/{i:03d}.{h8(b)}.json', b), 'n': len(groups.get(i, []))})
-    # ノートの生の中身（検索用。[nid, mid, flds, sfld, csum, tags, mod]）。カードと同じく nid 順に分け、分け目は前回のものを使い回す
+    # ノートの生の中身（検索用・書き出し用。[nid, mid, flds, sfld, csum, tags, mod, guid]）。カードと同じく nid 順に分け、分け目は前回のものを使い回す
     notes_p = os.path.join(export_dir, 'notes.json'); note_files = []
     if os.path.exists(notes_p):
         notes = sorted(json.load(open(notes_p, encoding='utf-8')), key=lambda r: r[0])

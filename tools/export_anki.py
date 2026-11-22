@@ -114,14 +114,20 @@ if not cards: die('書き出すカードが0枚でした。exclude_top_decks で
 keep_cids = {c['id'] for c in cards}
 revlog = [r for r in col.db.all("select id, cid, ease, ivl, lastIvl, factor, time, type from revlog") if r[1] in keep_cids]
 # ノートタイプ（端末でノートを追加・編集するときに、テンプレートからカードを描くので、全部のノートタイプの中身も配る）
+# x … アプリでは使わない Anki の値（.apkg・.colpkg に書き出すときに戻す）。フィールド・テンプレートの id は 64 ビットなので文字列にする（JavaScript で丸まらないように）
+def extras(d, known):
+    return {k: (str(v) if k in ('id', 'originalId') and isinstance(v, int) else v) for k, v in d.items() if k not in known}
+NT_KNOWN = {'id', 'name', 'css', 'type', 'sortf', 'flds', 'tmpls'}
+FLD_KNOWN = {'name', 'ord', 'excludeFromSearch', 'font', 'size', 'sticky', 'rtl', 'plainText', 'description'}
+TMPL_KNOWN = {'name', 'ord', 'qfmt', 'afmt', 'did'}
 notetypes = {}
 for m in col.models.all():
     css = m['css']
     notetypes[m['id']] = {'name': m['name'], 'css': css, 'type': m['type'], 'sortf': m.get('sortf', 0),
                           'fields': [{'name': f['name'], 'ord': f['ord'], 'excludeFromSearch': bool(f.get('excludeFromSearch')), 'font': f.get('font', 'Arial'), 'size': f.get('size', 20),
-                                      'sticky': bool(f.get('sticky')), 'rtl': bool(f.get('rtl')), 'plainText': bool(f.get('plainText')), 'description': f.get('description', '')} for f in m['flds']],
-                          'templates': [{'name': t['name'], 'ord': t['ord'], 'qfmt': t['qfmt'], 'afmt': t['afmt'], 'did': t.get('did')} for t in m['tmpls']],
-                          'used': m['id'] in nt_used}
+                                      'sticky': bool(f.get('sticky')), 'rtl': bool(f.get('rtl')), 'plainText': bool(f.get('plainText')), 'description': f.get('description', ''), 'x': extras(f, FLD_KNOWN)} for f in m['flds']],
+                          'templates': [{'name': t['name'], 'ord': t['ord'], 'qfmt': t['qfmt'], 'afmt': t['afmt'], 'did': t.get('did'), 'x': extras(t, TMPL_KNOWN)} for t in m['tmpls']],
+                          'used': m['id'] in nt_used, 'x': extras(m, NT_KNOWN)}
     if m['id'] in nt_used:
         for u in re.findall(r'url\(["\']?([^"\')]+)["\']?\)', m['css']): media[u] += 1
 used_conf = {decks[did].get('conf') for did in keep_deck}
@@ -143,7 +149,8 @@ for f in sorted(media):
     p = os.path.join(mdir, f)
     mlist.append({'name': f, 'refs': media[f], 'size': os.path.getsize(p) if os.path.exists(p) else None})
 keep_nids = {c['nid'] for c in cards}
-notes = [list(r) for r in col.db.all('select id, mid, flds, sfld, csum, tags, mod from notes') if r[0] in keep_nids]
+# [id, mid, flds, sfld, csum, tags, mod, guid]（guid は .apkg に書き出したとき、Anki が同じノートだと分かるように）
+notes = [list(r) for r in col.db.all('select id, mid, flds, sfld, csum, tags, mod, guid from notes') if r[0] in keep_nids]
 json.dump(notes, open(f'{OUT}/notes.json', 'w', encoding='utf-8'), ensure_ascii=False)
 json.dump(meta, open(f'{OUT}/meta.json', 'w', encoding='utf-8'), ensure_ascii=False)
 json.dump(cards, open(f'{OUT}/cards.json', 'w', encoding='utf-8'), ensure_ascii=False)

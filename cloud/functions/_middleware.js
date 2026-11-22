@@ -31,6 +31,19 @@ async function pair(request, env, T) {
   await DB.prepare("update kv set v = 0 where k = 'pairfail'").run();
   return new Response(null, { status: 303, headers: { Location: '/app/index.html', 'Set-Cookie': `sa=${T}; Path=/; Max-Age=34560000; Secure; HttpOnly; SameSite=Lax`, 'cache-control': 'no-store' } });
 }
+// 端末で読み込んだ画像・音声（functions/api/media.js が D1 に置いたもの）
+const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif', heic: 'image/heic',
+  mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav', flac: 'audio/flac', mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
+  css: 'text/css; charset=utf-8', js: 'text/javascript; charset=utf-8', json: 'application/json', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf', pdf: 'application/pdf', txt: 'text/plain; charset=utf-8' };
+async function importedMedia(env, name) {
+  let m; try { m = await env.DB.prepare('select size, parts from media where name = ?1').bind(name).first(); } catch { return null; }
+  if (!m) return null;
+  const rows = (await env.DB.prepare('select data from media_part where name = ?1 order by i').bind(name).all()).results;
+  if (rows.length !== m.parts) return null;
+  const parts = rows.map(r => new Uint8Array(r.data));
+  const ext = (name.match(/\.([^.]+)$/) || [])[1]?.toLowerCase();
+  return new Response(new Blob(parts), { status: 200, headers: { 'content-type': MIME[ext] || 'application/octet-stream', 'content-length': String(m.size) } });
+}
 // 教材の入っていないもの（ホーム画面に置くための manifest とアイコン）は合言葉なしで出す
 const isPublic = p => p === '/app/manifest.webmanifest' || p.startsWith('/app/icons/');
 export async function onRequest({ request, env, next }) {
@@ -52,7 +65,12 @@ export async function onRequest({ request, env, next }) {
     if (nav && !url.pathname.startsWith('/api/')) return new Response(null, { status: 303, headers: { Location: '/pair', 'cache-control': 'no-store' } });
     return text('Unauthorized', 401);
   }
-  const res = await next();
+  let res = await next();
+  // 束に無い画像・音声（端末で .apkg から読み込んだもの）は D1 から出す。Pages は無いファイルに 404 か、トップの index.html（200）を返す
+  if (url.pathname.startsWith('/bundle/media/') && request.method === 'GET' && (res.status === 404 || ((res.headers.get('content-type') || '').includes('text/html') && !/\.html?$/i.test(url.pathname)))) {
+    const got = await importedMedia(env, decodeURIComponent(url.pathname.slice('/bundle/media/'.length)));
+    if (got) res = got; else return text('Not found', 404);
+  }
   // 名前に中身の印（ハッシュ）が入ったファイルは変わらないので端末に長く置かせる。ほかは毎回確かめさせる
   const p = url.pathname;
   const out = new Response(res.body, res);

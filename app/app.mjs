@@ -14,6 +14,8 @@ import { createScratchpad, spPref, SP_WIDTH, SP_SIZE, SP_ALPHA } from './scratch
 import { repositionNew } from '../fsrs/reposition.mjs';
 import { createNotes } from './notes.mjs';
 import { createDecks, attachSwipe } from './decks.mjs';
+import { setupExchange } from './xui.mjs';
+import { ntFrom11 } from './exchange.mjs';
 import { updateMemoryState, Rescheduler } from '../fsrs/memory.mjs';
 import * as fsrsJobs from './fsrsjobs.mjs';
 
@@ -22,7 +24,7 @@ const MEDIA = BUNDLE + 'media/';
 const MATHJAX_URL = new URL('../vendor/mathjax/tex-chtml.js', location.href).href;
 const $ = s => document.querySelector(s);
 const S = { meta: null, all: [], cards: [], byId: new Map(), revlog: [], revIds: new Set(), deck: null, q: null, card: null, side: 'q', undo: [], shownAt: 0, open: new Set(), fdecks: new Map() };
-let pen, ask, sp, notes;
+let pen, ask, sp, notes, xchg;
 // ---------- 画面の明るさ（自動／ダーク／ライト） ----------
 const THEMES = ['auto', 'dark', 'light'], THEME_LABEL = { auto: '自動', dark: 'ダーク', light: 'ライト' };
 const mq = matchMedia('(prefers-color-scheme: dark)');
@@ -115,7 +117,7 @@ const cfg = () => ({ crt: S.meta.crt, meta: S.meta, fsrs: !!S.meta.config.fsrs, 
 // 「まだ送っていない自分の答え（outbox）」を順に重ねたもの
 const STATE_KEYS = ['type', 'queue', 'due', 'ivl', 'factor', 'reps', 'lapses', 'left', 'data'];
 // flags（フラグ）と mark（ノートのマーク＝タグ marked）も状態として運ぶ。mark はアプリで付け外ししたときだけ入る
-// did（カードのデッキ）は、ブラウザの「デッキの変更」で動かしたカード（didSet）と、Anki から届いた状態にあるときだけ送り・重ねる
+// did（カードのデッキ）は、ブラウザの「デッキの変更」で動かしたカード（didSet）・コレクションの置き換え（.colpkg の読み込み）・Anki から届いた状態にあるときだけ送り・重ねる
 const pickState = c => { const o = {}; for (const k of STATE_KEYS) o[k] = c[k]; o.flags = c.flags || 0; if (c.mark !== undefined) o.mark = c.mark ? 1 : 0; if (c.leeched) o.leech = 1; if (c.didSet) o.did = c.did; return o; };
 function applyState(c, st, rev) { for (const k of STATE_KEYS) if (k in st) c[k] = st[k]; if ('flags' in st) c.flags = st.flags; if ('mark' in st) c.mark = !!st.mark; if (st.leech) c.leeched = true; if ('did' in st && S.decksById?.has(st.did)) { c.did = st.did; c.didSet = true; } c.rev = rev; }
 const REV_KEYS = ['id', 'cid', 'ease', 'ivl', 'lastIvl', 'factor', 'time', 'type'];
@@ -123,14 +125,30 @@ function addRev(r) { if (S.revIds.has(r.id)) return; S.revIds.add(r.id); const o
 function delRev(id) { if (!S.revIds.delete(id)) return; S.revlog = S.revlog.filter(r => r.id !== id); }
 function applyOp(op) {
   if (op.t === 'note') { notes.apply({ ...op.n, src: 'app' }); return; }   // まだ送っていないノートの追加・編集・削除
+  if (op.t === 'rev') { addRev(op.r); return; }   // 記録だけ（.apkg から読み込んだ学習履歴）
   const c = S.byId.get(op.c?.id); if (!c) return;
   if (op.t === 'ans') { applyState(c, op.c.st, op.c.rev); addRev(op.r); }
   else if (op.t === 'undo') { applyState(c, op.c.st, op.c.rev); delRev(op.rid); }
   else if (op.t === 'set') { applyState(c, op.c.st, op.c.rev); if (op.r) addRev(op.r); }   // 休止・非表示・フラグ・マーク・元に戻す・記憶の値の計算し直し（期日の付け直しは記録も）
 }
+// ---------- ノートタイプ（conf の nt:<id>＝schema 11。端末で .apkg から読み込んだもの）。束のものより新しいときだけ重ね、描き直すノートタイプを覚える ----------
+// ノートより先に重ねる（読み込んだノートは、このノートタイプで描くため）
+const ntDirty = new Set();
+function applyNt(rows) {
+  if (!Array.isArray(rows)) return;
+  for (const { k, v, rev } of rows) {
+    if (!k.startsWith('nt:') || !v || typeof v !== 'object') continue;
+    const id = +k.slice(3), cur = S.meta.notetypes[id];
+    if (cur && rev <= (cur.rev ?? (Number(cur.x?.mod) || 0) * 1000)) continue;
+    S.meta.notetypes[id] = { ...ntFrom11(v), rev };
+    if (cur) ntDirty.add(id);
+  }
+}
+async function flushNt() { if (!ntDirty.size) return 0; const ids = [...ntDirty]; ntDirty.clear(); return notes.rerender(ids); }
 // ---------- デッキのオプション（サーバーの conf 表）。Anki 側（配った中身）より新しいものだけ重ねる ----------
 function applyConf(rows) {
   if (!Array.isArray(rows)) return;
+  applyNt(rows);
   if (rows.length) S.mainQ = null;   // 上限・並びが変わるので組み直す
   const dn = rows.filter(r => r.k.startsWith('dname:'));   // デッキの作成・名前変更・削除（app/decks.mjs）。作ったデッキのオプション（deck:<id>）が引けるように先に
   if (dn.length && deckOps.applyRows(dn) && S.all.length) refreshCards();
@@ -280,10 +298,12 @@ async function load() {
   for (const r of baseRev) addRev({ id: r[0], cid: r[1], ease: r[2], ivl: r[3], lastIvl: r[4], factor: r[5], time: r[6], type: r[7] });
   if ((await store.get('kv', 'base')) !== man.base.state) await store.resetServerCopy(man.base.state);
   // 端末で追加・編集・削除したノート（D1 の notes の写し）を、カードの状態より先に重ねる（端末で作ったカードに状態を入れられるように）
+  applyNt(await store.get('kv', 'conf')); applyNt((await store.outbox()).map(x => x.op).filter(o => o.t === 'conf'));   // ノートタイプはノートより先に
   notes.reset(); for (const n of (await store.getAll('srv_notes')).sort((a, b) => a.rev - b.rev)) notes.apply(n);
   applyServer(await store.getAll('srv_cards'), (await store.getAll('srv_revlog')).sort((a, b) => a.seq - b.seq));
   applyConf(await store.get('kv', 'conf')); applyConf((await store.outbox()).map(x => x.op).filter(o => o.t === 'conf'));
   for (const { op } of await store.outbox()) applyOp(op);
+  await flushNt().catch(e => console.warn('ノートタイプの描き直し', e));
   if (S.lastDeck != null && S.decksById.get(S.lastDeck)?.gone) S.lastDeck = 1;   // 今のデッキを消していたら、既定のデッキ（Anki と同じ）
   refreshCards();
   checkDay(true);
@@ -329,6 +349,7 @@ async function runSync(manual = false) {
     dlg.innerHTML = `<div class="box"><b>同期中...</b><p>追加/変更： ${up}↑ <span class="dn">0</span>↓<br>削除：${upDel}↑ <span class="dd">0</span>↓</p><svg class="spin" viewBox="0 0 36 36"><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.25" transform="rotate(0 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.36" transform="rotate(45 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.46" transform="rotate(90 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.57" transform="rotate(135 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.68" transform="rotate(180 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.79" transform="rotate(225 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="0.89" transform="rotate(270 18 18)"/><line x1="18" y1="4" x2="18" y2="11" stroke="#fff" stroke-width="3.6" stroke-linecap="round" opacity="1.00" transform="rotate(315 18 18)"/></svg><button>キャンセル</button></div>`;
     dlg.querySelector('button').onclick = () => dlg.remove(); document.body.append(dlg);
   }
+  try { await xchg?.uploadPending(); } catch (e) { console.warn(e); }   // .apkg から読み込んだ画像・音声を先に送る（ほかの端末と Anki が取れるように）
   const t0 = Date.now(), got = await sync.syncNow();
   if (dlg) {
     if (got) { const nn = got.notes || []; dlg.querySelector('.dn').textContent = got.cards.length + got.revlog.filter(r => !r.del).length + nn.filter(n => !n.del).length; dlg.querySelector('.dd').textContent = got.revlog.filter(r => r.del).length + nn.filter(n => n.del).length; }
@@ -337,10 +358,12 @@ async function runSync(manual = false) {
   btn.classList.remove('busy');
   if (sync.state.online) { try { localStorage.setItem('syncedOnce', '1'); } catch {} remoteDirty = false; remoteAt = Date.now(); }
   if (got && (got.cards.length || got.revlog.length || got.conf?.length || got.notes?.length)) {
+    applyNt(got.conf);   // ノートタイプはノートより先に
     const nids = new Set(); for (const n of got.notes || []) if (notes.apply(n)) nids.add(n.id);
     applyServer(got.cards, got.revlog);
     if (got.conf) { applyConf(got.conf); applyConf((await store.outbox()).map(x => x.op).filter(o => o.t === 'conf')); }
     for (const { op } of await store.outbox()) applyOp(op); // 同期の最中に答えた分を重ね直す
+    await flushNt().catch(e => console.warn(e));
     refreshCards(); S.mainQ = null; unburyOld();
     if (nids.size) notesChanged(nids);
     else if (document.body.dataset.view === 'decks') showDecks(); else if (S.deck) paintCounts(countsFor(S.deck).c, S.card);
@@ -528,7 +551,7 @@ function showDecks() {
     el.querySelector('.dname').onclick = () => startStudy(d.id);
     if (d.dyn) el.querySelector('.chev').onclick = () => openFDeck(d.id);   // フィルターデッキは右の「›」で設定（直す・再構築・削除）の画面
     const tw = el.querySelector('.tw'); if (tw) tw.onclick = () => { S.open.has(d.id) ? S.open.delete(d.id) : S.open.add(d.id); try { localStorage.setItem('openDecks', JSON.stringify([...S.open])); } catch {} showDecks(); };
-    el.swipe = attachSwipe(el, { onAct: k => (k === 'rename' ? deckOps.rename(d.id) : k === 'delete' ? deckOps.remove(d.id) : null), isOpen: () => swipeRow === el,
+    el.swipe = attachSwipe(el, { onAct: k => (k === 'rename' ? deckOps.rename(d.id) : k === 'delete' ? deckOps.remove(d.id) : k === 'export' ? xchg.exportDeck(d.id) : null), isOpen: () => swipeRow === el,
       setOpen: r => { if (swipeRow && swipeRow !== r) swipeRow.swipe?.close(); swipeRow = r; } });
     group.appendChild(el);
     if (S.open.has(d.id)) for (const c of ch) row(group, c, depth + 1);
@@ -1901,6 +1924,13 @@ function setupNotes() {
     typing: t => { try { window.webkit?.messageHandlers?.sa?.postMessage({ typing: t }); } catch {} } });
   notes.element();   // 戻るボタン（Android）が開け閉めを見られるように、先に作っておく
 }
+// 書き出し・読み込み（app/xui.mjs・exchange.mjs・pkg.mjs）
+function setupXchg() {
+  xchg = setupExchange({ S, BUNDLE, MEDIA, API: new URL('../api/', location.href).href, alive: c => c.type != null && alive(c), loadNotes: () => loadNotes(S, BUNDLE), nextNewPos, store, notes,
+    applyConf, applyOp, iosPrompt, iosAlert, toast,
+    afterImport: async () => { await flushNt(); refreshCards(); S.mainQ = null; showDecks(); scheduleSync(500); } });
+  window.__xchg = xchg;   // 試験用（画面の通し試験がここから呼ぶ）
+}
 // ---------- 起動 ----------
 function setupTools() {
   pen = createPen($('#cardhost')); pen.setEnabled(false);   // 書き込みのデザインを読み込むまでは書けない
@@ -2063,11 +2093,14 @@ function setupTools() {
     mk('アクション', 'sel-act', openBrowseActions);
     mk('すべて選択', 'sel-all', () => { BR.sel = new Set(BR.list.map(c => c.id)); paintBrowseTitle(); paintBrowse(true); });
     mk('キャンセル', 'sel-cancel', () => setBrowseSelect(false)); }
-  // 一覧の左下「追加/エクスポート」（AnkiMobile と同じ吹き出し。中の機能はまだ）
+  // 一覧の左下「追加/エクスポート」（AnkiMobile と同じ吹き出し。iTunesからインポート＝ファイルを選ぶ・コレクションをエクスポート・新しいデッキを作る。共有デッキはまだ）
   $('#nav-add').onclick = () => { $('#addpop').hidden = false; document.body.classList.add('addopen'); };
   // スワイプで行を開いているときに、ほかのところを押したら閉じるだけ（iOS の表と同じ）
   document.addEventListener('click', e => { if (swipeRow && !swipeRow.contains(e.target)) { e.stopPropagation(); e.preventDefault(); swipeRow.swipe?.close(); swipeRow = null; } }, true);
   $('#addpop .newdeck').onclick = () => { $('#addpop').hidden = true; document.body.classList.remove('addopen'); deckOps.create(); };
+  const closeAdd = () => { $('#addpop').hidden = true; document.body.classList.remove('addopen'); };
+  $('#addpop .import').onclick = async () => { closeAdd(); xchg.importFile(await xchg.pickFile()); };   // iTunes の代わりに、ファイルを選ぶ（.apkg・.colpkg）
+  $('#addpop .export').onclick = () => { closeAdd(); xchg.exportCollection(); };
   $('#addpop').onclick = e => { if (e.target.id === 'addpop') { $('#addpop').hidden = true; document.body.classList.remove('addopen'); } };
   setupAskButton();
   ask = createAsk({ getCard: () => S.card, getSide: () => S.side, deckName: did => S.decksById.get(did)?.name || '', penImage: () => pen.image(isDark() ? '#000000' : '#ffffff'), hasStrokes: () => pen.state.strokes.length > 0, cardById: id => S.byId.get(id) });
@@ -2145,6 +2178,7 @@ function setupBack() {
   for (const [q] of OVERLAYS) { const el = $(q); if (el) mo.observe(el, { attributes: true, attributeFilter: ['hidden', 'class'] }); }
 }
 setupNotes();
+setupXchg();
 setupTools();
 setupBack();
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});

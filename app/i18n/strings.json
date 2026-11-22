@@ -987,5 +987,69 @@
  {
   "ja": "回答したカードは「leech」（苦戦、忘却多発）のカードです。 カードを休止しました",
   "en": "Card was a leech. Card suspended."
+ },
+ {
+  "ja": "Anki デッキパッケージ",
+  "key": "exporting-anki-deck-package"
+ },
+ {
+  "ja": "Anki コレクションパッケージ",
+  "key": "exporting-anki-collection-package"
+ },
+ {
+  "ja": "エクスポート",
+  "en": "Export"
+ },
+ {
+  "ja": "スケジュール情報を含める",
+  "key": "exporting-include-scheduling-information"
+ },
+ {
+  "ja": "デッキのプリセットを含める",
+  "key": "exporting-include-deck-configs"
+ },
+ {
+  "ja": "メディアファイルを含める",
+  "key": "exporting-include-media"
+ },
+ {
+  "ja": "すべてのデッキ",
+  "key": "exporting-all-decks"
+ },
+ {
+  "ja": "インポートのオプション",
+  "key": "importing-import-options"
+ },
+ {
+  "ja": "学習履歴を含める",
+  "key": "importing-include-reviews"
+ },
+ {
+  "ja": "インポート",
+  "key": "actions-import"
+ },
+ {
+  "ja": "コレクションをインポート",
+  "en": "Import Collection"
+ },
+ {
+  "ja": "置き換える",
+  "en": "Replace"
+ },
+ {
+  "ja": "ファイルをエクスポート中...",
+  "key": "exporting-exporting-file"
+ },
+ {
+  "ja": "ファイルをインポート中...",
+  "key": "importing-importing-file"
+ },
+ {
+  "ja": "コレクションをインポート中...",
+  "key": "importing-importing-collection"
+ },
+ {
+  "ja": "コレクションを書き出しました。",
+  "key": "exporting-collection-exported"
  }
 ]

@@ -20,8 +20,12 @@ insert or ignore into kv(k, v) values ('seq', 0);
 create table if not exists conf (k text primary key, v text not null, rev integer not null, src text not null, seq integer not null);
 -- 端末で追加・編集・削除したノート（束の上に重ねる）。flds＝フィールドの JSON 配列、tags＝空白区切り、cards＝JSON [[カードの id, ord, デッキ, 新規の位置], …]、
 -- rev＝新しさ（ミリ秒）、src＝'app'（端末で変えた）／'anki'（アドオンが Anki に書いた・Anki で消えていた）、del＝1 なら消した、added＝1 なら端末で作ったノート
+-- guid＝端末で作ったノートの guid（Anki に足すときに使う）、imp＝1 ならパッケージ（.apkg）から読み込んだノート（Anki でも cards のカードだけを作る）
 create table if not exists notes (id integer primary key, mid integer not null, flds text not null, tags text not null, did integer not null, cards text not null,
-  rev integer not null, src text not null, del integer not null default 0, added integer not null default 0, seq integer not null);
+  rev integer not null, src text not null, del integer not null default 0, added integer not null default 0, seq integer not null, guid text, imp integer not null default 0);
 create index if not exists notes_seq on notes(seq, id);
+-- 端末で読み込んだ画像・音声（.apkg の中のもの。束に無いもの）。中身は 1MB ごとに media_part に分けて置く。/bundle/media/<名前> で束に無ければここから出す
+create table if not exists media (name text primary key, size integer not null, sha1 text not null, parts integer not null, rev integer not null, src text not null, seq integer not null);
+create table if not exists media_part (name text not null, i integer not null, data blob not null, primary key (name, i));
 -- 別の端末を足すときの使い捨ての番号（h＝'pair:'+番号 の SHA-256、exp＝期限のミリ秒）。pair_code.py が入れ、/pair が使ったら消す
 create table if not exists pair (h text primary key, exp integer not null);

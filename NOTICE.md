@@ -20,6 +20,9 @@
 | `fsrs/simulate.mjs` の `PQ`（優先度つきの並び） | priority-queue 2.5.0（<https://github.com/garro95/priority-queue>）のヒープの動き（同じ優先度の並びまで fsrs-rs のシミュレーターと同じにするため） | Copyright Gianmarco Garrisi。MPL-2.0（`LICENSES/priority-queue-MPL-2.0.txt`。元は LGPL-3.0-or-later か MPL-2.0 の選択） |
 | `resign/`（自動で入れ直すプログラム） | このリポジトリの作者が作った。部品として isideload 0.5.2（<https://github.com/nab138/isideload>、MIT）・idevice（MIT）・keyring（MIT か Apache-2.0）ほかを使う（`resign/Cargo.lock`）。iloader（<https://github.com/nab138/iloader>、MIT）と同じ部品・同じ設定にしている | 部品はそれぞれのライセンス |
 | MathJax 3.2.2 | リポジトリには入れず、`tools/fetch_vendor.py` が npm の公式の置き場から取ってくる | Apache-2.0 |
+| `app/pkg.mjs`・`app/exchange.mjs`（.apkg・.colpkg の読み書きと、読み込み・書き出しの決まり） | Anki 25.09.4 の rslib（import_export の gather・package・apkg/import の notes・decks・cards・media、notetype・decks・deckconfig の schema11、media/files のファイル名の直し方）を、このリポジトリの作者が 2026 年に JavaScript へ書き写し、手を加えたもの。protobuf の形は Python の anki 25.9.4 の記述子から取った | Copyright Ankitects Pty Ltd and contributors。AGPL-3.0-or-later（`LICENSES/anki-LICENSE.txt`） |
+| sql.js 1.14.2（.apkg・.colpkg の中の SQLite） | リポジトリには入れず、`tools/fetch_vendor.py` が npm の公式の置き場から取ってくる（`sql-wasm-browser.js`・`.wasm`。SQLite はパブリックドメイン） | Copyright (c) 2017 sql.js authors。MIT（取ってきた `cloud/vendor/sqljs/LICENSE`） |
+| fzstd 0.1.1（新しい形の .apkg・.colpkg の zstd を開く） | 同上（`esm/index.mjs`） | Copyright (c) 2020 Arjun Barrett。MIT（取ってきた `cloud/vendor/fzstd/LICENSE`） |
 
 ## AnkiMobile について
 

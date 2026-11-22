@@ -33,7 +33,7 @@ async function pull() {
     if (cs.length) { const l = cs[cs.length - 1]; cur = { ...cur, cs: l.seq, ci: l.id }; }
     if (rs.length) { const l = rs[rs.length - 1]; cur = { ...cur, rs: l.seq, ri: l.id }; }
     // ノート（端末で追加・編集・削除したもの）。{id, mid, flds:[…], tags, did, cards:[[cid, ord, did, due], …], rev, src, del, added}
-    const ns = (j.notes || []).map(([id, mid, flds, tags, did, cards, rev, src, del, added, seq]) => ({ id, mid, flds: JSON.parse(flds), tags, did, cards: JSON.parse(cards), rev, src, del, added, seq }));
+    const ns = (j.notes || []).map(([id, mid, flds, tags, did, cards, rev, src, del, added, seq, guid, imp]) => ({ id, mid, flds: JSON.parse(flds), tags, did, cards: JSON.parse(cards), rev, src, del, added, seq, ...(guid ? { guid } : {}), ...(imp ? { imp: 1 } : {}) }));
     if (ns.length) { const l = ns[ns.length - 1]; cur = { ...cur, ns: l.seq, ni: l.id }; }
     await store.savePulled(cs, rs, cur, ns);
     cards.push(...cs); revlog.push(...rs); notes.push(...ns);

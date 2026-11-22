@@ -3,6 +3,7 @@
 //   {t:'undo', rid, c:{id, st, rev}}     元に戻した。記録 rid に削除の印、状態は今が rid の答えのままなら前の状態に戻す
 //   {t:'state', c:{...}} / {t:'rev', r:記録}  書き戻し（Anki 側）から。src:'anki'
 //   {t:'set', c:{...}}                    非表示・休止・フラグなど（答えではない変更）
+//   {t:'note', n:{…}}                   ノートの追加・編集・削除（下）。{t:'conf', k, v, rev} … オプション・デッキ・ノートタイプ（nt:<id>＝schema 11 の JSON）
 //   'set'・'state' に base（送った側が知っている、そのカードの最後の答えの記録 id）があれば、それより新しい答え（種類 0〜4、消していないもの）が
 //   もう届いているときは状態を置き換えない（古い期日で、別の端末や Anki の答えを上書きしないように）
 import { ensureNotes } from './_notes.js';
@@ -33,13 +34,13 @@ export async function onRequestPost({ request, env }) {
       const n = o.n || {};
       const okCards = Array.isArray(n.cards) && n.cards.every(x => Array.isArray(x) && x.length === 4 && x.every(isInt));
       if (![n.id, n.mid, n.did, n.rev].every(isInt) || !Array.isArray(n.flds) || !n.flds.every(x => typeof x === 'string') || typeof n.tags !== 'string' || !okCards) return Response.json({ error: 'bad note' }, { status: 400 });
-      st.push(DB.prepare(`insert into notes(id, mid, flds, tags, did, cards, rev, src, del, added, seq) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ${SEQ}) on conflict(id) do update set mid = excluded.mid, flds = excluded.flds, tags = excluded.tags, did = excluded.did, cards = excluded.cards, rev = excluded.rev, src = excluded.src, del = excluded.del, added = max(notes.added, excluded.added), seq = excluded.seq where excluded.rev >= notes.rev`)
-        .bind(n.id, n.mid, JSON.stringify(n.flds), n.tags, n.did, JSON.stringify(n.cards), n.rev, src, n.del ? 1 : 0, n.added ? 1 : 0));
+      st.push(DB.prepare(`insert into notes(id, mid, flds, tags, did, cards, rev, src, del, added, seq, guid, imp) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ${SEQ}, ?11, ?12) on conflict(id) do update set mid = excluded.mid, flds = excluded.flds, tags = excluded.tags, did = excluded.did, cards = excluded.cards, rev = excluded.rev, src = excluded.src, del = excluded.del, added = max(notes.added, excluded.added), guid = coalesce(excluded.guid, notes.guid), imp = max(notes.imp, excluded.imp), seq = excluded.seq where excluded.rev >= notes.rev`)
+        .bind(n.id, n.mid, JSON.stringify(n.flds), n.tags, n.did, JSON.stringify(n.cards), n.rev, src, n.del ? 1 : 0, n.added ? 1 : 0, typeof n.guid === 'string' && n.guid.length <= 64 ? n.guid : null, n.imp ? 1 : 0));
       continue;
     }
     if (o.t === 'conf') {
       // デッキのオプション。今より新しい（rev が大きいか同じ）ときだけ置き換える
-      if (typeof o.k !== 'string' || !/^(preset|deck|fdeck|dname):-?\d+$|^global$/.test(o.k) || !isInt(o.rev) || typeof o.v !== 'object' || !o.v) return Response.json({ error: 'bad conf' }, { status: 400 });
+      if (typeof o.k !== 'string' || !/^(preset|deck|fdeck|dname|nt):-?\d+$|^global$/.test(o.k) || !isInt(o.rev) || typeof o.v !== 'object' || !o.v) return Response.json({ error: 'bad conf' }, { status: 400 });
       st.push(DB.prepare(`insert into conf(k, v, rev, src, seq) values (?1, ?2, ?3, ?4, ${SEQ}) on conflict(k) do update set v = excluded.v, rev = excluded.rev, src = excluded.src, seq = excluded.seq where excluded.rev >= conf.rev`)
         .bind(o.k, JSON.stringify(o.v), o.rev, src));
       continue;

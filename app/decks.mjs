@@ -219,7 +219,7 @@ export function createDecks(env) {
 }
 
 // ---------- デッキの一覧の行を左へスワイプ（iOS の表と同じ）: 右から「エクスポート」「名前変更」「削除」が出る ----------
-const ACTS = [['export', 'エクスポート', true], ['rename', '名前変更', false], ['delete', '削除', false]];
+const ACTS = [['export', 'エクスポート', false], ['rename', '名前変更', false], ['delete', '削除', false]];
 export function attachSwipe(row, { onAct, isOpen, setOpen }) {
   const acts = document.createElement('div'); acts.className = 'acts';
   for (const [k, label, disabled] of ACTS) { const b = document.createElement('button'); b.className = 'act-' + k; b.textContent = label; b.disabled = disabled; b.onclick = e => { e.stopPropagation(); setOpen(null); onAct(k); }; acts.append(b); }
