@@ -40,8 +40,9 @@ const barDark = () => { try { return localStorage.getItem('barDark') || 'translu
 // 入れた機能は「設定」→「このアプリ独自の機能」で端末ごとに切れる
 const FEAT = { pen: '', autoSync: false, lang: 'ja' };   // lang … 画面の言語（Anki の言語の番号の形 ja・de-DE など。tools/build_site.py が config.json の language から入れる）
 let DESIGN = null;   // 読み込んだ書き込みのデザイン（mount の返り値）
-const PREF_DEFAULT = { syncMedia: true, neverType: false, replayBtn: true, stopQAudio: true, topbar: true, bottombar: true, counts: true, answerBtn: true, ivl: true, pen: true, autoSync: false, ticks: true, ticksByType: false, toolsBtn: true, noPad: false, extLinks: true };
+const PREF_DEFAULT = { pastePng: false, pasteResize: false, autoCap: true, autoCorrect: true, drawNoFinger: false, syncMedia: true, neverType: false, replayBtn: true, stopQAudio: true, topbar: true, bottombar: true, counts: true, answerBtn: true, ivl: true, pen: true, autoSync: false, ticks: true, ticksByType: false, toolsBtn: true, noPad: false, extLinks: true };
 // autoSync: 既定は本家の Anki と同じく、下の「同期」を押したときだけ送受信する。オンにすると、答えるたびに数秒後に送り、開いたとき・戻ったとき・5分ごとにも同期する（このアプリ独自の方式）
+const lsRaw = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch { return d; } };
 const pref = k => { try { const v = localStorage.getItem('pref:' + k); return v == null ? PREF_DEFAULT[k] : v === '1'; } catch { return PREF_DEFAULT[k]; } };
 // 学習の設定を画面に映す（トップバー・ボトムバー・残り枚数・回答ボタン・次回までの間隔）
 function applyPrefs() {
@@ -1983,6 +1984,7 @@ function setupNotes() {
     changed: notesChanged, scheduleSync: () => scheduleSync(), nextNewPos, bumpNewPos,
     showPreview: (f, c) => previewInto(f, c),
     addMedia: (name, bytes) => xchg.addMedia(name, bytes), sha1Of: bytes => xchg.sha1Of(bytes),
+    pref: k => pref(k), maxImg: () => Math.max(0, parseInt(lsRaw('maxImg', '1024'), 10) || 0),
     typing: t => { try { window.webkit?.messageHandlers?.sa?.postMessage({ typing: t }); } catch {} } });
   notes.element();   // 戻るボタン（Android）が開け閉めを見られるように、先に作っておく
 }
@@ -2098,9 +2100,12 @@ function setupTools() {
     pads: () => ({ title: 'パッドの大きさ', groups: [SP_SIZE.map(n => ({ t: n + '%', ck: spPref.size() === n, run: () => { spPref.set('size', n); sp.refresh(); } }))] }),
     pada: () => ({ title: '手書きパッドの透明度', groups: [Object.entries(SP_ALPHA).map(([k, [t]]) => ({ t, ck: spPref.alpha() === k, run: () => { spPref.set('alpha', k); sp.refresh(); } }))] }),
     edit: () => ({ title: '編集', groups: [
-      [{ t: '最大画像サイズ（長辺）', v: '1024', off: 1 }, { t: 'クリップボード画像を PNG 形式で貼り付ける', tg: false, off: 1 }, { t: '貼り付けの際にリサイズ', tg: false, off: 1 }, { t: 'カメラで撮影した写真をクロップ（切り出し）', tg: false, off: 1 }, { t: 'カメラで撮影する動画を高画質にする', tg: false, off: 1 }],
-      [{ t: '英字入力時に文頭を自動で大文字にする', tg: true, off: 1 }, { t: 'オートコレクト', tg: true, off: 1 }, { t: 'スマート引用符とダッシュを自動変換', tg: true, off: 1 }],
-      [{ t: '手書きスクリーンで指での入力を無視', tg: false, off: 1 }]] }),
+      [{ t: '最大画像サイズ（長辺）', v: lsRaw('maxImg', '1024'), run: async () => {
+          const r = await iosPrompt({ title: '最大画像サイズ（長辺）', message: 'カメラ・写真ライブラリから入れる写真（と、下の設定がオンなら貼り付けた画像）の長辺をここまで小さくします。0 なら小さくしません。', numbers: [{ label: 'ピクセル', value: lsRaw('maxImg', '1024') }] });
+          if (r) { setLS('maxImg', String(Math.max(0, parseInt(r.numbers[0], 10) || 0))); renderPrefs(); } } },
+        tgl('クリップボード画像を PNG 形式で貼り付ける', 'pastePng'), tgl('貼り付けの際にリサイズ', 'pasteResize'), { t: 'カメラで撮影した写真をクロップ（切り出し）', tg: false, off: 1 }, { t: 'カメラで撮影する動画を高画質にする', tg: false, off: 1 }],
+      [tgl('英字入力時に文頭を自動で大文字にする', 'autoCap'), tgl('オートコレクト', 'autoCorrect'), { t: 'スマート引用符とダッシュを自動変換', tg: true, off: 1 }],
+      [tgl('手書きスクリーンで指での入力を無視', 'drawNoFinger')]] }),
     profile: () => ({ title: 'プロファイル', groups: [[{ t: 'ユーザー 1', ck: true }]] }),
     // バックアップ（Anki と同じ決まりで、画像・音声を含めない .colpkg を端末に置く。app/backup.mjs）。押すとそのバックアップに戻す（.colpkg の読み込みと同じ確認）
     backup: () => {

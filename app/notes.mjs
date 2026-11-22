@@ -240,7 +240,7 @@ export function createNotes(env) {
     const dark = env.isDark(), font = String(f.font || 'Arial').replace(/["<>]/g, '');
     return `<!doctype html><html><head><meta charset="utf-8"><base href="${env.MEDIA}"><style>html{color:${dark ? '#f2f2f2' : '#000'};background:transparent}
 body{margin:0;padding:10px 12px;min-height:22px;font-family:"${font}",-apple-system,"Hiragino Sans",sans-serif;font-size:17px;line-height:1.35;overflow-wrap:anywhere;outline:none;-webkit-text-size-adjust:100%}
-img{max-width:100%;height:auto}</style></head><body contenteditable="true" spellcheck="false"${f.rtl ? ' dir="rtl"' : ''}>${html}</body></html>`;
+img{max-width:100%;height:auto}</style></head><body contenteditable="true" spellcheck="false" autocapitalize="${env.pref?.('autoCap') === false ? 'none' : 'sentences'}" autocorrect="${env.pref?.('autoCorrect') === false ? 'off' : 'on'}"${f.rtl ? ' dir="rtl"' : ''}>${html}</body></html>`;   // 設定＞編集の「文頭を大文字」「オートコレクト」
   }
   const fit = f => { try { const b = f.contentDocument.body; f.style.height = Math.max(44, Math.ceil(b.getBoundingClientRect().height)) + 'px'; } catch {} };
   function build() {
@@ -286,6 +286,7 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
       fr.onload = () => {
         const d = fr.contentDocument; if (!d || !d.body) return;
         fr._init = d.body.innerHTML; fit(fr);
+        d.addEventListener('paste', e => pasteImages(e, fr, ta, i));
         if (i === 0 && ed && ed.focusFirst) { ed.focusFirst = false; try { fr.contentWindow.focus(); d.body.focus(); } catch {} }
       };
       fr.srcdoc = fieldDoc(ed.vals[i] ?? '', f);
@@ -377,14 +378,41 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
     inp.style.cssText = 'position:fixed;left:-100px;top:0;opacity:0'; document.body.append(inp);
     inp.addEventListener('change', async () => {
       for (const f of inp.files) {
-        const bytes = new Uint8Array(await f.arrayBuffer());
-        const ext = (f.name.match(/\.([^.]+)$/) || [])[1]?.toLowerCase() || (f.type.split('/')[1] || 'bin').replace('jpeg', 'jpg').replace('quicktime', 'mov');
+        let bytes = new Uint8Array(await f.arrayBuffer());
+        let ext = (f.name.match(/\.([^.]+)$/) || [])[1]?.toLowerCase() || (f.type.split('/')[1] || 'bin').replace('jpeg', 'jpg').replace('quicktime', 'mov');
+        if (!keepName && /^image\/(jpeg|png|heic|heif|webp)$/.test(f.type)) {   // カメラ・写真ライブラリの写真は、長辺を設定＞編集の「最大画像サイズ」まで
+          const r = await resizeImage(bytes, f.type, env.maxImg()); if (r) { bytes = r.bytes; ext = r.type === 'image/png' ? 'png' : 'jpg'; }
+        }
         const name = keepName || !/^(image|video)\//.test(f.type) ? f.name : `paste-${await env.sha1Of(bytes)}.${ext}`;
         await addBytes(fr, ta, i, name, bytes);
       }
       inp.remove();
     });
     inp.click();
+  }
+  // 画像を小さくする（長辺を maxSide まで。0 なら大きさはそのまま）。outType を付けるとその形式に書き直す。変えることが無ければ null
+  async function resizeImage(bytes, type, maxSide, outType = null) {
+    let bmp; try { bmp = await createImageBitmap(new Blob([bytes], { type })); } catch { return null; }
+    const s = maxSide > 0 ? Math.min(1, maxSide / Math.max(bmp.width, bmp.height)) : 1;
+    if (s === 1 && (!outType || outType === type)) return null;
+    const w = Math.max(1, Math.round(bmp.width * s)), h = Math.max(1, Math.round(bmp.height * s));
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const g = cv.getContext('2d');
+    const out = outType || (type === 'image/png' ? 'image/png' : 'image/jpeg');
+    if (out === 'image/jpeg') { g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); }
+    g.drawImage(bmp, 0, 0, w, h);
+    const b = await new Promise(r => cv.toBlob(r, out, 0.9)); return b ? { bytes: new Uint8Array(await b.arrayBuffer()), type: out } : null;
+  }
+  // 貼り付けた画像は、ファイルにして入れる（Anki と同じ paste-<sha1>。設定＞編集の「PNG 形式で貼り付ける」がオフなら JPEG、「貼り付けの際にリサイズ」で長辺を最大画像サイズまで）
+  async function pasteImages(e, fr, ta, i) {
+    const files = [...(e.clipboardData?.items || [])].filter(it => it.kind === 'file' && /^image\//.test(it.type)).map(it => it.getAsFile()).filter(Boolean);
+    if (!files.length) return;
+    e.preventDefault();
+    for (const f of files) {
+      let bytes = new Uint8Array(await f.arrayBuffer()), type = f.type;
+      const png = !!env.pref?.('pastePng'), r = await resizeImage(bytes, type, env.pref?.('pasteResize') ? env.maxImg() : 0, png ? 'image/png' : 'image/jpeg');
+      if (r) { bytes = r.bytes; type = r.type; }
+      await addBytes(fr, ta, i, `paste-${await env.sha1Of(bytes)}.${type === 'image/png' ? 'png' : type === 'image/jpeg' ? 'jpg' : (type.split('/')[1] || 'png')}`, bytes);
+    }
   }
   // マイク: 録って、保存で入れる（Anki の「音声を録音」と同じく録り終えてから入れる）
   async function recordInto(fr, ta, i) {
@@ -415,7 +443,7 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
     const paint = () => { ctx.clearRect(0, 0, W, H); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#000';
       for (const s of cur ? [...strokes, cur] : strokes) { ctx.beginPath(); s.forEach((p, k) => { ctx.lineWidth = p.w; k ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); if (s.length === 1) ctx.lineTo(s[0].x + .01, s[0].y); ctx.stroke(); } };
     const pt = e => { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top, w: e.pointerType === 'pen' && e.pressure > 0 ? 1 + 4 * e.pressure : 3 }; };
-    cv.addEventListener('pointerdown', e => { e.preventDefault(); try { cv.setPointerCapture(e.pointerId); } catch {} cur = [pt(e)]; paint(); });
+    cv.addEventListener('pointerdown', e => { e.preventDefault(); if (env.pref?.('drawNoFinger') && e.pointerType === 'touch') return; try { cv.setPointerCapture(e.pointerId); } catch {} cur = [pt(e)]; paint(); });   // 「手書きスクリーンで指での入力を無視」
     cv.addEventListener('pointermove', e => { if (!cur) return; for (const x of (e.getCoalescedEvents?.() || [e])) cur.push(pt(x)); paint(); });
     const end = () => { if (cur) { strokes.push(cur); cur = null; paint(); } }; cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
     d.querySelector('.undo').onclick = () => { strokes.pop(); paint(); };
