@@ -46,6 +46,8 @@ _T = {
               '\nDecks changed in selfanki: created {created}, renamed {renamed}, deleted {removed} (cards deleted {cards_removed}, newer in Anki {anki_newer})'),
     'warn_deck': ('\n\nデッキを書けませんでした: {e}', '\n\nCould not write decks: {e}'),
     'busy': ('暗記との同期は、もう動いています。', 'A selfanki sync is already running.'),
+    'schema_left': ('端末で変えたノートタイプ（フィールド・カードタイプの並びや数）と、ノートタイプを変えたノート {n} 件は、Anki に書きませんでした。書くには、もう一度「暗記と同期」をして、確認で「はい」を選んでください。',
+                    '{n} note type change(s) made on the device (field/card type order or count, or notes moved to another note type) were not written to Anki. Sync with selfanki again and answer Yes to write them.'),
     'pairing': ('暗記につないでいます…', 'Connecting to selfanki…'),
     'failed': ('暗記と同期できませんでした。\n\n{e}', 'Could not sync with selfanki.\n\n{e}'),
 }
@@ -127,7 +129,7 @@ def _message(s, dry):
 _running = False
 
 
-def sync(dry=False, auto=False):
+def sync(dry=False, auto=False, allow_schema=False):
     global _running
     link = _links().get(mw.pm.name)
     if not link:
@@ -144,12 +146,16 @@ def sync(dry=False, auto=False):
         if not dry:
             # 書く前にバックアップを取る（Anki の「ファイル」→「バックアップから復元」で戻せる）
             col.create_backup(backup_folder=mw.pm.backupFolder(), force=True, wait_for_completion=True)
-        result['s'] = core.run(col, link['site_url'], link['token'], dry=dry, log=lambda *a: print('[暗記と同期]', *a))
+        result['s'] = core.run(col, link['site_url'], link['token'], dry=dry, log=lambda *a: print('[暗記と同期]', *a), allow_schema=allow_schema)
 
     def done(*_):
         global _running
         _running = False
         s = result.get('s') or {}
+        # 端末で変えたノートタイプの並び・数、ノートタイプの変更は、Anki ではスキーマの変更（次の AnkiWeb 同期が一方向）。Anki と同じ確認の文言で聞いてから書く
+        if s.get('schema_pending') and not dry and not allow_schema:
+            if mw.confirm_schema_modification(): sync(auto=auto, allow_schema=True); return
+            showInfo(t('schema_left', n=s['schema_pending']), parent=mw)
         m = _message(s, dry)
         if m is None: tooltip(t('nothing'))
         elif auto and not s.get('verify_ng') and not s.get('conf_fail') and not s.get('note_fail') and not s.get('deck_fail'): tooltip(m.replace('\n\n', '\n'), period=6000)
