@@ -2,6 +2,8 @@
 // 書き出す中身の選び方は rslib 25.09.4 import_export/gather.rs（ExchangeData::gather_data）を、読み込みの決まりは apkg/import（notes.rs・decks.rs・cards.rs・media.rs）をなぞる。
 // 端末の中の姿（束＋端末での変更）から、Anki の schema 11 の形を組み直して書く。パッケージの読み書きは app/pkg.mjs
 import * as pkg from './pkg.mjs';
+import { planAdd, normalizeName } from './decks.mjs';
+import { timingToday } from '../fsrs/sched.mjs';
 
 // ---------- 小物 ----------
 const BASE91 = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&()*+,-./:;<=>?@[]^_`{|}~';
@@ -228,5 +230,182 @@ export function createExchange(env) {
   const tagList = notes => { const m = new Map(); for (const n of notes) for (const t of n.tags.trim().split(/\s+/)) if (t && !m.has(fold(t))) m.set(fold(t), t); return [...m.values()]; };
   const fileName = s => String(s).replace(/::/g, '__').replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').trim() || 'deck';
 
-  return { exportDeck, exportCollection, gather };
+
+  // ---------- 読み込み（rslib apkg/import をなぞる。merge_notetypes＝しない・ノートとノートタイプの更新＝新しければ） ----------
+  // パッケージ側の gather_data（コレクション全部）。opts: { sched, configs }
+  function gatherPackage(col, sched, configs) {
+    const decksById = new Map(col.decks.map(d => [d.id, d])), byName = new Map(col.decks.map(d => [fold(d.name), d]));
+    const notes = col.notes.map(n => ({ ...n })), cards = col.cards.map(c => ({ ...c }));
+    const want = new Set(); for (const c of cards) { want.add(c.did); if (sched && c.odid) want.add(c.odid); }
+    const names = new Set([...want].map(id => decksById.get(id)?.name).filter(Boolean).map(fold));
+    for (const id of [...want]) { const d = decksById.get(id); if (!d) continue; for (const p of parentNames(d.name)) { if (names.has(fold(p))) continue; names.add(fold(p)); const pd = byName.get(fold(p)); if (pd) want.add(pd.id); } }
+    const decks = [...want].map(id => decksById.get(id)).filter(Boolean).filter(d => !(!sched && d.id === 1)).map(d => structuredClone(d));
+    const mids = new Set(notes.map(n => n.mid)), notetypes = col.notetypes.filter(m => mids.has(m.id)).map(m => structuredClone(m));
+    const deckIds = new Set(decks.map(d => d.id)), dyn = new Set(decks.filter(d => d.dyn).map(d => d.id));
+    const allowFiltered = cards.every(c => (!c.odid && deckIds.has(c.did) && !dyn.has(c.did)) || c.odid === 1 || deckIds.has(c.odid));
+    let revlog = [];
+    if (sched) {
+      const ids = new Set(cards.map(c => c.id)); revlog = col.revlog.filter(r => ids.has(r.cid)).map(r => ({ ...r }));
+      if (!allowFiltered) for (const c of cards) if (c.odid) { c.odid = c.did; restoreFromFiltered(c); }
+    } else {
+      for (const n of notes) { const t = String(n.tags).trim().split(/\s+/).filter(x => x && !['marked', 'leech'].includes(fold(x))); n.tags = t.length ? ` ${t.join(' ')} ` : ''; }
+      let pos = Number(col.conf?.nextPos) || 0;
+      for (const c of cards) { const did = c.did; if (scheduleAsNew(c, pos)) pos++; c.flags = 0; c.did = did; }
+    }
+    let dconf = [];
+    if (configs) { const used = new Set(decks.filter(d => !d.dyn).map(d => +d.conf)); dconf = col.dconf.filter(c => used.has(+c.id)).map(c => structuredClone(c)); }
+    for (const d of decks) {
+      if (!sched) { d.lrnToday = [0, 0]; d.revToday = [0, 0]; d.newToday = [0, 0]; d.timeToday = [0, 0]; d.collapsed = false; d.browserCollapsed = false; }
+      if (!d.dyn) {
+        if (!configs) d.conf = 1;
+        if (!sched) Object.assign(d, { extendNew: 0, extendRev: 0, reviewLimit: null, reviewLimitToday: null, newLimit: null, newLimitToday: null });
+      } else if (!sched || !allowFiltered) {
+        for (const k of ['resched', 'terms', 'separate', 'delays', 'previewDelay', 'previewAgainSecs', 'previewHardSecs', 'previewGoodSecs']) delete d[k];
+        Object.assign(d, { dyn: 0, conf: 1, desc: '', extendNew: 0, extendRev: 0, reviewLimit: null, newLimit: null, reviewLimitToday: null, newLimitToday: null, desiredRetention: null });
+      }
+    }
+    const daysElapsed = timingToday(Math.floor(Date.now() / 1000), { crt: col.crt, config: col.conf || {} }).daysElapsed;
+    return { notes, cards, decks, notetypes, revlog, dconf, daysElapsed };
+  }
+  // 端末の中のノートタイプを schema 11 で
+  const target11 = () => Object.entries(S.meta.notetypes || {}).map(([id, n]) => ntTo11(id, n));
+  const fieldMatch = (a, b) => (a.id != null && b.id != null ? String(a.id) === String(b.id) : a.name === b.name);
+  const equalSchema = (a, b) => a.flds.length === b.flds.length && a.tmpls.length === b.tmpls.length && a.flds.every((f, i) => fieldMatch(f, b.flds[i])) && a.tmpls.every((t, i) => fieldMatch(t, b.tmpls[i]));
+  const shouldUpdate = (cond, existing, incoming) => (cond === 'always' ? existing !== incoming : cond === 'never' ? false : existing < incoming);
+  // 端末の id と重ならない id（Anki のように時刻から。足すたびに 1 ずつ）
+  function idMaker(used) { let t = Date.now(); return () => { while (used.has(t)) t++; used.add(t); return t++; }; }
+  // 画像・音声の名前の付け替え（rslib replace_media_refs）
+  function replaceMediaRefs(field, fn) {
+    let changed = false;
+    const out = field.replace(MEDIA_TAG, (m, a, b, c) => { const f = a ?? b ?? c; const r = fn(pkg.decodeEntities(f)); if (r == null) return m; changed = true; return m.replace(f, a != null || b != null ? r.replace(/"/g, '&quot;') : r); })
+      .replace(/\[sound:(.+?)\]/gs, (m, f) => { const r = fn(pkg.decodeEntities(f)); if (r == null) return m; changed = true; return `[sound:${r}]`; });
+    return changed ? out : null;
+  }
+  // 読み込みの計画を立てる（端末にはまだ何も書かない）。p＝pkg.readPackage の戻り値。opts: { sched, configs, updateNotes, updateNotetypes }
+  async function planImport(p, opts = {}) {
+    const o = { sched: true, configs: false, updateNotes: 'ifNewer', updateNotetypes: 'ifNewer', ...opts };
+    const g = gatherPackage(p.col, o.sched, o.configs);
+    const notesNow = await env.loadNotes();
+    const plan = { notetypesAdd: [], notetypesUpdate: [], decksAdd: [], decksUpdate: [], dconfAdd: [], notesAdd: [], notesUpdate: [], cardsAdd: [], revlogAdd: [], media: [],
+      log: { found: g.notes.length, new: 0, updated: 0, duplicate: 0, conflicting: 0, media: 0 }, daysElapsed: g.daysElapsed };
+    // --- 画像・音声（prepare_media） ---
+    const have = await env.mediaIndex();   // 名前 → sha1（16 進。束のものは先頭 10 桁）
+    const checked = new Map(), unchecked = [];
+    for (const e of p.media) {
+      if (!pkg.filenameIsSafe(e.name)) throw new pkg.PackageError('指定したファイルは正当な .apkg ファイルではありません。');
+      const name = pkg.normalizeFilename(e.name), ent = { ...e, name, used: false };
+      const ex = have.get(name);
+      if (name.startsWith('_') || name.startsWith('latex-')) { if (ex == null) unchecked.push(ent); continue; }
+      if (ex != null) {
+        if (!ent.sha1) ent.sha1 = await pkg.sha1hex(await e.bytes());
+        if (!ent.sha1.startsWith(ex) && !ex.startsWith(ent.sha1)) { const orig = ent.name; ent.name = pkg.addHashSuffix(ent.name, ent.sha1); checked.set(orig, ent); }
+      } else checked.set(name, ent);
+    }
+    const useMedia = name => { let n; try { if (!pkg.filenameIsSafe(name)) return null; n = pkg.normalizeFilename(name); } catch { return null; } const ent = checked.get(n); if (ent) { ent.used = true; return ent.name !== name ? ent.name : null; } return n !== name ? n : null; };
+    // --- ノートタイプ（import_notetypes） ---
+    const targets = target11(), remapNt = new Map(), usedNtIds = new Set(targets.map(m => +m.id));
+    const ntName = new Set(targets.map(m => fold(m.name)));
+    const newNtId = idMaker(usedNtIds);
+    for (const inc of g.notetypes) {
+      inc.originalId = String(inc.id);
+      const ex = targets.find(m => +m.id === +inc.id);
+      if (ex) {
+        let existing = ex;
+        if (!equalSchema(existing, inc)) {
+          const dup = targets.find(m => +m.id !== +inc.id && String(m.originalId ?? '') === String(inc.id) && equalSchema(m, inc));
+          if (dup) { remapNt.set(+inc.id, +dup.id); existing = dup; inc.id = +dup.id; }
+          else { const old = +inc.id; inc.id = newNtId(); remapNt.set(old, inc.id); while (ntName.has(fold(inc.name))) { inc.name += '+'; inc.mod = Math.floor(Date.now() / 1000); } ntName.add(fold(inc.name)); plan.notetypesAdd.push(inc); targets.push(inc); continue; }
+        }
+        if (shouldUpdate(o.updateNotetypes, existing.mod || 0, inc.mod || 0)) { inc.id = +existing.id; plan.notetypesUpdate.push(inc); const i = targets.indexOf(existing); targets[i] = inc; }
+      } else {
+        while (ntName.has(fold(inc.name))) { inc.name += '+'; inc.mod = Math.floor(Date.now() / 1000); }
+        ntName.add(fold(inc.name)); usedNtIds.add(+inc.id); plan.notetypesAdd.push(inc); targets.push(inc);
+      }
+    }
+    const ntById = id => targets.find(m => +m.id === +id);
+    // --- ノート（import_notes） ---
+    const guids = new Map(); for (const [id, n] of notesNow) if (n.guid) guids.set(n.guid, { id, mod: n.mod || 0, mid: n.mid });
+    const noteIds = new Set([...notesNow.keys(), ...(S.noteRecs ? S.noteRecs.keys() : [])]);
+    const idMap = new Map(), tagCase = new Map(); for (const n of notesNow.values()) for (const t of String(n.tags).split(/\s+/)) if (t && !tagCase.has(fold(t))) tagCase.set(fold(t), t);
+    const canonTags = tags => { const seen = new Map(); for (const t of String(tags).split(/[\s　]+/)) { if (!t) continue; const k = fold(t); if (seen.has(k)) continue; seen.set(k, tagCase.get(k) ?? t); if (!tagCase.has(k)) tagCase.set(k, t); } return [...seen.values()].sort((a, b) => (fold(a) < fold(b) ? -1 : fold(a) > fold(b) ? 1 : 0)); };
+    const normalize = S.meta.config?.normalize_note_text !== false;
+    for (const n0 of g.notes) {
+      const n = { ...n0 }; if (remapNt.has(+n.mid)) n.mid = remapNt.get(+n.mid);
+      const ex = guids.get(n.guid);
+      const munge = () => { const f = String(n.flds).split('\x1f').map(x => replaceMediaRefs(x, useMedia) ?? x); n.flds = f.join('\x1f'); };
+      if (ex) {
+        if (+ex.mid !== +n.mid) { plan.log.conflicting++; continue; }
+        if (shouldUpdate(o.updateNotes, ex.mod, n.mod)) {
+          munge(); const t = ntById(n.mid); const flds = fixFields(n.flds, t, normalize);
+          plan.notesUpdate.push({ id: ex.id, mid: +n.mid, flds, tags: canonTags(n.tags), mod: n.mod, guid: n.guid }); idMap.set(n0.id, ex.id); plan.log.updated++;
+        } else { idMap.set(n0.id, ex.id); plan.log.duplicate++; }
+        continue;
+      }
+      munge();
+      const t = ntById(n.mid); if (!t) continue;
+      const flds = fixFields(n.flds, t, normalize);
+      let id = n.id; while (noteIds.has(id)) id += 999; noteIds.add(id);
+      plan.notesAdd.push({ id, guid: n.guid, mid: +n.mid, mod: n.mod, flds, tags: canonTags(n.tags) }); idMap.set(n0.id, id); guids.set(n.guid, { id, mod: n.mod, mid: n.mid }); plan.log.new++;
+    }
+    // --- デッキとプリセット（import_decks_and_configs） ---
+    const presetIds = new Set(Object.keys(S.meta.presets || {}).map(Number));
+    for (const c of g.dconf) if (!presetIds.has(+c.id)) { plan.dconfAdd.push(c); presetIds.add(+c.id); }
+    const W = deckList().map(d => ({ id: d.id, name: d.name, dyn: d.dyn })), deckMap = new Map(), renamedParents = [];
+    const suffix = String(Math.floor(Date.now() / 1000));
+    const level = d => d.name.split('::').length;
+    for (const d of g.decks.slice().sort((a, b) => level(a) - level(b))) {
+      for (const [from, to] of renamedParents) if (d.name.startsWith(from)) { d.name = to + d.name.slice(from.length); break; }
+      if (!d.dyn) for (const k of ['newLimitToday', 'reviewLimitToday']) {
+        const lim = d[k]; if (!lim) continue; const today = timingToday(Math.floor(Date.now() / 1000), S.meta).daysElapsed;
+        if (lim.today === g.daysElapsed) lim.today = today; else if (today > 0) lim.today = Math.min(lim.today, today - 1); else d[k] = null;
+      }
+      const ex = W.find(x => fold(x.name) === fold(normalizeName(d.name)));
+      if (ex && !!ex.dyn === !!d.dyn) {
+        deckMap.set(d.id, ex.id);
+        if (!d.dyn) plan.decksUpdate.push({ id: ex.id, desc: d.desc || '', md: !!d.md, conf: +d.conf, reviewLimit: d.reviewLimit ?? null, newLimit: d.newLimit ?? null, reviewLimitToday: d.reviewLimitToday ?? null, newLimitToday: d.newLimitToday ?? null });
+        else plan.decksUpdate.push({ id: ex.id, filtered: d });
+        continue;
+      }
+      if (ex) { const old = d.name + '::'; d.name = `${d.name} ${suffix}`; renamedParents.push([old, d.name + '::']); }
+      // 親がフィルターデッキなら、その名前のふつうのデッキを作って付け替える（ensure_valid_first_existing_parent）
+      const parts = normalizeName(d.name).split('::');
+      for (let i = parts.length - 1; i >= 1; i--) {
+        const pn = parts.slice(0, i).join('::'), pd = W.find(x => fold(x.name) === fold(pn)); if (!pd) continue;
+        if (pd.dyn) { const nn = `${pd.name} ${suffix}`; const r = planAdd(W, nn); for (const c of r.created) { W.push({ id: c.id, name: c.name, dyn: 0 }); plan.decksAdd.push({ id: c.id, name: c.name, dyn: 0, d11: null }); } renamedParents.push([pd.name + '::', nn + '::']); d.name = nn + d.name.slice(pd.name.length); }
+        break;
+      }
+      const r = planAdd(W, d.name);
+      for (const c of r.created) { W.push({ id: c.id, name: c.name, dyn: c.id === r.id ? (d.dyn ? 1 : 0) : 0 }); plan.decksAdd.push({ id: c.id, name: c.name, dyn: c.id === r.id ? (d.dyn ? 1 : 0) : 0, d11: c.id === r.id ? { ...d, id: c.id, name: c.name } : null }); }
+      deckMap.set(d.id, r.id);
+    }
+    // --- カードと記録（import_cards_and_revlog） ---
+    const today = timingToday(Math.floor(Date.now() / 1000), S.meta).daysElapsed, delta = g.daysElapsed - today;
+    const existingCards = new Set(S.all.filter(c => !c.gone).map(c => `${c.nid}:${c.ord}`)), cardIds = new Set(S.byId.keys()), cardMap = new Map();
+    for (const c0 of g.cards) {
+      const nid = idMap.get(c0.nid); if (nid == null) continue;
+      if (existingCards.has(`${nid}:${c0.ord}`)) continue;
+      const c = { ...c0, nid };
+      if (deckMap.has(c.did)) c.did = deckMap.get(c.did);
+      if (c.odid && deckMap.has(c.odid)) c.odid = deckMap.get(c.odid);
+      if (c.queue === 2 || c.queue === 3 || c.type === 2) c.due -= delta;
+      if (c.type === 2 && c.odue) c.odue -= delta;
+      let id = c.id; while (cardIds.has(id)) id += 999; cardIds.add(id); cardMap.set(c0.id, id); c.id = id;
+      existingCards.add(`${nid}:${c.ord}`);
+      plan.cardsAdd.push(c);
+    }
+    const revIds = new Set(S.revIds || []);
+    for (const r of g.revlog) { const cid = cardMap.get(r.cid); if (cid == null || revIds.has(r.id)) continue; revIds.add(r.id); plan.revlogAdd.push({ ...r, cid }); }
+    // --- 使う画像・音声 ---
+    plan.media = [...[...checked.values()].filter(e => e.used), ...unchecked];
+    plan.log.media = plan.media.length;
+    return plan;
+  }
+  // フィールドの数をノートタイプに合わせ（足りなければ空、多ければ捨てる）、NFC にする
+  function fixFields(flds, t, normalize) {
+    const n = Math.max(1, (t?.flds || []).length), a = String(flds).split('\x1f');
+    while (a.length < n) a.push(''); a.length = n;
+    return normalize ? a.map(x => x.normalize('NFC')) : a;
+  }
+
+  return { exportDeck, exportCollection, gather, planImport, gatherPackage };
 }
