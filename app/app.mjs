@@ -747,6 +747,23 @@ function pickFlag(cs) {
   add('キャンセル', null, 'cancel');
   document.body.append(d);
 }
+// よそのサイトのファイルを、自分のサーバー（functions/api/fetch.js）を通して取る。このページは自分のサイトとしか通信できないため
+async function fetchViaServer(url) {
+  const r = await fetch(new URL('../api/fetch', location.href).href, { method: 'POST', headers: { 'content-type': 'application/json', 'x-sa-fetch': '1' }, body: JSON.stringify({ url }), credentials: 'same-origin' });
+  if (!r.ok) { let m = ''; try { m = (await r.json()).error; } catch {} throw new Error(m || `HTTP ${r.status}`); }
+  let name = ''; try { name = decodeURIComponent(r.headers.get('x-sa-name') || ''); } catch {}
+  return { bytes: new Uint8Array(await r.arrayBuffer()), name };
+}
+// 「追加/エクスポート」の「リンク先からダウンロード」: .apkg・.colpkg の URL から読み込む
+async function downloadFromLink() {
+  const r = await iosPrompt({ title: 'リンク先からダウンロード', message: '.apkg か .colpkg のファイルの URL', input: '' });
+  const url = r?.value?.trim(); if (!url) return;
+  toast('ダウンロード中…');
+  let got; try { got = await fetchViaServer(url); } catch (e) { iosAlert('リンク先からダウンロード', String(e?.message || e)); return; }
+  const fromUrl = (() => { try { return decodeURIComponent(new URL(url).pathname.split('/').pop() || ''); } catch { return ''; } })();
+  const name = [got.name, fromUrl].find(n => /\.(apkg|colpkg)$/i.test(n)) || 'download.apkg';
+  await xchg.importFile(new File([got.bytes], name));
+}
 // AnkiMobile の URL スキーム（manual url-schemes.md）: addnote・search・sync。infoForAdding（クリップボードの独自の型）はできない
 const MEDIA_URL = /^https?:\/\/\S+\.(jpe?g|png|gif|webp|svg|bmp|mp3|m4a|aac|ogg|oga|opus|wav|flac|mp4|m4v|mov|webm)$/i;
 async function handleXcb(raw) {
@@ -772,9 +789,9 @@ async function handleXcb(raw) {
     let val = v;
     if (MEDIA_URL.test(v.trim())) {   // 画像・音声への URL は取ってきて、ファイルとして入れる
       try {
-        const r = await fetch(v.trim()); if (!r.ok) throw new Error(String(r.status));
+        const r = await fetchViaServer(v.trim());
         const u = new URL(v.trim()), base = decodeURIComponent((u.search ? (v.trim().match(/[^/=&?]+$/) || [''])[0] : u.pathname.split('/').pop()) || 'media');
-        const name = await xchg.addMedia(base, new Uint8Array(await r.arrayBuffer()));
+        const name = await xchg.addMedia(base, r.bytes);
         val = /\.(jpe?g|png|gif|webp|svg|bmp)$/i.test(name) ? `<img src="${name.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">` : `[sound:${name}]`;
       } catch (e) { return fail(`「${v}」を取ってこられませんでした（${e?.message || e}）。`); }
     }
@@ -2207,6 +2224,9 @@ function setupTools() {
   const closeAdd = () => { $('#addpop').hidden = true; document.body.classList.remove('addopen'); };
   $('#addpop .import').onclick = async () => { closeAdd(); xchg.importFile(await xchg.pickFile()); };   // iTunes の代わりに、ファイルを選ぶ（.apkg・.colpkg）
   $('#addpop .export').onclick = () => { closeAdd(); xchg.exportCollection(); };
+  $('#addpop .link').onclick = () => { closeAdd(); downloadFromLink(); };
+  // 共有デッキ: AnkiWeb の共有デッキのページを開くだけ（ダウンロードには AnkiWeb のログインが要るので、このアプリからは取れない。落としたファイルを「iTunesからインポート」で）
+  $('#addpop .shared').onclick = () => { closeAdd(); window.open('https://ankiweb.net/shared/decks', '_blank', 'noopener'); };
   $('#addpop').onclick = e => { if (e.target.id === 'addpop') { $('#addpop').hidden = true; document.body.classList.remove('addopen'); } };
   setupAskButton();
   ask = createAsk({ getCard: () => S.card, getSide: () => S.side, deckName: did => S.decksById.get(did)?.name || '', penImage: () => pen.image(isDark() ? '#000000' : '#ffffff'), hasStrokes: () => pen.state.strokes.length > 0, cardById: id => S.byId.get(id) });
