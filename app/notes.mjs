@@ -611,7 +611,7 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
         if (ord !== c.ord) changed = true;
         exist.push({ id: c.id, ord, did: c.did, type: c.type, due: c.due });
       }
-      const add = plan.generate ? genCards(t, flds, exist, null, true) : [];
+      const add = plan.generate && exist.length ? genCards(t, flds, exist, null, true) : [];   // rslib はカードの残っているノートだけから作る（全部消えたノートには作らない）
       if (add.length) changed = true;
       if (!changed) continue;
       const decks = new Set(exist.map(c => c.did)), did = decks.size === 1 ? [...decks][0] : (live[0]?.did ?? 1);
