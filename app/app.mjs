@@ -154,7 +154,7 @@ async function saveConf(k, v, rev) { applyConf([{ k, v, rev }]); await store.add
 let swipeRow = null;
 const deckOps = createDecks({ S,
   commitConf: async rows => { applyConf(rows); for (const r of rows) await store.addOp({ t: 'conf', ...r }); },
-  pushUndo: e => { S.undo.push(e); if (S.undo.length > 30) S.undo.shift(); },
+  pushUndo: e => undoPush(e),
   prompt: o => iosPrompt(o), alert: (t, m) => iosAlert(t, m),
   saveOpen: () => { try { localStorage.setItem('openDecks', JSON.stringify([...S.open])); } catch {} },
   defaultName: () => S.meta.presets?.[1]?.name || 'Default',   // 既定のデッキを消したときの名前（Anki はパソコンの言語の「デフォルト」。アドオンが同期で正しい名前を返す）
@@ -406,7 +406,7 @@ async function writeFlt(id, picked, undoLabel = null) {
     c.data = data; c.rev = at; ops.push({ t: 'set', c: { id: c.id, st: pickState(c), rev: at }, base: base.get(c.id) || 0 });
   }
   await store.addOps(ops);
-  if (undoLabel) { S.undo.push({ kind: 'set', prevs, label: undoLabel, rebuild: true, noForce: true }); if (S.undo.length > 30) S.undo.shift(); }   // 戻したあとは並びから選び直す
+  if (undoLabel) { undoPush({ kind: 'set', prevs, label: undoLabel, rebuild: true, noForce: true }); }   // 戻したあとは並びから選び直す
   S.mainQ = null; scheduleSync();
   return picked.size;
 }
@@ -841,10 +841,10 @@ async function rate(g, byKey = false) {
   if (!checkModified(S.card)) return;
   S.busy = true; try { await rateInner(g); } finally { S.busy = false; }
 }
-async function rateInner(g) {
+async function rateInner(g, takenMs = null) {
   const prev = structuredClone(S.card);
   const maxMs = (presetOf(S.card.did).maxTaken || 60) * 1000;   // 解答時間の上限（デッキのオプション。既定 60 秒）
-  const taken = Math.min(maxMs, Math.round(performance.now() - S.shownAt)), at = Date.now(), fd = fdeckOf(S.card);
+  const taken = takenMs ?? Math.min(maxMs, Math.round(performance.now() - S.shownAt)), at = Date.now(), fd = fdeckOf(S.card);   // やり直すときは前の解答時間
   let res;
   if (fd && !fd.resched) {   // プレビュー（再スケジュールしないフィルターデッキ）: 元のデッキでの状態は変えない
     const ctx = ctxFor(S.card), t = timingToday(Math.floor(at / 1000), S.meta);
@@ -857,7 +857,7 @@ async function rateInner(g) {
   if (res.card.leeched && res.card.lapses !== prev.lapses) toast(c.queue === -1 ? '回答したカードは「leech」（苦戦、忘却多発）のカードです。 カードを休止しました' : '回答したカードは「leech」（苦戦、忘却多発）のカードです。');
   if (c.queue === 2 && S.lb && !fd && !fltOf(c)) lbAdd(S.lb, c.nid, S.decksById.get(c.did)?.conf, c.ivl); // 復習になったら負荷分散の数に足す（answer_card_inner。フィルターデッキで答えたときは足さない）
   const sibs = burySiblings(fltOf(prev) ? { ...prev, queue: fq(prev) } : prev);   // 兄弟を翌日まで埋める（元のデッキのプリセットの「兄弟を埋める」。フィルターデッキでは中での種類で）
-  S.undo.push({ prev, revlogId: res.revlog.id, sibs }); if (S.undo.length > 30) S.undo.shift(); // 続けて戻せるように（30回まで）
+  undoPush({ prev, revlogId: res.revlog.id, sibs }); // 続けて戻せるように（30回まで）
   await store.addOp({ t: 'ans', r: res.revlog, c: { id: c.id, st: pickState(c), rev: c.rev } });
   const base = lastRevIds(sibs.map(s => s.id));
   for (const s of sibs) { const x = S.byId.get(s.id); await store.addOp({ t: 'set', c: { id: x.id, st: pickState(x), rev: x.rev }, base: base.get(x.id) || 0 }); }
@@ -867,18 +867,47 @@ async function undoAnswer() {
   if (!S.undo.length || S.busy) return;
   S.busy = true; try { await undoInner(); } finally { S.busy = false; }
 }
+// 元に戻す／やり直すの積み方（30回まで）。新しい操作をしたら「やり直す」は消える（Anki と同じ）
+const REDO = []; let redoing = false;
+function undoPush(e) { S.undo.push(e); if (S.undo.length > 30) S.undo.shift(); if (!redoing) REDO.length = 0; }
+// ノート・デッキ・カードの状態の操作は「前の中身に戻す」の形なので、戻す前の中身を控えれば、それがそのまま逆向きの操作になる
+async function inverseOf(e) {
+  if (e.kind === 'note') return notes.inverse(e);
+  if (e.kind === 'deck') return deckOps.inverse(e);
+  return { ...e, prevs: e.prevs.map(p => structuredClone(S.byId.get(p.id))) };
+}
+async function revertEntry(e) {
+  if (e.kind === 'note') { await notes.undo(e); return; }   // ノートの追加・編集・削除
+  if (e.kind === 'deck') { await deckOps.undo(e); deckDone(); return; }   // デッキの作成・名前変更・削除
+  // 非表示・休止・フラグ・マーク・デッキを戻す（新しい時刻で前の状態を送る。デッキを動かしたカードは前のデッキも送る）
+  const now = Date.now(), base = lastRevIds(e.prevs.map(p => p.id));
+  for (const p of e.prevs) { const c = S.byId.get(p.id), moved = c.didSet; Object.assign(c, p); if (moved) c.didSet = true; c.rev = now; await store.addOp({ t: 'set', c: { id: c.id, st: pickState(c), rev: now }, base: base.get(c.id) || 0 }); }
+  if (e.rebuild) S.mainQ = null;
+  scheduleSync();
+}
+async function redoAction() {
+  if (S.busy) return;
+  const e = REDO[REDO.length - 1]; if (!e) { toast('やり直せる操作はありません'); return; }
+  if (e.kind === 'ans' && (document.body.dataset.view !== 'study' || S.card?.id !== e.cid)) { toast('やり直せません'); return; }   // 答えのやり直しは、戻したカードを出しているときだけ
+  S.busy = true; redoing = true;
+  try {
+    REDO.pop();
+    if (e.kind === 'ans') { await rateInner(e.ease, e.taken); return; }   // 同じボタン・同じ解答時間でもう一度答える
+    const inv = await inverseOf(e); await revertEntry(e); undoPush(inv);
+    toast(`やり直しました（${e.label}）`);
+    if (e.kind === 'set' && document.body.dataset.view === 'study') { if (S.card && S.byId.get(S.card.id)?.queue < 0) advance(); else paintMarks(); }
+  } finally { redoing = false; S.busy = false; }
+}
 async function undoInner() {
   const top = S.undo[S.undo.length - 1];
-  if (top.kind === 'note') { S.undo.pop(); await notes.undo(top); toast(`元に戻しました（${top.label}）`); return; }   // ノートの追加・編集・削除
-  if (top.kind === 'deck') { S.undo.pop(); await deckOps.undo(top); deckDone(); toast(`元に戻しました（${top.label}）`); return; }   // デッキの作成・名前変更・削除
-  if (top.kind === 'set') { // 非表示・休止・フラグ・マーク・デッキを戻す（新しい時刻で前の状態を送る。デッキを動かしたカードは前のデッキも送る）
-    S.undo.pop(); const now = Date.now();
-    const base = lastRevIds(top.prevs.map(p => p.id));
-    for (const p of top.prevs) { const c = S.byId.get(p.id), moved = c.didSet; Object.assign(c, p); if (moved) c.didSet = true; c.rev = now; await store.addOp({ t: 'set', c: { id: c.id, st: pickState(c), rev: now }, base: base.get(c.id) || 0 }); }
-    if (top.rebuild) S.mainQ = null;
-    toast(`元に戻しました（${top.label}）`); advance(top.noForce ? null : S.byId.get(top.prevs[0].id)); scheduleSync(); return;
+  if (top.kind === 'note' || top.kind === 'deck' || top.kind === 'set') {
+    S.undo.pop(); const inv = await inverseOf(top); await revertEntry(top); REDO.push(inv);
+    toast(`元に戻しました（${top.label}）`);
+    if (top.kind === 'set') advance(top.noForce ? null : S.byId.get(top.prevs[0].id));
+    return;
   }
   const { prev, revlogId, sibs = [] } = S.undo.pop();
+  const r0 = S.revlog.find(x => x.id === revlogId); if (r0) REDO.push({ kind: 'ans', cid: prev.id, ease: r0.ease, taken: r0.time });
   const c = S.byId.get(prev.id); Object.assign(c, prev); if (!prev.leeched) delete c.leeched; delRev(revlogId);
   await store.addOp({ t: 'undo', rid: revlogId, c: { id: c.id, st: pickState(c), rev: c.rev } });
   const now = Date.now(), base = lastRevIds(sibs.map(s => s.id));   // 答えと一緒に埋めた兄弟も戻す
@@ -918,7 +947,7 @@ async function changeCards(cards, fn, msg, name, next = true, rebuild = true) {
   try {
     const now = Date.now(), prevs = cards.map(c => structuredClone(c)), base = lastRevIds(cards.map(c => c.id));
     for (const c of cards) { fn(c); c.rev = now; await store.addOp({ t: 'set', c: { id: c.id, st: pickState(c), rev: now }, base: base.get(c.id) || 0 }); }
-    S.undo.push({ kind: 'set', prevs, label: name, rebuild }); if (S.undo.length > 30) S.undo.shift();
+    undoPush({ kind: 'set', prevs, label: name, rebuild });
     if (rebuild) S.mainQ = null;   // 非表示・休止・フラグは Anki でもキューを組み直す（マークはノートの変更なので組み直さない）
   } finally { S.busy = false; }
   toast(msg); scheduleSync();
@@ -1050,7 +1079,7 @@ function freshRevId() { let id = Date.now(); while (S.revIds.has(id)) id++; retu
 async function applyManual(prevCard, res, msg, quiet = false) {
   const c = S.byId.get(prevCard.id), prev = structuredClone(prevCard);
   Object.assign(c, res.card); c.rev = res.revlog.id; addRev(res.revlog);
-  S.undo.push({ prev, revlogId: res.revlog.id, sibs: [] }); if (S.undo.length > 30) S.undo.shift();
+  undoPush({ prev, revlogId: res.revlog.id, sibs: [] });
   await store.addOp({ t: 'ans', r: res.revlog, c: { id: c.id, st: pickState(c), rev: c.rev } });
   if (quiet) return;   // ブラウザでまとめてするとき（最後に一度だけ知らせる）
   toast(msg); S.mainQ = null; refreshCards(); if (document.body.dataset.view === 'study' && S.deck != null) advance(); scheduleSync();
@@ -1647,7 +1676,7 @@ function openCustom() {
 // 3つ目が null のものは、まだ写していない（一覧では薄く出して選べない）
 const ACTIONS = [
   ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => [`ua${n}`, `User Action ${n}`, null]),
-  ['redo', 'やり直す', null],
+  ['redo', 'やり直す', () => redoAction()],
   ['off', 'オフ', () => {}],
   ['options', 'オプション', () => { if (isFDeck(S.deck)) openFDeck(S.deck); else if (typeof S.deck === 'number') openAnkiPage('deck-options', 'オプション', S.deck); }],
   ['custom', 'カスタム学習', () => openCustom()],
@@ -1866,7 +1895,7 @@ function notesChanged(nids) {
 function setupNotes() {
   notes = createNotes({ S, store, MEDIA, loadNotes: () => loadNotes(S, BUNDLE), toast, iosAlert, isDark, isMarked,
     confirm: (title, message, o = {}) => iosPrompt({ title, message, ...o }).then(r => !!r),
-    pushUndo: e => { S.undo.push(e); if (S.undo.length > 30) S.undo.shift(); },
+    pushUndo: e => undoPush(e),
     changed: notesChanged, scheduleSync: () => scheduleSync(), nextNewPos, bumpNewPos,
     showPreview: (f, c) => previewInto(f, c),
     typing: t => { try { window.webkit?.messageHandlers?.sa?.postMessage({ typing: t }); } catch {} } });

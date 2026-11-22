@@ -189,6 +189,16 @@ export function createNotes(env) {
     if (recs.length) await commit(recs, { kind: 'note', label, items });
     return recs.reduce((n, r) => n + r.cards.length, 0);
   }
+  // やり直す用: 戻す前の中身を控えた、逆向きの記録（消してあるノートは null＝やり直すと消す）
+  async function inverse(entry) {
+    const items = [];
+    for (const { nid } of entry.items) {
+      const rec = S.noteRecs.get(nid);
+      if (rec?.eff === 'del' || !liveCards(nid).length) { items.push({ nid, prev: null }); continue; }
+      const c0 = await content(nid); items.push({ nid, prev: c0 ? { ...c0, did: rec?.did ?? liveCards(nid)[0]?.did ?? 1 } : null });
+    }
+    return { ...entry, items };
+  }
   // 元に戻す: 追加は消す、編集は前の中身に、削除は消す前の中身に戻す（どれも新しい rev で送る）。編集で増えたカードは残る（Anki と違う）
   async function undo(entry) {
     const recs = [];
@@ -414,5 +424,5 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
     const n = await deleteNotes(nids, 'ノートを削除する');
     if (n) env.toast(`${nids.length}件のノートを削除しました（カード${n}枚）`);
   }
-  return { ready, apply, reset, openAdd, openEdit, deleteFrom, deleteBrowse, undo, bulkEdit, isOpen: () => !!ed, close, element: build };
+  return { ready, apply, reset, openAdd, openEdit, deleteFrom, deleteBrowse, undo, inverse, bulkEdit, isOpen: () => !!ed, close, element: build };
 }

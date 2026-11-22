@@ -163,6 +163,10 @@ export function createDecks(env) {
     return rows;
   }
   // 元に戻す: 前の記録の中身を、新しい rev で書き直す（前に記録が無ければ、束の名前に戻す・作ったデッキなら消す）
+  // やり直す用: 戻す前の記録を控えた、逆向きの操作
+  function inverse(entry) {
+    return { ...entry, items: entry.items.map(x => x.fdeck != null ? { fdeck: x.fdeck, prev: env.fdecks().find(f => f.id === x.fdeck)?.name ?? x.prev } : { did: x.did, prev: recs.has(x.did) ? structuredClone(recs.get(x.did)) : null }) };
+  }
   async function undo(entry) {
     const rev = rev0(entry.items.filter(x => x.did != null).map(x => x.did)), rows = [];
     for (const { did, prev, fdeck } of entry.items) {
@@ -211,7 +215,7 @@ export function createDecks(env) {
     if (S.lastDeck != null && S.decksById.get(S.lastDeck)?.gone) S.lastDeck = 1;   // 今のデッキを消したら既定のデッキ（フィルターデッキの id はそのまま）
     env.done(`デッキ「${d.name}」（カード${n}枚）を削除しました`);
   }
-  return { reset, applyRows, rebuild, hides, create, rename, remove, undo, recs, base };
+  return { reset, applyRows, rebuild, hides, create, rename, remove, undo, inverse, recs, base };
 }
 
 // ---------- デッキの一覧の行を左へスワイプ（iOS の表と同じ）: 右から「エクスポート」「名前変更」「削除」が出る ----------
