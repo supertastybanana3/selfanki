@@ -202,10 +202,16 @@ export function createNtScreen(env) {
     st.orig = JSON.stringify(st.work);
     env.toast(tr.saved); hide();
   }
+  // 前の形にあって新しい形に無いフィールド・カードの種類（＝端末で消したもの）。アドオンはこれだけを Anki から消す（端末が知らなかったものは残す）
+  const removedOf = (prev, next) => {
+    const gone = (a, b) => { const ids = new Set(b.map(x => x.x?.id).filter(Boolean)), names = new Set(b.map(x => x.name)); return a.filter(x => (x.x?.id ? !ids.has(x.x.id) : !names.has(x.name))).map(x => ({ id: x.x?.id ? String(x.x.id) : null, name: x.name })); };
+    return { fields: gone(prev.fields || [], next.fields || []), templates: gone(prev.templates || [], next.templates || []) };
+  };
   async function commitNt(mid, w, plan, prevNt, label) {
     const prevCopy = clone(prevNt);
     const { rev: _r, ...body } = w;
-    await env.commitConf([{ k: 'nt:' + mid, v: ntTo11(mid, body), rev: Math.max(Date.now(), (prevNt.rev || 0) + 1) }]);
+    const v = ntTo11(mid, body); v.saRemoved = removedOf(prevNt, w);
+    await env.commitConf([{ k: 'nt:' + mid, v, rev: Math.max(Date.now(), (prevNt.rev || 0) + 1) }]);
     const items = await notes.notetypeEdited(mid, plan);
     await notes.rerender([mid]);
     env.pushUndo({ kind: 'nt', label, mid, prevNt: prevCopy, items });
@@ -214,7 +220,8 @@ export function createNtScreen(env) {
   // 元に戻す／やり直す（app.mjs の revertEntry から）: ノートタイプを前のものに戻し、書き換えたノートを前の中身とカードに戻す
   async function revert(e) {
     const cur = S.meta.notetypes[e.mid], { rev: _r, ...body } = e.prevNt;
-    await env.commitConf([{ k: 'nt:' + e.mid, v: ntTo11(e.mid, body), rev: Math.max(Date.now(), (cur?.rev || 0) + 1) }]);
+    const v = ntTo11(e.mid, body); v.saRemoved = removedOf(cur || {}, e.prevNt);   // 元に戻す: 戻したときに無くなるもの（端末で足したもの）だけを消す
+    await env.commitConf([{ k: 'nt:' + e.mid, v, rev: Math.max(Date.now(), (cur?.rev || 0) + 1) }]);
     if (e.items.length) await notes.undo({ items: e.items });
     await notes.rerender([e.mid]);
     env.changed();

@@ -98,7 +98,8 @@ def server_view(srv):
         for row in j.get('notes', []):
             (id_, mid, flds, tags, did, ncards, rev, src, dl, added, seq) = row[:11]
             notes[id_] = {'id': id_, 'mid': mid, 'flds': json.loads(flds), 'tags': tags, 'did': did, 'cards': json.loads(ncards), 'rev': rev, 'src': src, 'del': dl, 'added': added,
-                          'guid': row[11] if len(row) > 11 else None, 'imp': row[12] if len(row) > 12 else 0}
+                          'guid': row[11] if len(row) > 11 else None, 'imp': row[12] if len(row) > 12 else 0,
+                          'fn': json.loads(row[13]) if len(row) > 13 and row[13] else None}   # fn＝flds の並びのフィールド名（名前で合わせる）
             ns, ni = seq, id_
         conf = j.get('conf', [])
         if not j['more']: break
@@ -249,7 +250,7 @@ def _ensure_parents(col, name):
         if not col.decks.id_for_name(p): col.decks.id(p)
 
 
-def apply_decks(col, srv, recs, log, dry=False, mods0=None):
+def apply_decks(col, srv, recs, log, dry=False, mods0=None, allow_destructive=False, removals=None):
     """暗記の端末で作った・名前を変えた・消したデッキを Anki に書く。決まりは「新しいほう」＝端末の記録の rev と Anki のデッキの mod（秒）。
       消した   … Anki のデッキより新しければ col.decks.remove（子のデッキ・カード・カードが無くなったノートも消える。Anki の「デッキを削除」と同じ）
                   既定のデッキ（id 1）は消えずに、そのとき入っていたカード（id < cleared）が消え、名前が「デフォルト」に戻る（rslib remove_single_deck）
@@ -269,25 +270,21 @@ def apply_decks(col, srv, recs, log, dry=False, mods0=None):
         v = {kk: vv for kk, vv in r['v'].items() if kk in ('created', 'cleared')}; v['name'] = name
         push[did] = {'t': 'conf', 'src': 'anki', 'k': f'dname:{did}', 'v': v, 'rev': max(now, r['rev'] + 1)}
 
-    # 1. 消す（先に消して名前を空ける。端末で同じ名前のデッキを作り直した・別のデッキをその名前にした、に備える）
+    # 1. 消すデッキ: ここでは消さずに、仮の名前にして名前を空けるだけ（端末で同じ名前のデッキを作り直した・別のデッキをその名前にした、に備える）。
+    #    カードを消すのは、ノートとカードの状態を書き終えたあと（apply_deck_removals）。端末で別のデッキへ移したカードを先に移すため。
+    #    消すのは端末が知っていたカードだけ（束を作ったあとに Anki で足したカードなどは消さない）。消すのは allow_destructive のときだけ
     rm = []
     for did, r in recs.items():
         v = r['v']; d = anki.get(did)
         if did == 1 and v.get('cleared'):
-            cids = col.db.list('select id from cards where (did = 1 or odid = 1) and id < ?', v['cleared'])
-            if cids:
-                n['cards_removed'] += len(cids)
-                if not dry: col.remove_cards_and_orphaned_notes(cids)
-            if d is not None: back(did, r, d['name'])   # 一度だけ（src='anki' にして、あとで既定のデッキに移したカードを消さない）。名前を変えたら下で返し直す
+            if removals is not None: removals.append({'did': 1, 'cleared': v['cleared'], 'r': r})
+            continue
         if not v.get('removed') or d is None or did == 1: continue
-        if newer(did, r): rm.append(did)
+        if newer(did, r) or d['name'].startswith(TMP): rm.append(did)   # 仮の名前のまま残っている＝前の同期で消す途中だった
         else: n['anki_newer'] += 1; back(did, r, d['name'])
-    if rm:
-        if dry: n['removed'] += len(rm)
-        else:
-            alive = [x for x in rm if col.decks.get(x, default=False)]
-            if alive: n['cards_removed'] += col.decks.remove(alive).count
-            n['removed'] += len(rm)
+    for did in rm:
+        if removals is not None: removals.append({'did': did, 'name': recs[did]['v'].get('name') or anki[did]['name'], 'r': recs[did]})
+        if allow_destructive and not dry and not anki[did]['name'].startswith(TMP): col.decks.rename(did, f'{TMP}{did}')
     if not dry: anki = {d['id']: d for d in col.decks.all()}
 
     # 2. 作る・名前を変える（親から順に。行き先の名前を、これから名前を変えるデッキが使っていたら、そちらを先に）
@@ -310,7 +307,18 @@ def apply_decks(col, srv, recs, log, dry=False, mods0=None):
         n['created'] += sum(1 for t in todo if t[3] == 'create'); n['renamed'] += sum(1 for t in todo if t[3] == 'rename')
         return n
     fold = lambda x: x.casefold()
+    rounds, limit = 0, 4 * len(todo) + 8   # 行き詰まり（親子と名前の取り合いが解けない）で回り続けないように
     while todo:
+        rounds += 1
+        if rounds > limit:
+            log('デッキの名前を書ききれなかった（端末の名前の付け替えが、Anki の上で解けない組み合わせ）', [(t[1], t[3]) for t in todo][:5])
+            for t in todo:   # 仮の名前のまま残ったものは、元の名前（無理なら印つき）に戻す
+                cur = col.decks.get(t[0], default=False)
+                if cur and cur['name'].startswith(TMP):
+                    back_name = t[1] if not col.decks.id_for_name(t[1]) else f'{t[1]}（暗記の名前を書けなかった）'
+                    try: col.decks.rename(t[0], back_name)
+                    except Exception as e: log('元の名前に戻せなかった', t[0], repr(e)[:120])
+            break
         done_any = False
         for t in list(todo):
             did, want, r, kind = t
@@ -330,8 +338,11 @@ def apply_decks(col, srv, recs, log, dry=False, mods0=None):
             got = col.decks.get(did)['name']
             if got != r['v']['name']: back(did, r, got)
             todo.remove(t); done_any = True
-        if todo and not done_any:   # 取り替え（A→B と B→A）: 1つをいったん仮の名前にする
-            t = next((u for u in todo if u[3] == 'rename'), todo[0])
+        if todo and not done_any:   # 行き詰まり（A→B と B→A の取り替え、A→X と X→X::y など）: ほかの行き先の名前をふさいでいるデッキを、いったん仮の名前にする
+            names_now = {x.id: x.name for x in col.decks.all_names_and_ids()}
+            t = next((u for u in todo if u[3] == 'rename' and not names_now.get(u[0], '').startswith(TMP)
+                      and any(fold(names_now.get(u[0], '')) == fold(v[1]) for v in todo if v is not u)), None) \
+                or next((u for u in todo if u[3] == 'rename' and not names_now.get(u[0], '').startswith(TMP)), todo[0])
             if t[3] == 'rename': col.decks.rename(t[0], f'{TMP}{t[0]}')
             else: break
     for did in list(push):   # 返すのは書き終えたあとの Anki の名前。消したデッキの子だったなどで、もう無いデッキへは返さない
@@ -341,6 +352,52 @@ def apply_decks(col, srv, recs, log, dry=False, mods0=None):
     if n['created'] or n['renamed'] or n['removed'] or n['cards_removed']: col.db.execute('update col set mod = ?', now)   # AnkiWeb との同期で上がるように
     if push: srv.push(list(push.values()))
     if any(n.values()): log('デッキ', n)
+    return n
+
+
+
+def apply_deck_removals(col, srv, removals, known, log, dry=False, allow_destructive=False):
+    """端末で消したデッキを、ノートとカードの状態を書いたあとで Anki から消す（apply_decks の続き）。
+    消すのは端末が知っていたカード（known）だけ。デッキ（子も）にほかのカードが残れば、デッキは消さずに元の名前に戻し、端末へもまだあることを返す。
+    既定のデッキ（id 1）は、消したときに入っていた（id < cleared）知っていたカードだけを消す。
+    allow_destructive でなければ何も消さず、消える数だけを数える（pending_*）"""
+    n = {'removed': 0, 'cards_removed': 0, 'kept': 0, 'pending_decks': 0, 'pending_cards': 0, 'names': []}
+    if not removals: return n
+    now = int(time.time() * 1000); push = []
+    for x in removals:
+        did, r = x['did'], x['r']
+        if did == 1:
+            cids = [c for c in col.db.list('select id from cards where (did = 1 or odid = 1) and id < ?', x['cleared']) if c in known]
+            if not allow_destructive or dry:
+                if cids: n['pending_cards'] += len(cids); n['names'].append(col.decks.name(1))
+                continue
+            if cids: col.remove_cards_and_orphaned_notes(cids); n['cards_removed'] += len(cids)
+            d = col.decks.get(1, default=False)
+            if d:   # 一度だけ（src='anki' にして、あとで既定のデッキに移したカードを消さない）
+                v = {kk: vv for kk, vv in r['v'].items() if kk in ('created', 'cleared')}; v['name'] = d['name']
+                push.append({'t': 'conf', 'src': 'anki', 'k': 'dname:1', 'v': v, 'rev': max(now, r['rev'] + 1)})
+            continue
+        if not col.decks.get(did, default=False): continue
+        name = col.decks.name(did)
+        ids = [did] + [y.id for y in col.decks.all_names_and_ids() if y.name.startswith(name + '::')]
+        q = ','.join(str(int(i)) for i in ids)
+        allc = col.db.list(f'select id from cards where did in ({q}) or odid in ({q})')
+        kc = [c for c in allc if c in known]
+        if not allow_destructive or dry:
+            n['pending_decks'] += 1; n['pending_cards'] += len(kc); n['names'].append(x['name']); continue
+        if kc: col.remove_cards_and_orphaned_notes(kc); n['cards_removed'] += len(kc)
+        rest = col.db.scalar(f'select count() from cards where did in ({q}) or odid in ({q})')
+        if rest == 0:
+            col.decks.remove([did]); n['removed'] += 1
+        else:   # 端末が知らないカード（束のあとに Anki で足した・移したなど）が残った: デッキは消さず、元の名前に戻す
+            want = x['name']
+            if col.decks.id_for_name(want) not in (None, did): want = f'{want}（暗記で消したデッキの残り）'
+            col.decks.rename(did, want); n['kept'] += 1
+            log(f'デッキ「{x["name"]}」には端末が知らないカードが {rest} 枚あるので、デッキは消さずに残した')
+            push.append({'t': 'conf', 'src': 'anki', 'k': f'dname:{did}', 'v': {'name': col.decks.name(did)}, 'rev': max(now, r['rev'] + 1)})
+    if n['removed'] or n['cards_removed'] or n['kept']: col.db.execute('update col set mod = ?', now)
+    if push and not dry: srv.push(push)
+    if any(v for k, v in n.items() if k != 'names'): log('デッキの削除', n)
     return n
 
 
@@ -385,10 +442,16 @@ def apply_notetypes(col, srv, conf_rows, log, dry=False, snotes=None, allow_sche
         if cur is None:
             if dry: n['added'] += 1; continue
             m['id'] = 0; m['usn'] = -1
-            got = col.models.add_dict(m).id
+            try: got = col.models.add_dict(m).id
+            except Exception as e:   # Anki が受け付けなかった: このノートタイプのノートも書かない（ほかのノートタイプは続ける）
+                log('ノートタイプを足せなかった（Anki が受け付けなかった）', ntid, repr(e)[:200]); n['skipped'] += 1
+                if held is not None: held.add(ntid)
+                continue
             if got != ntid:
                 if col.db.scalar('select count() from notetypes where id = ?', ntid):
-                    log('ノートタイプの id が Anki のほかのものと重なったので、付け替えなかった', ntid); n['skipped'] += 1; continue
+                    log('ノートタイプの id が Anki のほかのものと重なったので、付け替えなかった', ntid); n['skipped'] += 1
+                    if held is not None: held.add(ntid)
+                    continue
                 col.db.execute('update notetypes set id = ? where id = ?', ntid, got)
                 col.db.execute('update fields set ntid = ? where ntid = ?', ntid, got)
                 col.db.execute('update templates set ntid = ? where ntid = ?', ntid, got)
@@ -399,6 +462,17 @@ def apply_notetypes(col, srv, conf_rows, log, dry=False, snotes=None, allow_sche
         if rev <= (cur.get('mod') or 0) * 1000: continue
         wf, wt = m.get('flds') or [], m.get('tmpls') or []
         fmap, tmap = _match(cur['flds'], wf), _match(cur['tmpls'], wt)
+        # Anki にあって端末の記録に無いフィールド・カードの種類: 端末で消したと明示されたもの（saRemoved。id か、id が無ければ名前）だけを消す。
+        # ほかは端末が知らなかったもの（束を作ったあとに Anki で足したなど）なので、残す（中身もカードもそのまま。並びは後ろ）
+        rmd = m.get('saRemoved') or {}
+        def intended(x, lst):
+            xid = str(x.get('id')) if x.get('id') is not None else None
+            return any((str(r.get('id')) == xid) if (r.get('id') and xid) else (r.get('name') == x.get('name')) for r in (lst or []))
+        keep_f = [j for j in range(len(cur['flds'])) if j not in fmap and not intended(cur['flds'][j], rmd.get('fields'))]
+        keep_t = [j for j in range(len(cur['tmpls'])) if j not in tmap and not intended(cur['tmpls'][j], rmd.get('templates'))]
+        if keep_f or keep_t: log('端末が知らなかったフィールド・カードの種類は残す', cur['name'], [cur['flds'][j]['name'] for j in keep_f], [cur['tmpls'][j]['name'] for j in keep_t])
+        if keep_f: wf = list(wf) + [dict(cur['flds'][j]) for j in keep_f]; fmap = list(fmap) + keep_f
+        if keep_t: wt = list(wt) + [dict(cur['tmpls'][j]) for j in keep_t]; tmap = list(tmap) + keep_t
         sortf = m.get('sortf', cur.get('sortf', 0)) or 0
         old_sort = fmap[sortf] if 0 <= sortf < len(fmap) and fmap[sortf] is not None else sortf
         structural = fmap != list(range(len(cur['flds']))) or tmap != list(range(len(cur['tmpls']))) or old_sort != (cur.get('sortf') or 0)
@@ -406,6 +480,15 @@ def apply_notetypes(col, srv, conf_rows, log, dry=False, snotes=None, allow_sche
         if structural and not allow_schema:
             n['schema_pending'] += 1
             if held is not None: held.add(ntid)   # このノートタイプのノートも書かない（端末の記録は新しい並びなので、古い並びの Anki に書くと崩れる）
+            # 何が変わるか（アドオンが確かめるときに見せる）: 消えるフィールド（中身のあるノートの数）・消えるカードの種類（カードの数）
+            det = n.setdefault('schema_detail', [])
+            for j in sorted(set(range(len(cur['flds']))) - {x for x in fmap if x is not None}):
+                full = sum(1 for (fl,) in col.db.all('select flds from notes where mid = ?', ntid) if (fl.split('\x1f') + [''] * 99)[j].strip())
+                det.append(f'「{cur["name"]}」のフィールド「{cur["flds"][j]["name"]}」を消す（中身のあるノート {full} 件）')
+            for j in sorted(set(range(len(cur['tmpls']))) - {x for x in tmap if x is not None}):
+                nc = col.db.scalar('select count() from cards c join notes n on c.nid = n.id where n.mid = ? and c.ord = ?', ntid, j)
+                det.append(f'「{cur["name"]}」のカードの種類「{cur["tmpls"][j]["name"]}」を消す（カード {nc} 枚）')
+            if not det or not det[-1].startswith(f'「{cur["name"]}」'): det.append(f'「{cur["name"]}」のフィールド・カードの種類の並びを変える')
             continue
         if dry: n['updated'] += 1; continue
         new = dict(cur)
@@ -428,7 +511,10 @@ def apply_notetypes(col, srv, conf_rows, log, dry=False, snotes=None, allow_sche
         mods = dict(col.db.all('select id, mod from notes where mid = ?', ntid))
         before = set(col.db.list('select c.id from cards c join notes n on c.nid = n.id where n.mid = ?', ntid))
         try: col.models.update_dict(new)
-        except Exception as e: log('ノートタイプを書けなかった（Anki が受け付けなかった）', ntid, repr(e)[:200]); n['skipped'] += 1; continue
+        except Exception as e:
+            log('ノートタイプを書けなかった（Anki が受け付けなかった）', ntid, repr(e)[:200]); n['skipped'] += 1
+            if held is not None: held.add(ntid)   # このノートタイプのノートも書かない（新しい並びのノートを古い並びの Anki に書かないように）
+            continue
         n['updated'] += 1
         if generated is not None: generated.update(set(col.db.list('select c.id from cards c join notes n on c.nid = n.id where n.mid = ?', ntid)) - before)
         # 端末で書き換えたノート（並べ替えたフィールド・増えた・消えたカード）を、Anki の結果にそろえる
@@ -436,7 +522,9 @@ def apply_notetypes(col, srv, conf_rows, log, dry=False, snotes=None, allow_sche
             if rec['mid'] != ntid or rec['del'] or rec['id'] not in mods: continue
             if rec['rev'] > mods[rec['id']] * 1000:
                 note = col.get_note(rec['id'])
-                for i in range(len(note.fields)): note.fields[i] = rec['flds'][i] if i < len(rec['flds']) else ''
+                vals = fields_for(note, rec, log)
+                if vals is None: continue
+                for i, v in enumerate(vals): note.fields[i] = v
                 note.tags = rec['tags'].split()
                 col.update_note(note, skip_undo_entry=True)
                 _fix_cards(col, rec, before, log)
@@ -476,15 +564,21 @@ def _change_notetype(col, rec, log, fresh=None, generated=frozenset()):
     before = set(col.db.list('select id from cards where nid = ?', rec['id'])) - set(generated)   # この同期でノートタイプを書いたときに Anki が作ったカードは、端末の id にそろえる側に
     col.models.change_notetype_of_notes(req)
     note = col.get_note(rec['id'])
-    for i in range(len(note.fields)): note.fields[i] = rec['flds'][i] if i < len(rec['flds']) else ''
+    vals = fields_for(note, rec, log)   # 合わせられなければ、Anki が対応づけた中身のまま
+    if vals is not None:
+        for i, v in enumerate(vals): note.fields[i] = v
     note.tags = rec['tags'].split()
     col.update_note(note, skip_undo_entry=True)
     _fix_cards(col, rec, before, log, fresh)
     return True
 
 
+_WIN_RESERVED = {'con', 'prn', 'aux', 'nul', *(f'com{i}' for i in range(1, 10)), *(f'lpt{i}' for i in range(1, 10))}
 def _safe_media(name):
-    return isinstance(name, str) and name and '/' not in name and '\\' not in name and name not in ('.', '..') and not name.startswith('.') and '\0' not in name
+    # / \ と、Windows でドライブや別のストリームを指す : と、使えない文字 < > " | ? *・制御文字・末尾の点と空白・予約名（CON など）を通さない
+    return (isinstance(name, str) and name and name not in ('.', '..') and not name.startswith('.') and not name.endswith(('.', ' '))
+            and not any(ch in name for ch in '/\\:<>"|?*') and not any(ord(ch) < 32 for ch in name)
+            and name.split('.')[0].strip().lower() not in _WIN_RESERVED)
 
 
 def download_media(col, srv, log, dry=False):
@@ -522,8 +616,28 @@ def check_profile(col, scards, notes):
         raise SyncError(f'このプロファイルには、暗記のカード {len(ids)} 枚のうち {len(ids & have)} 枚しかありません。別のプロファイルか、別の暗記につないでいるようです。止めました。')
 
 
+_NT_NAMES = {}   # 端末のノートタイプの記録（conf の nt:<id>）のフィールドの並び。記録に名前（fn）が無いときに使う（run() が入れる）
+
+
+def fields_for(note, rec, log):
+    """端末の記録のフィールドを、Anki のノートタイプのフィールドへ名前で合わせる（fn があるとき）。端末が知らないフィールド（Anki で足した）は今の中身のまま。
+    fn の無い古い記録は、数が同じなら並びどおり、違えば合わせられない（None＝書かない。並びどおりに書くと、足したフィールドが空になったり中身が入れ替わったりする）"""
+    names = [f['name'] for f in note.note_type()['flds']]
+    vals, fn = rec['flds'], rec.get('fn')
+    if not fn and len(_NT_NAMES.get(rec['mid']) or []) == len(vals): fn = _NT_NAMES[rec['mid']]   # 名前の無い古い記録でも、端末でノートタイプを直したなら、その並び
+    if fn and len(fn) == len(vals):
+        m = dict(zip(fn, vals))
+        lost = [k for k in fn if k not in names and str(m.get(k, '')).strip()]
+        if lost: log('Anki のノートタイプに無いフィールドの中身は書かなかった', rec['id'], lost[:3])
+        return [m[nm] if nm in m else note.fields[i] for i, nm in enumerate(names)]
+    if len(vals) == len(names): return list(vals)
+    log('フィールドの数が Anki と違う（名前の無い古い記録）ので、このノートは書かなかった', rec['id'], len(vals), len(names))
+    return None
+
+
 def note_wire(rec, **kw):
     out = {k: rec[k] for k in ('id', 'mid', 'flds', 'tags', 'did', 'cards', 'rev', 'del', 'added')}
+    if rec.get('fn'): out['fn'] = rec['fn']
     if rec.get('guid'): out['guid'] = rec['guid']
     if rec.get('imp'): out['imp'] = 1
     return {**out, **kw}
@@ -549,8 +663,11 @@ def _fix_cards(col, rec, before, log, fresh=None):
         have.add(ord_)
         if fresh is not None: fresh.add(new_id)
     now = int(time.time())
+    nt = col.get_note(rec['id']).note_type(); ntmpl = len(nt['tmpls']); cloze = nt.get('type') == 1
     for ord_, (cid, did, due) in want.items():
         if ord_ in have or col.db.scalar('select count() from cards where id = ?', cid): continue
+        if (not cloze and not (0 <= ord_ < ntmpl)) or (cloze and not (0 <= ord_ < 500)):   # Anki のノートタイプに無いカードの種類（Anki でテンプレートを消したなど）
+            log('Anki のノートタイプに無いカードの種類なので、作らなかった', rec['id'], ord_); continue
         col.db.execute("insert into cards (id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data) values (?, ?, ?, ?, ?, -1, 0, 0, ?, 0, 0, 0, 0, 0, 0, 0, 0, '')",
                        cid, rec['id'], did if col.decks.get(did, default=False) else 1, ord_, now, due)
         if fresh is not None: fresh.add(cid)
@@ -566,7 +683,9 @@ def _add_note(col, rec, log, gone=_no, fresh=None):
     if col.db.scalar('select count() from notes where id = ?', rec['id']) or any(col.db.scalar('select count() from cards where id = ?', c[0]) for c in rec['cards']):
         log('ノートかカードの id が Anki のほかのものと重なったので、足せなかった', rec['id']); return False
     note = col.new_note(m)
-    for i in range(len(note.fields)): note.fields[i] = rec['flds'][i] if i < len(rec['flds']) else ''
+    vals = fields_for(note, rec, log)
+    if vals is None: return False
+    for i, v in enumerate(vals): note.fields[i] = v
     note.tags = rec['tags'].split()
     if rec.get('guid'): note.guid = rec['guid']
     col.add_note(note, rec['did'] if col.decks.get(rec['did'], default=False) else 1)
@@ -585,7 +704,9 @@ def _update_note(col, rec, log, fresh=None, allow_schema=False, generated=frozen
         if not allow_schema: return 'pending'
         return _change_notetype(col, rec, log, fresh, generated)
     before = set(col.db.list('select id from cards where nid = ?', rec['id']))
-    for i in range(len(note.fields)): note.fields[i] = rec['flds'][i] if i < len(rec['flds']) else ''
+    vals = fields_for(note, rec, log)
+    if vals is None: return False
+    for i, v in enumerate(vals): note.fields[i] = v
     note.tags = rec['tags'].split()
     col.update_note(note, skip_undo_entry=True)
     _fix_cards(col, rec, before, log, fresh)
@@ -595,16 +716,19 @@ def _update_note(col, rec, log, fresh=None, allow_schema=False, generated=frozen
 def _written(col, rec):
     """Anki に書いたあとの中身（Anki がそろえたタグなど）を、src='anki' で送り返す。rev は Anki のノートの mod 以上にする（配り直した束と同じ新しさ）"""
     note = col.get_note(rec['id'])
-    return note_wire(rec, flds=list(note.fields), tags=' '.join(note.tags), rev=max(rec['rev'], note.mod * 1000), **{'del': 0})
+    return note_wire(rec, flds=list(note.fields), fn=[f['name'] for f in note.note_type()['flds']], tags=' '.join(note.tags), rev=max(rec['rev'], note.mod * 1000), **{'del': 0})
 
 
-def apply_notes(col, srv, notes, log, dry=False, gone=_no, fresh=None, allow_schema=False, mods0=None, skip=(), generated=frozenset(), held=frozenset()):
+def apply_notes(col, srv, notes, log, dry=False, gone=_no, fresh=None, allow_schema=False, mods0=None, skip=(), generated=frozenset(), held=frozenset(), allow_destructive=False, readd_missing=False):
     """暗記の端末で追加・編集・削除したノート（サーバーの notes）を Anki に書く。決まりは「新しいほう」＝端末の記録の rev と Anki のノートの mod（秒）。
       消した   … Anki のノートより新しければ消す
       Anki に無い … 端末で作ったノートなら足す（id を合わせる）。Anki に入れたことがある・前から Anki にあったノートなら、Anki で消したので端末でも消す
       Anki にある … 端末の記録のほうが新しければ、フィールドとタグを書く（増えるカードの id を合わせる）。Anki のほうが新しければ書かない
     カードの状態を比べる前に呼ぶ（端末で作ったカードを先に Anki に入れておくため）"""
-    n = {'added': 0, 'updated': 0, 'removed': 0, 'gone_in_anki': 0, 'anki_newer': 0, 'skipped': 0, 'in_removed_deck': 0, 'schema_pending': 0, 'held': 0}
+    n = {'added': 0, 'updated': 0, 'removed': 0, 'gone_in_anki': 0, 'anki_newer': 0, 'skipped': 0, 'in_removed_deck': 0, 'schema_pending': 0, 'held': 0,
+         'pending_removed': 0, 'pending_gone': 0, 'readded': 0}
+    # 消す（端末で消したノートを Anki でも）・Anki で消されたとみなす（Anki に無いノートを端末からも）は、allow_destructive のときだけ。
+    # そうでなければ数えるだけ（アドオンが数を見せて聞いてから、もう一度呼ぶ）。readd_missing なら Anki に無いノートを端末の記録から入れ直す（バックアップから戻したとき）
     if not notes: return n
     ids = list(notes); amod = {}
     for i in range(0, len(ids), 500):
@@ -618,8 +742,8 @@ def apply_notes(col, srv, notes, log, dry=False, gone=_no, fresh=None, allow_sch
         if held and (rec['mid'] in held or (mod is not None and col.db.scalar('select mid from notes where id = ?', nid) in held)): n['held'] += 1; continue   # ノートタイプの並びの変更を待っている
         if rec['del']:
             if mod is not None and rec['rev'] > mod * 1000:
-                if not dry: col.remove_notes([nid])
-                n['removed'] += 1
+                if allow_destructive and not dry: col.remove_notes([nid]); n['removed'] += 1
+                else: n['pending_removed'] += 1
             continue
         if mod is None:
             if rec['added'] and rec['src'] != 'anki' and rec['cards'] and all(gone(c[0], c[2]) for c in rec['cards']):
@@ -628,10 +752,18 @@ def apply_notes(col, srv, notes, log, dry=False, gone=_no, fresh=None, allow_sch
                 if dry: n['added'] += 1
                 elif _add_note(col, rec, log, gone, fresh): n['added'] += 1; push.append(_written(col, rec))
                 else: n['skipped'] += 1
-            else:
+            elif readd_missing and not dry and rec['cards']:
+                if _add_note(col, rec, log, gone, fresh): n['readded'] += 1; push.append(_written(col, rec))
+                else: n['skipped'] += 1
+            elif allow_destructive and not dry:
                 n['gone_in_anki'] += 1
-                if not dry: push.append(note_wire(rec, rev=max(now, rec['rev'] + 1), **{'del': 1}))
+                push.append(note_wire(rec, rev=max(now, rec['rev'] + 1), **{'del': 1}))
+            else: n['pending_gone'] += 1
             continue
+        if rec['rev'] > mod * 1000 and rec.get('imp') and rec.get('guid'):
+            g = col.db.scalar('select guid from notes where id = ?', nid)
+            if g and g != rec['guid']:   # 端末で .apkg から読み込んだノートの id が、Anki の別のノートと重なった（端末が知らないノート）。上書きしない
+                log('読み込んだノートの id が Anki の別のノート（guid が違う）と重なったので、書かなかった', nid); n['skipped'] += 1; continue
         if rec['rev'] > mod * 1000:
             if dry:
                 if col.db.scalar('select mid from notes where id = ?', nid) != rec['mid'] and not allow_schema: n['schema_pending'] += 1
@@ -642,7 +774,7 @@ def apply_notes(col, srv, notes, log, dry=False, gone=_no, fresh=None, allow_sch
             elif r: n['updated'] += 1; push.append(_written(col, rec))
             else: n['skipped'] += 1
         elif rec['src'] == 'app': n['anki_newer'] += 1
-    if not dry and (n['added'] or n['updated'] or n['removed']): col.db.execute('update col set mod = ?', now)   # AnkiWeb との同期で上がるように
+    if not dry and (n['added'] or n['updated'] or n['removed'] or n['readded']): col.db.execute('update col set mod = ?', now)   # AnkiWeb との同期で上がるように
     if push and not dry: srv.push([{'t': 'note', 'src': 'anki', 'n': p} for p in push])
     if any(n.values()): log('ノート', n)
     return n
@@ -697,17 +829,26 @@ def apply_conf(col, srv, conf_rows, log, dry=False, mods0=None):
     return n
 
 
-def run(col, site_url, token, dry=False, log=print, allow_schema=False):
+def run(col, site_url, token, dry=False, log=print, allow_schema=False, allow_destructive=False, readd_missing=False):
     """同期を1回する。dry なら数えるだけ（何も書かない）。結果の数を返す。
     allow_schema: 端末で並び・数を変えたノートタイプ・ノートタイプを変えたノートを Anki に書く（Anki ではスキーマの変更＝次の AnkiWeb 同期が一方向）。
-    False なら書かずに summary['schema_pending'] に数える（アドオンは Anki の確認の文言で聞いてから True でもう一度呼ぶ）"""
+    False なら書かずに summary['schema_pending'] に数える（アドオンは何が変わるかを見せて聞いてから True でもう一度呼ぶ）
+    allow_destructive: 消す操作（端末で消したデッキのカード・ノートを Anki でも消す、Anki に無いノートを端末からも消す）をする。
+    False なら消さずに summary['pending'] に数える（アドオンは数を見せて聞いてから True でもう一度呼ぶ。自動の同期では聞かずに知らせるだけ）。
+    readd_missing: Anki に無いノートを、端末の記録から Anki に入れ直す（Anki をバックアップから戻したあとなど）"""
     t0 = time.time()
     srv = Server(site_url, token)
     scards, srevs, conf_rows, snotes = server_view(srv)
+    _NT_NAMES.clear()
+    for k, v, _rev, src, _ in conf_rows:
+        if k.startswith('nt:') and src != 'anki':
+            try: _NT_NAMES[int(k[3:])] = [f['name'] for f in (json.loads(v).get('flds') or [])]
+            except Exception: pass
     check_profile(col, scards, snotes)   # 何も書く前に、別のプロファイルにつないでいないか
     # デッキ → ノートの順に書く（端末で作ったデッキに端末で足したノートを入れられるように。消したデッキに足したノートは足さない）
     drecs = deck_recs(conf_rows); mods0 = {d['id']: d.get('mod', 0) for d in col.decks.all()}
-    try: ndeck = apply_decks(col, srv, drecs, log, dry=dry, mods0=mods0)
+    removals = []   # 端末で消したデッキ（カードを消すのは、ノートとカードの状態を書いたあと）
+    try: ndeck = apply_decks(col, srv, drecs, log, dry=dry, mods0=mods0, allow_destructive=allow_destructive, removals=removals)
     except SyncError: raise
     except Exception as e: ndeck = None; log('デッキを書けなかった', repr(e)); deck_fail = repr(e)[:200]
     else: deck_fail = None
@@ -720,7 +861,8 @@ def run(col, site_url, token, dry=False, log=print, allow_schema=False):
     else: nt_fail = None
     # 端末で追加・編集・削除したノートを先に書く（端末で作ったカードを、カードの状態を比べる前に Anki に入れておく）
     fresh = set()   # この同期で Anki に作ったカード（端末の状態を正にする）
-    try: nnote = apply_notes(col, srv, snotes, log, dry=dry, gone=gone_cards(drecs), fresh=fresh, allow_schema=allow_schema, mods0=nmods0, skip=nt_written, generated=nt_gen, held=nt_held)
+    try: nnote = apply_notes(col, srv, snotes, log, dry=dry, gone=gone_cards(drecs), fresh=fresh, allow_schema=allow_schema, mods0=nmods0, skip=nt_written, generated=nt_gen, held=nt_held,
+                             allow_destructive=allow_destructive, readd_missing=readd_missing)
     except SyncError: raise
     except Exception as e: nnote = None; log('ノートを書けなかった', repr(e)); note_fail = repr(e)[:200]
     else: note_fail = None
@@ -732,13 +874,24 @@ def run(col, site_url, token, dry=False, log=print, allow_schema=False):
     summary = {k: len(v) for k, v in p.items()}; summary['dry'] = dry; summary['notes'] = nnote; summary['decks'] = ndeck; summary['notetypes'] = nnt
     if nt_fail: summary['nt_fail'] = nt_fail
     sp = (nnt or {}).get('schema_pending', 0) + (nnote or {}).get('schema_pending', 0)
-    if sp: summary['schema_pending'] = sp
+    if sp:
+        summary['schema_pending'] = sp
+        summary['schema_detail'] = list((nnt or {}).get('schema_detail') or []) + ([f'ノートタイプを変えるノート {(nnote or {})["schema_pending"]} 件'] if (nnote or {}).get('schema_pending') else [])
     if note_fail: summary['note_fail'] = note_fail
     if deck_fail: summary['deck_fail'] = deck_fail
     log('比べた: Anki へ カード {to_anki} 記録 {rev_to_anki} ／暗記へ カード {to_srv} 記録 {rev_to_srv}'.format(**summary))
+    # 端末が知っていたカード（消してよいのはこれだけ）: サーバーの状態にあるカード＋端末で足したノートのカード＋この同期で作ったカード
+    known = set(scards) | {c[0] for rec in snotes.values() for c in (rec.get('cards') or [])} | fresh
+    def pending_summary(nrm):
+        nn = nnote or {}
+        pend = {'decks': nrm.get('pending_decks', 0), 'deck_cards': nrm.get('pending_cards', 0), 'deck_names': nrm.get('names', [])[:10],
+                'notes_removed': nn.get('pending_removed', 0), 'gone_in_anki': nn.get('pending_gone', 0)}
+        if pend['decks'] or pend['deck_cards'] or pend['notes_removed'] or pend['gone_in_anki']: summary['pending'] = pend
     if dry:
         try: summary['conf'] = apply_conf(col, srv, conf_rows, log, dry=True, mods0=mods0)
         except Exception as e: summary['conf_fail'] = repr(e)[:200]
+        try: pending_summary(apply_deck_removals(col, srv, removals, known, log, dry=True))
+        except Exception as e: summary['deck_fail'] = repr(e)[:200]
         summary['secs'] = round(time.time() - t0, 1); return summary
     # Anki に書く: カード → 記録 → タグ → オプション（記録を先に入れて途中で止まると、次の同期で「Anki のほうが新しい」に見えてしまう）
     cards = [write_card(col, cid, st) for cid, st, _ in p['to_anki']]
@@ -750,6 +903,13 @@ def run(col, site_url, token, dry=False, log=print, allow_schema=False):
     if p['leech']: col.tags.bulk_add(p['leech'], 'leech')
     if p['mark_add']: col.tags.bulk_add(p['mark_add'], 'marked')
     if p['mark_del']: col.tags.bulk_remove(p['mark_del'], 'marked')
+    # 端末で消したデッキ: カードを移し終えたあとで、知っていたカードだけを消す（allow_destructive のときだけ。そうでなければ数える）
+    try:
+        nrm = apply_deck_removals(col, srv, removals, known, log, allow_destructive=allow_destructive)
+        if ndeck is not None: ndeck['removed'] = ndeck.get('removed', 0) + nrm['removed']; ndeck['cards_removed'] = ndeck.get('cards_removed', 0) + nrm['cards_removed']; ndeck['kept'] = nrm['kept']
+        pending_summary(nrm)
+    except SyncError: raise
+    except Exception as e: summary['deck_fail'] = repr(e)[:200]; log('デッキを消せなかった', repr(e))
     try: summary['conf'] = apply_conf(col, srv, conf_rows, log, mods0=mods0)
     except Exception as e: summary['conf_fail'] = repr(e)[:200]; log('オプションを書けなかった', repr(e))
     # 暗記へ送る（Anki 側のほうが新しかったもの）

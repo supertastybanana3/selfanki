@@ -94,12 +94,18 @@ export function createNotes(env) {
   const noteRow = (rec, t, guid) => ({ mid: rec.mid, flds: rec.flds.join('\x1f'), sfld: plain(rec.flds[t.sortf] ?? ''), csum: 0, tags: tagsArr(rec.tags).length ? ' ' + tagsArr(rec.tags).join(' ') + ' ' : '', mod: Math.floor(rec.rev / 1000), guid: rec.guid ?? guid });
   const cardRow = c => [c.id, c.ord, c.did, c.type === 0 ? c.due : 0];
   // guid＝端末で作ったノートの guid（Anki に足すときに使う）、imp＝パッケージから読み込んだノート（Anki でもこのカードだけを作る）
-  const wire = r => ({ id: r.id, mid: r.mid, flds: r.flds, tags: r.tags, did: r.did, cards: r.cards, rev: r.rev, del: r.del ? 1 : 0, added: r.added ? 1 : 0, ...(r.guid ? { guid: r.guid } : {}), ...(r.imp ? { imp: 1 } : {}) });
+  const fieldNames = mid => nt(mid)?.flds?.map(f => f.name);
+  const wire = r => ({ id: r.id, mid: r.mid, flds: r.flds, ...(fieldNames(r.mid)?.length === r.flds.length ? { fn: fieldNames(r.mid) } : {}), tags: r.tags, did: r.did, cards: r.cards, rev: r.rev, del: r.del ? 1 : 0, added: r.added ? 1 : 0, ...(r.guid ? { guid: r.guid } : {}), ...(r.imp ? { imp: 1 } : {}) });
 
   // ---------- 記録を重ねる ----------
   const sameContent = (a, b) => a.mid === b.mid && !!a.del === !!b.del && a.tags === b.tags && JSON.stringify(a.flds) === JSON.stringify(b.flds) && JSON.stringify(a.cards) === JSON.stringify(b.cards);
   // 記録を1つ重ねる。見えるものが変わったら true
   function apply(rec0) {
+    // 届いた記録のフィールドを、この端末のノートタイプの並びへ名前で合わせる（fn＝記録の並びのフィールド名。Anki でフィールドを足した・並べ替えたとき）
+    const names = fieldNames(rec0.mid);
+    if (names && Array.isArray(rec0.fn) && rec0.fn.length === rec0.flds.length && JSON.stringify(rec0.fn) !== JSON.stringify(names)) {
+      const m = new Map(rec0.fn.map((k, i) => [k, rec0.flds[i]])); rec0 = { ...rec0, flds: names.map(nm => m.get(nm) ?? ''), fn: names };
+    }
     const cur = S.noteRecs.get(rec0.id);
     if (cur && cur.rev > rec0.rev) return false;
     const rec = { ...rec0, src: rec0.src || 'app' };

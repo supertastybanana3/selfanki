@@ -13,6 +13,7 @@ export async function ensureNotes(DB) {
   const add = [];
   if (!cols.has('guid')) add.push(DB.prepare('alter table notes add column guid text'));
   if (!cols.has('imp')) add.push(DB.prepare('alter table notes add column imp integer not null default 0'));
+  if (!cols.has('fn')) add.push(DB.prepare('alter table notes add column fn text'));   // flds の並びのフィールド名（JSON の配列。名前で合わせるため）
   if (add.length) await DB.batch(add);
   ready = true;
 }

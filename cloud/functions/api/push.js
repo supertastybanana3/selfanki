@@ -34,8 +34,9 @@ export async function onRequestPost({ request, env }) {
       const n = o.n || {};
       const okCards = Array.isArray(n.cards) && n.cards.every(x => Array.isArray(x) && x.length === 4 && x.every(isInt));
       if (![n.id, n.mid, n.did, n.rev].every(isInt) || !Array.isArray(n.flds) || !n.flds.every(x => typeof x === 'string') || typeof n.tags !== 'string' || !okCards) return Response.json({ error: 'bad note' }, { status: 400 });
-      st.push(DB.prepare(`insert into notes(id, mid, flds, tags, did, cards, rev, src, del, added, seq, guid, imp) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ${SEQ}, ?11, ?12) on conflict(id) do update set mid = excluded.mid, flds = excluded.flds, tags = excluded.tags, did = excluded.did, cards = excluded.cards, rev = excluded.rev, src = excluded.src, del = excluded.del, added = max(notes.added, excluded.added), guid = coalesce(excluded.guid, notes.guid), imp = max(notes.imp, excluded.imp), seq = excluded.seq where excluded.rev >= notes.rev`)
-        .bind(n.id, n.mid, JSON.stringify(n.flds), n.tags, n.did, JSON.stringify(n.cards), n.rev, src, n.del ? 1 : 0, n.added ? 1 : 0, typeof n.guid === 'string' && n.guid.length <= 64 ? n.guid : null, n.imp ? 1 : 0));
+      st.push(DB.prepare(`insert into notes(id, mid, flds, tags, did, cards, rev, src, del, added, seq, guid, imp, fn) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ${SEQ}, ?11, ?12, ?13) on conflict(id) do update set mid = excluded.mid, flds = excluded.flds, tags = excluded.tags, did = excluded.did, cards = excluded.cards, rev = excluded.rev, src = excluded.src, del = excluded.del, added = max(notes.added, excluded.added), guid = coalesce(excluded.guid, notes.guid), imp = max(notes.imp, excluded.imp), fn = excluded.fn, seq = excluded.seq where excluded.rev >= notes.rev`)
+        .bind(n.id, n.mid, JSON.stringify(n.flds), n.tags, n.did, JSON.stringify(n.cards), n.rev, src, n.del ? 1 : 0, n.added ? 1 : 0, typeof n.guid === 'string' && n.guid.length <= 64 ? n.guid : null, n.imp ? 1 : 0,
+          Array.isArray(n.fn) && n.fn.length === n.flds.length && n.fn.every(x => typeof x === 'string' && x.length <= 200) ? JSON.stringify(n.fn) : null));   // fn＝flds の並びのフィールド名（無ければ null）
       continue;
     }
     if (o.t === 'conf') {

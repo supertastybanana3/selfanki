@@ -4,7 +4,9 @@
 // 中身は /bundle/media/<名前> で出す（束に無いときだけ。_middleware.js）
 import { ensureNotes } from './_notes.js';
 export const PART = 1_048_576;
-export const safeMediaName = n => typeof n === 'string' && n.length > 0 && n.length <= 255 && !/[/\\\x00-\x1f]/.test(n) && n !== '.' && n !== '..' && !n.startsWith('.');
+// 名前の見張り: / \ と、Windows でドライブや別のストリームを指す : と、使えない文字 < > " | ? *・制御文字・末尾の点と空白・予約名（CON など）を通さない（アドオンの _safe_media と同じ）
+const WIN_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+export const safeMediaName = n => typeof n === 'string' && n.length > 0 && n.length <= 255 && !/[/\\:<>"|?*\x00-\x1f]/.test(n) && n !== '.' && n !== '..' && !n.startsWith('.') && !/[. ]$/.test(n) && !WIN_RESERVED.test(n.split('.')[0].trim());
 export async function onRequestGet({ env }) {
   await ensureNotes(env.DB);
   const r = await env.DB.prepare('select name, size, sha1, seq from media order by seq, name').all();

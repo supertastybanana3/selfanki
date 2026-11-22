@@ -43,6 +43,7 @@ snap = _Snap
 ST = STATE
 os.makedirs(ST, exist_ok=True)
 DRY = '--dry' in sys.argv
+ALLOW_DELETE = '--allow-delete' in sys.argv   # 消す操作（端末で消したノートを Anki でも消す・Anki に無いノートを端末からも消す）。付けなければ数えてログに出すだけ
 STATE_KEYS = ['type', 'queue', 'due', 'ivl', 'factor', 'reps', 'lapses', 'left', 'data']
 LOG = open(os.path.join(ST, 'mirror.log'), 'a', encoding='utf-8')
 def log(*a):
@@ -114,14 +115,16 @@ def server_notes():
     big = 2 ** 53 - 1; ns = ni = 0; out = {}
     while True:   # カードと記録の続きの位置は端に置いて、ノートだけを読む
         j = api(f'pull?cs={big}&ci={big}&rs={big}&ri={big}&ns={ns}&ni={ni}&n=5000')
-        for (id_, mid, flds, tags, did, cards, rev, src, dl, added, seq) in j.get('notes', []):
-            out[id_] = {'id': id_, 'mid': mid, 'flds': json.loads(flds), 'tags': tags, 'did': did, 'cards': json.loads(cards), 'rev': rev, 'src': src, 'del': dl, 'added': added}; ns, ni = seq, id_
+        for row in j.get('notes', []):   # 列はあとから足したもの（guid・imp・fn）があるので、前から順に読む
+            id_, mid, flds, tags, did, cards, rev, src, dl, added, seq = row[:11]
+            out[id_] = {'id': id_, 'mid': mid, 'flds': json.loads(flds), 'tags': tags, 'did': did, 'cards': json.loads(cards), 'rev': rev, 'src': src, 'del': dl, 'added': added,
+                        'fn': json.loads(row[13]) if len(row) > 13 and row[13] else None}; ns, ni = seq, id_
         if not j.get('notes') or not j['more']: break
     return out
 
 def apply_notes():
     """決まりはアドオン（core.apply_notes）と同じ「新しいほう」＝端末の記録の rev と Anki のノートの mod。編集（カードが増えないもの）と削除だけを書く"""
-    recs = server_notes(); n = {'updated': 0, 'removed': 0, 'gone_in_anki': 0, 'anki_newer': 0, 'need_addon': 0}
+    recs = server_notes(); n = {'updated': 0, 'removed': 0, 'gone_in_anki': 0, 'anki_newer': 0, 'need_addon': 0, 'pending_removed': 0, 'pending_gone': 0}
     if not recs: return n
     ids = list(recs); info = []
     for i in range(0, len(ids), 200): info += ac('notesInfo', notes=ids[i:i + 200])
@@ -134,11 +137,12 @@ def apply_notes():
         have = bool(inf and inf.get('noteId')); mod = (inf or {}).get('mod', 0) if have else None
         if rec['del']:
             if have and rec['rev'] > mod * 1000:
-                if not DRY: ac('deleteNotes', notes=[rec['id']])
-                n['removed'] += 1
+                if not ALLOW_DELETE or DRY: n['pending_removed'] += 1; continue
+                ac('deleteNotes', notes=[rec['id']]); n['removed'] += 1
             continue
         if not have:
             if rec['added'] and rec['src'] != 'anki': n['need_addon'] += 1; continue
+            if not ALLOW_DELETE: n['pending_gone'] += 1; continue   # Anki に無い（Anki で消した・バックアップから戻した）→ 確かめてから（--allow-delete）
             n['gone_in_anki'] += 1   # Anki で消してある → 端末でも消す
             push.append({'t': 'note', 'src': 'anki', 'n': {**{k: rec[k] for k in ('id', 'mid', 'flds', 'tags', 'did', 'cards', 'added')}, 'rev': max(now, rec['rev'] + 1), 'del': 1}})
             continue
@@ -147,11 +151,16 @@ def apply_notes():
             continue
         names = sorted(inf['fields'], key=lambda k: inf['fields'][k]['order'])
         if rec['mid'] in nt_app or mids.get(inf.get('modelName')) != rec['mid']: n['need_addon'] += 1; continue
-        if set(c[0] for c in rec['cards']) - set(inf.get('cards') or []) or len(names) != len(rec['flds']):
+        # フィールドは名前で合わせる（fn があるとき。端末が知らないフィールドは書かない＝Anki の中身のまま）。名前の無い古い記録は数が同じときだけ並びどおり
+        if rec.get('fn') and len(rec['fn']) == len(rec['flds']): fields = {k: v for k, v in zip(rec['fn'], rec['flds']) if k in names}
+        elif len(names) == len(rec['flds']): fields = dict(zip(names, rec['flds']))
+        else: fields = None
+        if set(c[0] for c in rec['cards']) - set(inf.get('cards') or []) or fields is None:
             n['need_addon'] += 1; continue   # カードが増える編集・ノートタイプが変わっている
-        if not DRY: ac('updateNote', note={'id': rec['id'], 'fields': dict(zip(names, rec['flds'])), 'tags': rec['tags'].split()})
+        if not DRY: ac('updateNote', note={'id': rec['id'], 'fields': fields, 'tags': rec['tags'].split()})
         n['updated'] += 1
     if push and not DRY: api('push', {'ops': push})
+    if n['pending_removed'] or n['pending_gone']: log(f"消す操作 {n['pending_removed'] + n['pending_gone']} 件（端末で消したノート {n['pending_removed']}・Anki に無いノート {n['pending_gone']}）は書かなかった。中身を確かめてから --allow-delete を付けて動かす（Anki をバックアップから戻した直後なら付けない）")
     if n['need_addon']: log('端末で追加したノート・カードが増える編集・ノートタイプを直したノート・ノートタイプを変えたノート', n['need_addon'], '件は、Anki のアドオン「暗記と同期」で入れる（ここでは書かない）')
     if nt_app: log(f'端末で直した・読み込んだノートタイプが {len(nt_app)} 件あります。Anki に入れるにはアドオン「暗記と同期」を使ってください（この書き戻しでは書きません）')
     return n
@@ -220,8 +229,8 @@ def main():
     ac('version'); check_profile()   # 試しでも、AnkiConnect とプロファイルは確かめる（読むだけ）
     lock(True)
     try:
-        # 0. 同期する前に、今のコレクションの控えを取る（同期や書き戻しで困ったときに戻せるように）
-        if CFG.get('ankiweb_sync') is True and not DRY: b0 = snap.take('before_sync'); log('同期の前の控え', b0['path'])
+        # 0. 同期する前・書く前に、今のコレクションの控えを取る（同期や書き戻しで困ったときに戻せるように。AnkiWeb と同期しない設定でも）
+        if not DRY: b0 = snap.take('before_sync' if CFG.get('ankiweb_sync') is True else 'before_write'); log('書く前の控え', b0['path'])
         # 1. 同期 → 写し
         snap.sync_anki()
         try: nnote = apply_notes(); summary['notes'] = nnote; log('ノート', nnote)

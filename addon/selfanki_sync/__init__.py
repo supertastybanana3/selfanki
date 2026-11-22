@@ -10,7 +10,7 @@ import os
 from aqt import gui_hooks, mw
 from aqt.operations import CollectionOp, QueryOp
 from aqt.qt import QAction, QMenu
-from aqt.utils import askUser, getText, showInfo, showWarning, tooltip
+from aqt.utils import askUser, askUserDialog, getText, showInfo, showWarning, tooltip
 
 from . import core
 
@@ -49,6 +49,19 @@ _T = {
     'schema_left': ('端末で変えたノートタイプ（フィールド・カードタイプの並びや数）と、ノートタイプを変えたノート {n} 件は、Anki に書きませんでした。書くには、もう一度「暗記と同期」をして、確認で「はい」を選んでください。',
                     '{n} note type change(s) made on the device (field/card type order or count, or notes moved to another note type) were not written to Anki. Sync with selfanki again and answer Yes to write them.'),
     'pairing': ('暗記につないでいます…', 'Connecting to selfanki…'),
+    # 消す操作の確かめ（数を見せてから。自動の同期では聞かずに知らせるだけ）
+    'pend_head': ('暗記の端末で消したものを、Anki にも反映しますか？（書く前に Anki のバックアップを取ってあります）\n',
+                  'Apply deletions made on your selfanki devices to Anki as well? (An Anki backup was made before writing.)\n'),
+    'pend_decks': ('\n・デッキ {n} 個（{names}）: 端末が知っていたカード {c} 枚を消します。端末が知らないカード（束を作ったあとに Anki で足したものなど）が残るデッキは、消さずに残します',
+                   '\n- {n} deck(s) ({names}): delete the {c} card(s) the devices knew about. Decks that still hold cards unknown to the devices (e.g. added in Anki later) are kept'),
+    'pend_notes': ('\n・ノート {n} 件を消します', '\n- Delete {n} note(s)'),
+    'pend_gone': ('\n・Anki に無いノート {n} 件を、端末からも消します。Anki をバックアップから戻した直後などで、消したつもりが無いなら「Anki に入れ直す」を選んでください',
+                  '\n- {n} note(s) missing in Anki will be deleted on the devices too. If you did not delete them (e.g. you just restored an Anki backup), choose "Re-add to Anki"'),
+    'btn_delete': ('消す', 'Delete'), 'btn_readd': ('Anki に入れ直す', 'Re-add to Anki'), 'btn_later': ('いまはしない', 'Not now'),
+    'pend_auto': ('暗記の端末で消したもの（{n} 件）の反映を待っています。「ツール」→「暗記」→「同期する」で確かめてください。',
+                  'Deletions from your selfanki devices ({n}) are waiting. Use Tools → selfanki → Sync to review them.'),
+    'schema_ask': ('暗記の端末で、ノートタイプの形（フィールド・カードの種類の並びや数）を変えました。Anki に書くと、次のようになります。\n\n{detail}\n\n{anki}\n\n書きますか？',
+                   'Note type structure (fields / card types) was changed on your selfanki devices. Writing it to Anki will do the following:\n\n{detail}\n\n{anki}\n\nWrite it?'),
     'failed': ('暗記と同期できませんでした。\n\n{e}', 'Could not sync with selfanki.\n\n{e}'),
 }
 
@@ -114,7 +127,7 @@ def _message(s, dry):
     marks = s.get('mark_add', 0) + s.get('mark_del', 0); conf = sum((s.get('conf') or {}).get(k, 0) for k in ('preset', 'new', 'deck'))
     nn = s.get('notes') or {}; nsum = sum(nn.get(k, 0) for k in ('added', 'updated', 'removed', 'gone_in_anki', 'skipped'))
     dd = s.get('decks') or {}; dsum = sum(dd.get(k, 0) for k in ('created', 'renamed', 'removed', 'cards_removed', 'anki_newer'))
-    if not dry and not any(s.get(k) for k in ('to_anki', 'rev_to_anki', 'to_srv', 'rev_to_srv', 'verify_ng', 'conf_fail', 'note_fail', 'deck_fail')) and not marks and not conf and not nsum and not dsum: return None
+    if not dry and not any(s.get(k) for k in ('to_anki', 'rev_to_anki', 'to_srv', 'rev_to_srv', 'verify_ng', 'conf_fail', 'note_fail', 'deck_fail')) and not marks and not conf and not nsum and not dsum and not s.get('pending'): return None
     m = t('dry_done' if dry else 'done', **s)
     if marks or conf: m += t('extra', marks=marks, conf=conf)
     if dsum: m += t('decks', **{k: dd.get(k, 0) for k in ('created', 'renamed', 'removed', 'cards_removed', 'anki_newer')})
@@ -123,13 +136,18 @@ def _message(s, dry):
     if s.get('note_fail'): m += t('warn_note', e=s['note_fail'])
     if s.get('verify_ng'): m += t('warn_ng', n=s['verify_ng'])
     if s.get('conf_fail'): m += t('warn_conf', e=s['conf_fail'])
+    pend = s.get('pending')
+    if pend and dry:   # 試すとき: 同期すると確かめる消す操作の数
+        if pend['decks'] or pend['deck_cards']: m += t('pend_decks', n=pend['decks'], names='、'.join(pend['deck_names']) or '-', c=pend['deck_cards'])
+        if pend['notes_removed']: m += t('pend_notes', n=pend['notes_removed'])
+        if pend['gone_in_anki']: m += t('pend_gone', n=pend['gone_in_anki'])
     return m
 
 
 _running = False
 
 
-def sync(dry=False, auto=False, allow_schema=False):
+def sync(dry=False, auto=False, allow_schema=False, allow_destructive=False, readd_missing=False):
     global _running
     link = _links().get(mw.pm.name)
     if not link:
@@ -146,16 +164,36 @@ def sync(dry=False, auto=False, allow_schema=False):
         if not dry:
             # 書く前にバックアップを取る（Anki の「ファイル」→「バックアップから復元」で戻せる）
             col.create_backup(backup_folder=mw.pm.backupFolder(), force=True, wait_for_completion=True)
-        result['s'] = core.run(col, link['site_url'], link['token'], dry=dry, log=lambda *a: print('[暗記と同期]', *a), allow_schema=allow_schema)
+        result['s'] = core.run(col, link['site_url'], link['token'], dry=dry, log=lambda *a: print('[暗記と同期]', *a), allow_schema=allow_schema,
+                               allow_destructive=allow_destructive, readd_missing=readd_missing)
 
     def done(*_):
         global _running
         _running = False
         s = result.get('s') or {}
-        # 端末で変えたノートタイプの並び・数、ノートタイプの変更は、Anki ではスキーマの変更（次の AnkiWeb 同期が一方向）。Anki と同じ確認の文言で聞いてから書く
+        # 端末で変えたノートタイプの並び・数、ノートタイプの変更は、Anki ではスキーマの変更（次の AnkiWeb 同期が一方向）。何が変わるか（消えるフィールド・カードの数）を
+        # 見せて、Anki の確認の文言も添えて、いつも聞く（Anki の confirm_schema_modification は、もうスキーマを変えてあると聞かずに通すため）。自動の同期では聞かない書く
         if s.get('schema_pending') and not dry and not allow_schema:
-            if mw.confirm_schema_modification(): sync(auto=auto, allow_schema=True); return
-            showInfo(t('schema_left', n=s['schema_pending']), parent=mw)
+            if not auto:
+                detail = '\n'.join('・' + x for x in (s.get('schema_detail') or [])) or '・' + t('schema_left', n=s['schema_pending'])
+                anki_msg = mw.col.tr.qt_misc_the_requested_change_will_require_a() if not mw.col.schema_changed() else ''
+                if askUser(t('schema_ask', detail=detail, anki=anki_msg), parent=mw, defaultno=True):
+                    sync(auto=auto, allow_schema=True, allow_destructive=allow_destructive, readd_missing=readd_missing); return
+            showInfo(t('schema_left', n=s['schema_pending']), parent=mw) if not auto else None
+        # 消す操作: 数を見せて聞く（自動の同期では聞かずに知らせる）。「消す」「Anki に入れ直す」で、もう一度同期する
+        pend = s.get('pending')
+        if pend and not dry and not allow_destructive and not readd_missing:
+            total = pend['deck_cards'] + pend['decks'] + pend['notes_removed'] + pend['gone_in_anki']
+            if auto: tooltip(t('pend_auto', n=total), period=8000)
+            else:
+                msg = t('pend_head')
+                if pend['decks'] or pend['deck_cards']: msg += t('pend_decks', n=pend['decks'], names='、'.join(pend['deck_names']) or '-', c=pend['deck_cards'])
+                if pend['notes_removed']: msg += t('pend_notes', n=pend['notes_removed'])
+                if pend['gone_in_anki']: msg += t('pend_gone', n=pend['gone_in_anki'])
+                buttons = [t('btn_delete')] + ([t('btn_readd')] if pend['gone_in_anki'] else []) + [t('btn_later')]
+                got = askUserDialog(msg, buttons, parent=mw).run()
+                if got == t('btn_delete'): sync(allow_schema=allow_schema, allow_destructive=True); return
+                if got == t('btn_readd'): sync(allow_schema=allow_schema, readd_missing=True); return
         m = _message(s, dry)
         if m is None: tooltip(t('nothing'))
         elif auto and not s.get('verify_ng') and not s.get('conf_fail') and not s.get('note_fail') and not s.get('deck_fail'): tooltip(m.replace('\n\n', '\n'), period=6000)
@@ -205,5 +243,16 @@ if os.environ.get('SELFANKI_ADDON_SELFTEST'):
             with open(out, 'w', encoding='utf-8') as f: f.write(str(msg))
             mw.progress.timer(800, mw.close, False)
         g = globals(); g['showInfo'] = g['showWarning'] = g['tooltip'] = record
+        # 確かめの小窓にも自動で答える（聞いた文面は結果のファイルの後ろに残す）。SELFANKI_ADDON_PENDING＝delete・readd・later、SELFANKI_ADDON_SCHEMA＝1・0
+        asked = out + '.asked'
+        def note_ask(msg):
+            with open(asked, 'a', encoding='utf-8') as f: f.write(str(msg) + '\n----\n')
+        def ask_user(msg, *a, **k): note_ask(msg); return os.environ.get('SELFANKI_ADDON_SCHEMA', '1') == '1'
+        class _Dlg:
+            def __init__(self, msg, buttons, **k): self.msg, self.buttons = msg, buttons
+            def run(self):
+                note_ask(self.msg); want = {'delete': t('btn_delete'), 'readd': t('btn_readd'), 'later': t('btn_later')}.get(os.environ.get('SELFANKI_ADDON_PENDING', 'delete'))
+                return want if want in self.buttons else self.buttons[-1]
+        g['askUser'] = ask_user; g['askUserDialog'] = _Dlg
         sync(dry=os.environ.get('SELFANKI_ADDON_DRY') == '1')
     gui_hooks.profile_did_open.append(lambda: mw.progress.timer(1500, _selftest, False))
