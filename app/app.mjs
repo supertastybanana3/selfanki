@@ -736,6 +736,49 @@ function pickFlag(cs) {
   add('キャンセル', null, 'cancel');
   document.body.append(d);
 }
+// AnkiMobile の URL スキーム（manual url-schemes.md）: addnote・search・sync。infoForAdding（クリップボードの独自の型）はできない
+const MEDIA_URL = /^https?:\/\/\S+\.(jpe?g|png|gif|webp|svg|bmp|mp3|m4a|aac|ogg|oga|opus|wav|flac|mp4|m4v|mov|webm)$/i;
+async function handleXcb(raw) {
+  const m = /^x-callback-url(?:\/|%2F)(addnote|search|sync)\/?(?:\?(.*))?$/is.exec(raw); if (!m) return false;
+  const q = new URLSearchParams(m[2] || ''), back = q.get('x-success');
+  const done = () => { if (back) location.href = back; };
+  if (m[1] === 'sync') { await runSync(true); done(); return true; }
+  if (m[1] === 'search') { openBrowse(q.get('query') ?? ''); done(); return true; }
+  const fail = msg => { iosAlert('ノートの追加', msg); return false; };
+  const prof = q.get('profile'); if (prof != null && !['User 1', 'ユーザー 1'].includes(prof)) return fail(`プロファイル「${prof}」は開いていません。`);
+  if (!notes.ready()) return fail('この束にはテンプレートが入っていません。手順 9 で書き出し直してください。');
+  const typeName = q.get('type'), deckNameQ = q.get('deck');
+  if (!typeName || !deckNameQ) return fail('type と deck が要ります。');
+  const mid = Object.keys(S.meta.notetypes || {}).find(k => S.meta.notetypes[k].name === typeName), t = mid && notes.notetype(mid);
+  if (!t) return fail(`ノートタイプ「${typeName}」が見つかりません。`);
+  const fold = s => s.normalize('NFC').toLowerCase();
+  const dk = S.meta.decks.find(d => fold(d.name) === fold(deckNameQ.replace(/\s*::\s*/g, '::')));
+  if (!dk || dk.dyn) return fail(`デッキ「${deckNameQ}」が見つかりません。`);
+  const flds = t.flds.map(() => '');
+  for (const [k, v] of q) {
+    if (!k.startsWith('fld')) continue;
+    const i = t.flds.findIndex(f => f.name === k.slice(3)); if (i < 0) return fail(`フィールド「${k.slice(3)}」がありません。`);
+    let val = v;
+    if (MEDIA_URL.test(v.trim())) {   // 画像・音声への URL は取ってきて、ファイルとして入れる
+      try {
+        const r = await fetch(v.trim()); if (!r.ok) throw new Error(String(r.status));
+        const u = new URL(v.trim()), base = decodeURIComponent((u.search ? (v.trim().match(/[^/=&?]+$/) || [''])[0] : u.pathname.split('/').pop()) || 'media');
+        const name = await xchg.addMedia(base, new Uint8Array(await r.arrayBuffer()));
+        val = /\.(jpe?g|png|gif|webp|svg|bmp)$/i.test(name) ? `<img src="${name.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">` : `[sound:${name}]`;
+      } catch (e) { return fail(`「${v}」を取ってこられませんでした（${e?.message || e}）。`); }
+    }
+    flds[i] = val;
+  }
+  const strip = h => String(h).replace(/<img[^>]*src=["']?([^"' >]+)[^>]*>/gi, ' $1 ').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+  if (!strip(flds[0]) && !/\[sound:|<img/i.test(flds[0])) return fail('最初のフィールドが空欄です。');
+  if (q.get('dupes') !== '1') {   // 重複（同じノートタイプで、最初のフィールドが同じ＝rslib の DuplicateOrEmpty）
+    const all = await loadNotes(S, BUNDLE), first = strip(flds[0]);
+    for (const n of all.values()) if (String(n.mid) === String(mid) && strip(n.flds.split('\x1f')[0]) === first) return fail('同じ内容のノートがすでにあります（dupes=1 を付けると足せます）。');
+  }
+  try { await notes.addNote(+mid, dk.id, flds, (q.get('tags') || '').split(/\s+/).filter(Boolean).join(' ')); }
+  catch (e) { return fail(String(e?.message || e)); }
+  toast('追加しました'); done(); return true;
+}
 function openBrowse(query) {
   $('#browse').hidden = false; $('#bprev').hidden = true; if (BR.sel) setBrowseSelect(false);
   if (query != null) $('#bq').value = query;
@@ -1949,6 +1992,10 @@ function setupXchg() {
     applyConf, applyOp, iosPrompt, iosAlert, toast,
     afterImport: async () => { await flushNt(); refreshCards(); S.mainQ = null; showDecks(); scheduleSync(500); } });
   window.__xchg = xchg;   // 試験用（画面の通し試験がここから呼ぶ）
+  // URL スキーム（AnkiMobile の anki://x-callback-url/…）を、アプリの URL の #x-callback-url/… で受ける（値の復号は URLSearchParams に任せる。先に全体を復号すると、中の URL の & が区切りになる）
+  const takeXcb = () => { const h = location.hash.slice(1); if (!/^x-callback-url(\/|%2F)/i.test(h)) return; history.replaceState(null, '', location.pathname + location.search); handleXcb(h); };
+  window.addEventListener('hashchange', takeXcb); setTimeout(takeXcb, 0);
+  window.__saOpenURL = u => handleXcb(String(u).replace(/^[a-z][a-z0-9+.-]*:\/\//i, ''));   // 殻（iOS）から
 }
 // ---------- 起動 ----------
 function setupTools() {
