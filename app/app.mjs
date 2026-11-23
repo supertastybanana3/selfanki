@@ -805,8 +805,8 @@ async function fetchViaServer(url) {
 }
 // 「追加/エクスポート」の「リンク先からダウンロード」: .apkg・.colpkg の URL から読み込む
 async function downloadFromLink() {
-  const r = await iosPrompt({ title: 'リンク先からダウンロード', message: '.apkg か .colpkg のファイルの URL', input: '' });
-  const url = r?.value?.trim(); if (!url) return;
+  const r = await iosPrompt({ title: 'リンク先からダウンロード', message: '.apkg ファイルをインポートするためのリンク先：', texts: [{ placeholder: 'http://example.com/myfile.apkg' }] });   // 実機の文言
+  const url = r?.texts?.[0]?.trim(); if (!url) return;
   toast('ダウンロード中…');
   let got; try { got = await fetchViaServer(url); } catch (e) { iosAlert('リンク先からダウンロード', String(e?.message || e)); return; }
   const fromUrl = (() => { try { return decodeURIComponent(new URL(url).pathname.split('/').pop() || ''); } catch { return ''; } })();
