@@ -50,10 +50,19 @@ export function textLine(html) {
   return stripHtmlMedia(String(html || '').replace(/<br\s*\/?>|<div>|\n/gi, ' ').replace(/\[\[type:[^\]]+\]\]/g, '').replace(/\[sound:([^\]]+)\]/g, '$1')).trim();
 }
 
+// カードの表・裏の HTML の音声の印 [anki:play:q:0] を、Anki のブラウザと同じく 🔉名前🔉（読み上げは 💬文💬）にする（rslib prettify_av_tags）
+export function avLine(c, side) {
+  return String((side === 'q' ? c.q : c.a) || '').replace(/\[anki:play:(q|a):(\d+)\]/g, (m, s, i) => {
+    const it = (s === 'q' ? c.qav : c.aav)?.[+i];
+    return it?.sound != null ? `🔉${it.sound}🔉` : it?.tts != null ? `💬${it.tts}💬` : '';
+  });
+}
 // ctx: { ntOf(mid) → {name, type, templates:[{name}], sortf}, deckName(did), homeOf(card) → 元のデッキの id（フィルターデッキの中なら）, inFiltered(card),
 //        days（今日が何日目）, now（秒）, noteMod(card), tagsOf(card) → 配列, avText(card, side) → [anki:play] を 🔉名前🔉 にした HTML }
 // ctx.eff(c)＝表と並べ替えに使う did・due・queue（Anki のフィルターデッキの中のカードは中での値。束では data.flt に入っている）
 const E = (c, ctx) => (ctx.eff ? ctx.eff(c) : c);
+// カードの更新日時（秒）。ctx.cardMod があればそれ（端末では状態の rev から）
+const cmod = (c, ctx) => (ctx.cardMod ? ctx.cardMod(c) : c.mod || 0);
 const isNewish = (c, ctx) => c.type === 0 || E(c, ctx).queue === 0;
 const undue = (c, ctx) => E(c, ctx).queue < 0;   // 休止・今日は非表示
 // rslib Card::due_time
@@ -71,9 +80,9 @@ function cardDueStr(c, ctx) {
   return undue(c, ctx) ? `(${due})` : due;
 }
 function sideStr(c, ctx, answer) {
-  const q = ctx.avText(c, 'q');
+  const av = ctx.avText || avLine, q = av(c, 'q');
   if (!answer) return textLine(q);
-  const a = ctx.avText(c, 'a');
+  const a = av(c, 'a');
   return textLine(a.startsWith(q) ? a.slice(q.length) : a);
 }
 function templateName(c, ctx) {
@@ -89,7 +98,7 @@ function deckStr(c, ctx) {
 export function cardCell(key, c, ctx) {
   switch (key) {
     case 'template': return templateName(c, ctx);
-    case 'cardMod': return dateTimeStr(c.mod || 0);
+    case 'cardMod': return dateTimeStr(cmod(c, ctx));
     case 'noteFld': return c.sfld ?? '';
     case 'noteTags': return ctx.tagsOf(c).join(' ');
     case 'deck': return deckStr(c, ctx);
@@ -111,7 +120,7 @@ export function noteCell(key, cs, ctx) {
   const c = cs[0];
   switch (key) {
     case 'template': return String(cs.length);
-    case 'cardMod': return dateTimeStr(Math.max(...cs.map(x => x.mod || 0)));
+    case 'cardMod': return dateTimeStr(Math.max(...cs.map(x => cmod(x, ctx))));
     case 'deck': { const ds = new Set(cs.map(x => E(x, ctx).did)); return ds.size > 1 ? `(${ds.size})` : deckStr(c, ctx); }
     case 'cardReps': return String(cs.reduce((s, x) => s + (x.reps || 0), 0));
     case 'cardLapses': return String(cs.reduce((s, x) => s + (x.lapses || 0), 0));
@@ -133,12 +142,14 @@ export function makeOrder(ctx) {
     const all = []; for (const [id, nt] of ctx.notetypes) (nt.templates || []).forEach((t, ord) => all.push({ k: `${id}:${ord}`, name: t.name, id: +id, ord }));
     all.sort((a, b) => unicase(a.name, b.name) || a.id - b.id || a.ord - b.ord).forEach((x, i) => tmplPos.set(x.k, i));
   }
-  const tagsKey = c => ` ${ctx.tagsOf(c).join(' ')} `;
-  const sortFld = c => String(ctx.sortFld ? ctx.sortFld(c) : (c.sfld ?? ''));   // notes.sfld（HTML を除いただけ。前後の空白も残る）
-  const dueKey = c => { const d = E(c, ctx).due; return d > 1e9 || c.type === 0 ? d : (d - ctx.days) * 86400 + ctx.now; };
+  // 並べ替えのあいだに何度も引くキーは、カードごとに1回だけ作る（5万枚でも重くならないように）
+  const memo = fn => { const m = new Map(); return c => { let v = m.get(c.id); if (v === undefined) { v = fn(c); m.set(c.id, v); } return v; }; };
+  const tagsKey = memo(c => ` ${ctx.tagsOf(c).join(' ')} `);
+  const sortFld = memo(c => String(ctx.sortFld ? ctx.sortFld(c) : (c.sfld ?? '')));   // notes.sfld（HTML を除いただけ。前後の空白も残る）
+  const dueKey = memo(c => { const d = E(c, ctx).due; return d > 1e9 || c.type === 0 ? d : (d - ctx.days) * 86400 + ctx.now; });
   // カードモードの比べ方（並べ替えのキー → (a, b) => 数）
   const card = {
-    cardMod: (a, b) => (a.mod || 0) - (b.mod || 0),
+    cardMod: (a, b) => cmod(a, ctx) - cmod(b, ctx),
     template: (a, b) => numCmp(tmplPos.get(`${a.mid}:${a.ord}`) ?? tmplPos.get(`${a.mid}:0`), tmplPos.get(`${b.mid}:${b.ord}`) ?? tmplPos.get(`${b.mid}:0`)) || a.ord - b.ord,
     deck: (a, b) => numCmp(deckPos.get(E(a, ctx).did), deckPos.get(E(b, ctx).did)),
     cardDue: (a, b) => dueKey(a) - dueKey(b),
@@ -168,7 +179,7 @@ export function makeOrder(ctx) {
     const cmpVal = (x, y) => (Array.isArray(x) ? (x[0] - y[0]) || (x[1] - y[1]) : x - y);
     switch (key) {
       case 'template': pos = rank(agg(cs => cs.length)); break;
-      case 'cardMod': pos = rank(agg(cs => Math.max(...cs.map(c => c.mod || 0)))); break;
+      case 'cardMod': pos = rank(agg(cs => Math.max(...cs.map(c => cmod(c, ctx))))); break;
       // 2つ目のキー decks.pos は集計していない列なので、SQLite ではそのノートの最初に読んだカード（id のいちばん小さいカード）の値になる
       case 'deck': pos = rank(agg(cs => { const first = cs.reduce((m, c) => (c.id < m.id ? c : m)); return [new Set(cs.map(c => E(c, ctx).did)).size, deckPos.get(E(first, ctx).did) ?? 0]; })); break;
       case 'cardDue': pos = rank(agg(cs => { const ok = cs.filter(c => !ctx.inFiltered(c) && c.type !== 0 && E(c, ctx).queue > 0); return ok.length ? Math.min(...ok.map(dueKey)) : null; })); break;
