@@ -6,7 +6,10 @@ let running = null;
 export const state = { online: null, lastOk: 0, lastError: '', pending: 0, serverless: false };
 
 async function call(path, opt = {}) {
-  const r = await fetch(API + path, { cache: 'no-store', credentials: 'same-origin', ...opt });
+  // 設定＞同期の「ネットワークタイムアウト」（秒。既定 60）を過ぎたら止める
+  let secs = 60; try { secs = Math.max(5, parseInt(localStorage.getItem('netTimeout') || '60', 10) || 60); } catch {}
+  const signal = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(secs * 1000) : undefined;
+  const r = await fetch(API + path, { cache: 'no-store', credentials: 'same-origin', ...(signal ? { signal } : {}), ...opt });
   if (r.status === 404) { state.serverless = true; throw new Error('サーバーなし'); }
   if (!r.ok) throw new Error(`${path}: ${r.status}`);
   return r.json();

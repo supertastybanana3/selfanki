@@ -48,10 +48,14 @@ const PREF_DEFAULT = { videoLoop: false, videoControls: true, badge: false, past
 const lsRaw = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch { return d; } };
 const pref = k => { try { const v = localStorage.getItem('pref:' + k); return v == null ? PREF_DEFAULT[k] : v === '1'; } catch { return PREF_DEFAULT[k]; } };
 // 学習の設定を画面に映す（トップバー・ボトムバー・残り枚数・回答ボタン・次回までの間隔）
+// ボトムバーのサイズ（設定＞学習＞ボトムバー）。AnkiMobile 25.09 の実機で測った回答ボタンの高さ 26・52・76・166pt（帯はボタン＋上 8pt＋下 20pt）
+const BB_SIZES = { small: '小', std: '標準', large: '大', xl: '特大' };
 function applyPrefs() {
   const c = document.body.classList;
   c.toggle('notopbar', !pref('topbar')); c.toggle('nobottombar', !pref('bottombar'));
   c.toggle('nocounts', !pref('counts')); c.toggle('noanswerbtn', !pref('answerBtn')); c.toggle('noivl', !pref('ivl'));
+  const bb = BB_SIZES[lsRaw('bbSize', 'std')] ? lsRaw('bbSize', 'std') : 'std';   // ボトムバーのサイズ（小・標準・大・特大）
+  for (const k of Object.keys(BB_SIZES)) c.toggle('bb-' + k, k === bb && k !== 'std');
   const penOn = !!DESIGN && pref('pen');
   c.toggle('nopen', !penOn); if (typeof pen !== 'undefined' && pen) pen.setEnabled(penOn);
   // ツールアイコン（歯車）を出すか・左右どちらか（設定＞学習）。左に置くときは、手書きパッドの元に戻すは右へ
@@ -351,6 +355,14 @@ function scheduleSync(ms = 4000) {
 const autoSyncOn = () => !!FEAT.autoSync && pref('autoSync');
 const syncNeverDone = () => { try { return !localStorage.getItem('syncedOnce'); } catch { return false; } };
 // 手で同期したときの小窓（AnkiMobile 25.09 の実機と同じ「同期中... 追加/変更: N↑ N↓ 削除: N↑ N↓」）。キャンセルは小窓を閉じるだけ（同期は続く）
+let medialogPending = null;   // 設定＞同期＞メディアログ（開いたときに読み直す）
+// 設定＞同期の「ログアウト」: この端末のつなぎ（合言葉のクッキー）を外す。端末の記録は残る。もう一度つなぐには番号を入れ直す
+async function logout() {
+  const ok = await iosPrompt({ title: 'ログアウト', message: 'この端末の、サーバーへのつなぎを外します。まだ送っていない答えは、この端末に残ります。もう一度使うには、パソコンで出した番号を入れ直してください。', ok: 'ログアウト' });
+  if (!ok) return;
+  try { await fetch(new URL('../api/logout', location.href).href, { method: 'POST', credentials: 'same-origin' }); } catch {}
+  location.href = new URL('/pair', location.href).href;
+}
 // バックアップの印（変わったかどうかだけ分かればよい）: 記録の数・カードと記録とノートの最後の変更・デッキとプリセットの中身
 function collectionSig() {
   let m = 0; for (const c of S.all) { if ((c.rev || 0) > m) m = c.rev; if ((c.mod || 0) * 1000 > m) m = c.mod * 1000; }
@@ -568,7 +580,7 @@ function openTools() {
   if (document.body.dataset.view !== 'study') return;
   // 文言は Anki の訳（「X を元に戻す」「X をやり直す」。答えは「カードへの回答」）
   const u = $('#menu-undo'), top = S.undo[S.undo.length - 1]; u.disabled = !S.undo.length; u.textContent = !top ? '元に戻す' : `${top.kind && top.label ? top.label : 'カードへの回答'} を元に戻す`;
-  const rd = $('#menu [data-act="redo"]'), rt = REDO[REDO.length - 1]; rd.disabled = !rt; rd.textContent = !rt ? 'やり直す' : `${rt.kind === 'ans' ? 'カードへの回答' : rt.label} をやり直す`;
+  const rd = $('#menu [data-act="redo"]'), rt = REDO[REDO.length - 1]; rd.disabled = false; rd.textContent = !rt ? 'やり直す' : `${rt.kind === 'ans' ? 'カードへの回答' : rt.label} をやり直す`;
   $('#menu').classList.add('open');
 }
 function showDecks() {
@@ -1024,7 +1036,7 @@ async function revertEntry(e) {
 }
 async function redoAction() {
   if (S.busy) return;
-  const e = REDO[REDO.length - 1]; if (!e) { toast('やり直せる操作はありません'); return; }
+  const e = REDO[REDO.length - 1]; if (!e) return;   // やり直せるものが無いときは何もしない（実機のボタンは押せる色のまま）
   if (e.kind === 'ans' && (document.body.dataset.view !== 'study' || S.card?.id !== e.cid)) { toast('やり直せません'); return; }   // 答えのやり直しは、戻したカードを出しているときだけ
   S.busy = true; redoing = true;
   try {
@@ -2148,6 +2160,7 @@ function setupTools() {
       { note: 'Buggy. Only enable if you have an old Anki version that can\'t sync.' }] }),
     rollover: () => ({ title: '日付更新時刻', groups: [Array.from({ length: 24 }, (_, h) => ({ t: String(h).padStart(2, '0') + ':00', ck: (S.meta.config.rollover ?? 4) === h, run: async () => { await saveConf('global', { rollover: h }, Date.now()); S.mainQ = null; checkDay(true); } }))] }),
     gamepad: () => ({ title: 'ゲームパッド', groups: [PAD_BTNS.map(([i, t, d]) => ({ t, v: actName(padAct(i, d)), go: 'gp' + i })), { note: 'スティックは、いつもカードを上下に送ります。' }] }),
+    bbsize: () => ({ title: 'ボトムバーのサイズ', groups: [Object.entries(BB_SIZES).map(([k, t]) => ({ t, ck: (lsRaw('bbSize', 'std') in BB_SIZES ? lsRaw('bbSize', 'std') : 'std') === k, run: () => { setLS('bbSize', k); applyPrefs(); } }))] }),
     toolspos: () => ({ title: 'ツールアイコンの配置', groups: [[['left', '左側'], ['right', '右側']].map(([k, t]) => ({ t, ck: (toolsLeft() ? 'left' : 'right') === k, run: () => { setLS('toolsPos', k); applyPrefs(); } }))] }),
     dtp: () => ({ title: 'ダブルタップ防止', groups: [Object.entries(DTP).map(([k, [t]]) => ({ t, ck: dtpKey() === k, run: () => setLS('dtp', k) }))] }),
     notify: () => ({ title: '通知', groups: [
@@ -2162,7 +2175,7 @@ function setupTools() {
       [tgl('トップバーを表示', 'topbar', applyPrefs)],
       TOP_DEF.map((_, i) => ({ t: `ボタン${i + 1}`, v: actName(topAct(i)), go: 'tb' + i }))] }),
     bottombar: () => ({ title: 'ボトムバー', groups: [
-      [tgl('ボトムバーを表示', 'bottombar', applyPrefs), { t: 'ボトムバーのサイズ', v: '標準', go: 'x', off: 1 }],
+      [tgl('ボトムバーを表示', 'bottombar', applyPrefs), { t: 'ボトムバーのサイズ', v: BB_SIZES[lsRaw('bbSize', 'std')] || '標準', go: 'bbsize' }],
       { sec: '質問側' }, [tgl('残りのカード枚数', 'counts', applyPrefs)],
       { sec: '解答側' }, [tgl('回答ボタン', 'answerBtn', applyPrefs), tgl('次回の学習までの間隔', 'ivl', applyPrefs)]] }),
     tap: () => ({ title: 'タップ', groups: [
@@ -2194,19 +2207,36 @@ function setupTools() {
         const r = await iosPrompt({ title: t, numbers: [{ label: t, value: String(lim[k]) }] }); if (!r) return;
         xchg.setBkLimit(k, r.numbers[0]); renderPrefs();
       } });
-      const when = n => { const d = parseBackupName(n); return d ? d.toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : n; };
-      const mb = b => b.size >= 1048576 ? `${(b.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b.size / 1024))} KB`;
+      const p2 = x => String(x).padStart(2, '0');
+      const when = n => { const d = parseBackupName(n); return d ? `${d.getFullYear()}/${p2(d.getMonth() + 1)}/${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}` : n; };   // 実機: 2026/11/23 10:46:00
+      // 並びと文言は AnkiMobile 25.09 の実機のとおり（間隔と保管数 → Anki の説明 →「現在利用可能なバックアップ」→「今すぐ作成」→ ユーザー名と日時）
       return { title: 'バックアップ', groups: [
-        [{ t: 'バックアップを作成', act: 1, run: () => backupNow().then(() => { if (!$('#prefs').hidden && stack.at(-1) === 'backup') renderPrefs(); }) }],
         [num('自動バックアップの間隔（分）', 'mins'), num('各日代表のバックアップ保管数（何日分）', 'daily'), num('各週代表のバックアップ保管数（何週分）', 'weekly'), num('各月代表のバックアップ保管数（何か月分）', 'monthly')],
-        { note: 'このアプリは一定時間（分）ごとに、アプリを閉じたとき（ほかのアプリに切り替えたとき）にコレクションのバックアップを作成しています。各期間（日／週／月）の代表として保管するバックアップ以外のバックアップは、ディスク領域を空けるために、作成から2日以上経過した後に削除していきます。画像・音声は含みません。' },
-        ...(list && list.length ? [list.map(b => ({ t: when(b.name), v: mb(b), run: () => { closePrefs(); xchg.restoreBackup(b.name); } }))] : [])] };
+        { note: 'Anki は一定時間（分）ごとにコレクションのバックアップを作成しています。各期間（日／週／月）の代表として保管するバックアップ以外のバックアップは、ディスク領域を空けるために、作成から2日以上経過した後に削除していきます。' },
+        { sec: '現在利用可能なバックアップ' },
+        [{ t: '今すぐ作成', act: 1, run: () => backupNow().then(() => { if (!$('#prefs').hidden && stack.at(-1) === 'backup') renderPrefs(); }) },
+          ...(list || []).map(b => ({ t: 'ユーザー 1', v: when(b.name), run: () => { closePrefs(); xchg.restoreBackup(b.name); } }))]] };
     },
     about: () => ({ title: 'このアプリについて', about: ['Anki のカードと学習の記録をそのまま使う暗記アプリです。', '復習の間隔の計算と出題の順番は、Anki のソースコード（AGPL）をもとに書き直したもので、Anki 本体と同じ結果になることを確かめています。', '答えた記録をパソコンの Anki に書き戻せば、Anki や AnkiMobile と並行して使えます。'] }),
+    // 同期（並びは AnkiMobile 25.09 の実機のとおり。「ログイン中のユーザー」の所は、つないでいるサイト。「一方向同期」はこの作りでは意味が違うので押せない）
     sync: () => ({ title: '同期', groups: [
       [tgl('音声と画像を同期', 'syncMedia', () => { if (pref('syncMedia') && S.manifest) prefetchAll(S.manifest); }), { t: 'メディア同期の進捗を表示', tg: true, off: 1 }],
-      { note: 'オフにすると、端末で足した画像・音声をサーバーへ送らず、オフラインのために画像・音声を先に取っておくこともしません（出てきたカードの分は、そのつど取ってきます）。' },
-      [{ t: '今すぐ同期', act: 1, run: () => { closePrefs(); runSync(true); } }]] }),
+      { sec: 'つないでいるサイト: ' + location.host },
+      [{ t: 'メディアログ', act: 1, go: 'medialog' }, { t: '一方向同期', act: 1, off: 1 }, { t: 'ログアウト', act: 1, run: () => logout() }],
+      [{ t: 'ネットワークタイムアウト', v: lsRaw('netTimeout', '60'), run: async () => {
+          const r = await iosPrompt({ title: 'ネットワークタイムアウト', numbers: [{ label: '秒', value: lsRaw('netTimeout', '60') }] });
+          if (r) { setLS('netTimeout', String(Math.max(5, parseInt(r.numbers[0], 10) || 60))); renderPrefs(); } } },
+        { t: 'セルフホスト同期サーバー', v: location.host, off: 1 }],
+      { note: '上級ユーザー向け - 詳細についてはマニュアルを参照してください' }] }),
+    // メディアログ: 送った画像・音声（新しい順）と、まだ送っていないもの
+    medialog: () => {
+      if (!medialogPending) xchg.pendingMedia().then(q => { medialogPending = q; if (!$('#prefs').hidden && stack.at(-1) === 'medialog') renderPrefs(); });
+      const p2 = x => String(x).padStart(2, '0'), when = t => { const d = new Date(t); return `${d.getFullYear()}/${p2(d.getMonth() + 1)}/${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`; };
+      const pend = medialogPending || [], sent = xchg.mediaLog();
+      return { title: 'メディアログ', groups: [
+        ...(pend.length ? [{ sec: `まだ送っていない画像・音声（${pend.length}）` }, pend.map(m => ({ t: m.name, off: 1 }))] : []),
+        { sec: '送った画像・音声' }, sent.length ? sent.map(([t, name]) => ({ t: name, v: when(t), off: 1 })) : [{ t: 'まだありません', off: 1 }]] };
+    },
   };
   // 割り当てを選ぶページ（AnkiMobile と同じく全アクションの一覧。まだ写していないものは薄く出して選べない）
   const SWIPES = [['left', '左にスワイプ'], ['right', '右にスワイプ'], ['up', '上にスワイプ'], ['down', '下にスワイプ']];
@@ -2235,7 +2265,7 @@ function setupTools() {
     }
   };
   $('#prefs .back').onclick = () => { stack.pop(); if (stack.length) renderPrefs(); else closePrefs(); };
-  $('#nav-settings').onclick = () => { stack = ['root']; renderPrefs(); $('#prefs').hidden = false; };
+  $('#nav-settings').onclick = () => { stack = ['root']; medialogPending = null; renderPrefs(); $('#prefs').hidden = false; };
   // Anki 本体の画面（統計など）を全画面で開く。中身は /graphs などの Anki の画面、データは ankiweb.mjs が答える
   installAnkiBackend(() => S, () => (typeof S.deck === 'number' ? S.deck : S.lastDeck), { updateDeckConfigs, close: () => $('#awpage .back').click() });
   $('#awpage .back').onclick = () => { $('#awpage').hidden = true; $('#awframe').src = 'about:blank'; };
