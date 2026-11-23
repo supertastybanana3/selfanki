@@ -933,9 +933,9 @@ function openBrowsePreview() {
   brPreview ||= createPreview({ el: $('#bprev'), list: () => BR.list, render: (f, c, both) => previewInto(f, c, both ? 'a' : 'q') });
   if (BR.list.length) brPreview.open(0);
 }
-// カードの裏（side='q' なら表）をプレビューの枠に出す（ブラウザの「表示」と、編集の画面の目のボタン）
+// カードの裏（side='q' なら表）をプレビューの枠に出す（ブラウザの「表示」と、編集の画面の目のボタン・カードテンプレートの画面）
 async function previewInto(f, c, side = 'a') {
-  const css = S.meta.notetypes[c.mid]?.css || ''; const dark = isDark();
+  const css = c.css ?? S.meta.notetypes[c.mid]?.css ?? ''; const dark = isDark();   // c.css＝カードテンプレートの画面で直している途中のスタイル
   const src = (side === 'q' ? c.q : c.a) || '';
   const math = /\\\(|\\\[/.test(src) ? `<script src="${MJCONF_URL}"></script><script src="${MATHJAX_URL}" async></script>` : '';
   const body = src.replace(/\[\[type:[^\]]*\]\]/g, '').replace(/\[anki:play:(q|a):(\d+)\]/g, '');
@@ -2132,7 +2132,7 @@ function setupNotes() {
   // 「カードテンプレート」「ノートタイプを変更」（app/ntscreen.mjs）
   ntScreen = createNtScreen({ S, notes, prompt: o => iosPrompt(o), alert: (t, m) => iosAlert(t, m), confirm: (title, message, o = {}) => iosPrompt({ title, message, ...o }).then(r => !!r),
     toast, commitConf: async rows => { applyConf(rows); for (const r of rows) await store.addOp({ t: 'conf', ...r }); }, pushUndo: e => undoPush(e),
-    loadNotes: () => loadNotes(S, BUNDLE), deckName, changed: () => notesChanged(new Set(S.card ? [S.card.nid] : [])) });
+    loadNotes: () => loadNotes(S, BUNDLE), deckName, changed: () => notesChanged(new Set(S.card ? [S.card.nid] : [])), showPreview: (f, c) => previewInto(f, c) });
 }
 // 書き出し・読み込み（app/xui.mjs・exchange.mjs・pkg.mjs）
 function setupXchg() {

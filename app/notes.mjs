@@ -19,18 +19,27 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 const plain = h => stripHtml(String(h).replace(/<(?:img|audio|video|source)\b[^>]*?\bsrc\s*=\s*["']?([^"'>\s]+)[^>]*>/gi, ' $1 '));
 const BACK_SVG = '<svg viewBox="0 0 12 20" width="12" height="20" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2 2 10l8 8"/></svg>';
 const CHEV = '<svg width="7.7" height="12.8" viewBox="0 0 9 15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 1.5 7.5 7.5 1.5 13.5"/></svg>';
-// 道具の帯（AnkiMobile のマニュアル editing.md の並び: B I U・Fx・絵筆・クリップ・(iPad はマイクが別)・ペン（iPad）・√・目・</>）。マイクの置き場所とクリップのメニューの文言は実機と見比べていない
+// 道具の帯（AnkiMobile 25.09 の実機 11/23: B・I・U・Fx・目・絵筆・マイク・クリップ・ペン・√・</>）。フィールドを選んでいないときは、目と </> のほかは押せない（実機）
 const TOOLS = [
-  ['bold', '<b>B</b>', '太字'], ['italic', '<i style="font-family:Georgia,serif">I</i>', 'イタリック'], ['underline', '<u>U</u>', '下線を追加'],
+  ['bold', '<b>B</b>', '太字'],
+  ['italic', '<i style="font-family:Georgia,serif">I</i>', 'イタリック'],
+  ['underline', '<u>U</u>', '下線を追加'],
   ['removeFormat', '<span style="font-style:italic;font-family:Georgia,serif">F<small>x</small></span>', '書式を取り除く'],
-  ['color', '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4.5l5 5-8 8-5-5z"/><path d="M6.5 12.5 3 21l8.5-3.5"/></svg>', '文字色'],
-  ['attach', '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M20 11.5 12 19.5a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7L9.7 17.2a1.7 1.7 0 0 1-2.4-2.4L15 7"/></svg>', 'メディアを追加'],
-  ['mic', '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></svg>', '音声を録音'],
-  ['draw', '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19z"/><path d="M14.5 6.5l3 3"/></svg>', '手書き'],
-  ['math', '<span style="font-family:Georgia,serif">√</span>', '数式'],
   ['preview', '<svg viewBox="0 0 28 20" width="25" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M1.5 10S6 2 14 2s12.5 8 12.5 8S22 18 14 18 1.5 10 1.5 10z"/><circle cx="14" cy="10" r="4"/></svg>', 'プレビュー'],
+  ['color', '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4.5l5 5-8 8-5-5z"/><path d="M6.5 12.5 3 21l8.5-3.5"/></svg>', '文字色'],
+  ['mic', '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></svg>', '音声を録音'],
+  ['attach', '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M20 11.5 12 19.5a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7L9.7 17.2a1.7 1.7 0 0 1-2.4-2.4L15 7"/></svg>', 'メディアを追加'],
+  ['draw', '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19z"/><path d="M14.5 6.5l3 3"/></svg>', '手書き'],
+  ['math', '<span style="font-family:Georgia,serif">√<i style="font-size:13px">x</i></span>', '数式'],
   ['html', '<span style="font:600 15px ui-monospace,Menlo,monospace">&lt;/&gt;</span>', 'HTMLエディタ'],
 ];
+const ALWAYS = new Set(['preview', 'html']);
+// 絵筆の8色。ダークは実機（11/23）で測った色（iOS の dark の system 色）。ライトは iOS の light の system 色と推測（実機では見ていない）
+const PAL_DARK = ['#ffffff', '#0091ff', '#31d158', '#ff9230', '#ff4246', '#db33f2', '#ffd702', '#8e8e93'];
+const PAL_LIGHT = ['#000000', '#007aff', '#34c759', '#ff9500', '#ff3b30', '#af52de', '#ffcc00', '#8e8e93'];
+const MIC_DENIED = 'お使いのデバイスの「設定」→「プライバシー」→「マイク」からAnkiがマイクを使用できるように設定してください。';
+// 手書き（ペン）の色（実機の iOS の手書きの道具で測った色）
+const PEN_COLORS = ['#000000', '#167efb', '#53d769', '#fed02f', '#fc3042'];   // フィールドを選んでいなくても押せる
 const CSS = `#editor{position:fixed;inset:0;z-index:28;background:var(--am-bg);display:flex;flex-direction:column}
 #editor[hidden],#editor [hidden]{display:none !important}
 #editor .pnav{flex:none;height:calc(50.5px + env(safe-area-inset-top));padding-top:env(safe-area-inset-top);display:grid;grid-template-columns:1fr auto 1fr;align-items:center;background:var(--am-bar);border-bottom:.5px solid var(--am-barline)}
@@ -62,9 +71,21 @@ const CSS = `#editor{position:fixed;inset:0;z-index:28;background:var(--am-bg);d
 #erec .t{font-size:17px;font-weight:600;padding:19px 16px 4px} #erec .tm{font:300 34px -apple-system,system-ui,sans-serif;font-variant-numeric:tabular-nums;padding:4px 0 16px;color:#ff453a}
 #erec .bt{display:flex;border-top:.5px solid rgba(255,255,255,.15)} #erec .bt button{flex:1;height:44px;font-size:17px;color:#4ea2ff;background:none;border:0} #erec .bt button+button{border-left:.5px solid rgba(255,255,255,.15);font-weight:600}
 #edraw{position:fixed;inset:0;z-index:40;background:#fff;display:flex;flex-direction:column}
-#edraw nav{flex:none;display:flex;justify-content:space-between;align-items:center;height:calc(50px + env(safe-area-inset-top));padding:env(safe-area-inset-top) 12px 0;background:#f7f7f7;border-bottom:.5px solid #c8c8c8}
-#edraw nav button{font-size:17px;color:#007aff;background:none;border:0} #edraw nav .yes{font-weight:600}
-#edraw canvas{flex:1;width:100%;touch-action:none}
+#edraw nav{flex:none;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;height:calc(50.5px + env(safe-area-inset-top));padding:env(safe-area-inset-top) 14px 0;background:var(--am-bar);border-bottom:.5px solid var(--am-barline)}
+#edraw nav b{font-size:17px;font-weight:600;color:var(--am-text)} #edraw nav button{font-size:17px;color:var(--am-bartext);background:none;border:0;justify-self:start} #edraw nav .yes{justify-self:end}
+#edraw canvas{flex:1;width:100%;touch-action:none;background:#fff}
+#edraw .pk{position:absolute;left:50%;bottom:calc(12px + env(safe-area-inset-bottom));transform:translateX(-50%);display:flex;align-items:center;gap:12px;padding:10px 18px;border-radius:30px;background:#343434;box-shadow:0 4px 24px rgba(0,0,0,.28)}
+#edraw .pk .undo,#edraw .pk .redo{width:36px;height:36px;border-radius:50%;background:#4a4a4c;color:#fff;display:flex;align-items:center;justify-content:center;border:0} #edraw .pk button:disabled{opacity:.35}
+#edraw .pk .sep{width:1px;height:40px;background:#555}
+#edraw .pk .cols{display:grid;grid-template-columns:repeat(3,30px);gap:8px}
+#edraw .pk .col{width:30px;height:30px;border-radius:50%;background:var(--c);border:0;box-shadow:inset 0 0 0 1px rgba(255,255,255,.25)} #edraw .pk .col.on{box-shadow:0 0 0 2px #343434,0 0 0 4px #fff}
+#epop{position:fixed;z-index:31;display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:13px;background:var(--br-pop,#2c2c2e);box-shadow:0 8px 30px rgba(0,0,0,.4)}
+#epop::after{content:"";position:absolute;left:calc(var(--ax) - 9px);border:9px solid transparent}
+#epop.below::after{top:-17px;border-bottom-color:var(--br-pop,#2c2c2e)} #epop.above::after{bottom:-17px;border-top-color:var(--br-pop,#2c2c2e)}
+#epop button{min-width:44px;height:40px;padding:0 8px;border:0;background:none;color:#4ea2ff;font:400 19px -apple-system,system-ui,sans-serif}
+#epop.above{gap:0;padding:10px 6px} #epop.above button{min-width:min(80px,calc((100vw - 40px) / 8));height:30px;display:flex;align-items:center;justify-content:center}
+#epop .dot{display:block;width:14px;height:14px;border-radius:50%;box-shadow:0 0 0 .5px rgba(128,128,128,.5)}
+#editor .pnav .mid{display:flex;align-items:center;justify-content:center} #editor .pnav .mid .tools{height:44px;color:var(--am-bartext);font-size:17px}
 #etools .h{font-size:13px;color:#8e8e93;text-align:center;padding:12px 0 11px}
 #etools button{height:54px;border:0;border-top:.5px solid rgba(255,255,255,.12);background:none;color:#4ea2ff;font-size:18px} #etools button.red{color:#ff4c44}`;
 
@@ -251,7 +272,8 @@ export function createNotes(env) {
   const frames = () => [...el.querySelectorAll(':scope > .pbody .fbox')];
   function fieldDoc(html, f) {
     const dark = env.isDark(), font = String(f.font || 'Arial').replace(/["<>]/g, '');
-    return `<!doctype html><html><head><meta charset="utf-8"><base href="${env.MEDIA}"><style>html{color:${dark ? '#f2f2f2' : '#000'};background:transparent}
+    // color-scheme を親と合わせる（違うと Chromium は枠を不透明な白で描き、ダークで薄い字が読めなくなる）
+    return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="${dark ? 'dark' : 'light'}"><base href="${env.MEDIA}"><style>html{color-scheme:${dark ? 'dark' : 'light'};color:${dark ? '#f2f2f2' : '#000'};background:transparent}
 body{margin:0;padding:10px 12px;min-height:22px;font-family:"${font}",-apple-system,"Hiragino Sans",sans-serif;font-size:17px;line-height:1.35;overflow-wrap:anywhere;outline:none;-webkit-text-size-adjust:100%}
 img{max-width:100%;height:auto}</style></head><body contenteditable="true" spellcheck="false" autocapitalize="${env.pref?.('autoCap') === false ? 'none' : 'sentences'}" autocorrect="${env.pref?.('autoCorrect') === false ? 'off' : 'on'}"${f.rtl ? ' dir="rtl"' : ''}>${html}</body></html>`;   // 設定＞編集の「文頭を大文字」「オートコレクト」
   }
@@ -260,7 +282,7 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
     if (el) return el;
     const st = document.createElement('style'); st.textContent = CSS; document.head.append(st);
     el = document.createElement('div'); el.id = 'editor'; el.hidden = true;
-    el.innerHTML = `<nav class="pnav"><button class="back">閉じる</button><span class="ptitle"></span><div class="nr"><button class="tools">ツール</button><button class="go"></button></div></nav>
+    el.innerHTML = `<nav class="pnav"><button class="back">閉じる</button><span class="mid"><span class="ptitle"></span><button class="tools">ツール</button></span><div class="nr"><button class="go"></button></div></nav>
 <div class="etb">${TOOLS.map(([k, h, t, off]) => `<button data-k="${k}" title="${t}"${off ? ' disabled' : ''}>${h}</button>`).join('')}</div><div class="pbody"></div>
 <div class="esub" hidden><nav class="pnav"><button class="back">${BACK_SVG}<span class="bl"></span></button><span class="ptitle"></span><span></span></nav><div class="pbody"></div></div>
 <div class="etoast"></div><div class="eprev" hidden><nav class="pnav"><button class="back">${BACK_SVG}<span class="bl">戻る</span></button><span class="ptitle">プレビュー</span><span></span></nav><iframe title="プレビュー"></iframe></div>`;
@@ -279,9 +301,14 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
   function paint() {
     const body = el.querySelector(':scope > .pbody'); body.innerHTML = '';
     const t = nt(ed.mid);
-    el.querySelector(':scope > .pnav .ptitle').textContent = ed.mode === 'add' ? '追加' : '編集';
-    el.querySelector('.go').textContent = ed.mode === 'add' ? '追加' : '保存';
-    el.querySelector('.tools').hidden = ed.mode === 'add';
+    // 実機（11/23）の編集の画面: 左「戻る」、真ん中「ツール」（題は無い）、右「保存」は中身を変えたときだけ。追加の画面は今のまま（実機は見比べていない）
+    const edit = ed.mode === 'edit';
+    el.querySelector(':scope > .pnav > .back').textContent = edit ? '戻る' : '閉じる';
+    el.querySelector(':scope > .pnav .ptitle').textContent = edit ? '' : '追加';
+    el.querySelector(':scope > .pnav .ptitle').hidden = edit;
+    el.querySelector('.go').textContent = edit ? '保存' : '追加';
+    el.querySelector('.go').hidden = edit;   // 変えたら watch() が出す
+    el.querySelector('.tools').hidden = !edit;
     const row = (lab, val, fn) => { const b = document.createElement('button'); b.className = 'it'; b.innerHTML = `<span class="lab"></span><span class="val"></span><span class="chev">${CHEV}</span>`; b.children[0].textContent = lab; b.children[1].textContent = val; b.onclick = fn; return b; };
     if (ed.mode === 'add') {   // ノートタイプとデッキは追加のときだけ（マニュアルのとおり、編集には無い）
       const g = document.createElement('div'); g.className = 'grp';
@@ -301,6 +328,7 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
         const d = fr.contentDocument; if (!d || !d.body) return;
         fr._init = d.body.innerHTML; fit(fr);
         d.addEventListener('paste', e => pasteImages(e, fr, ta, i));
+        d.addEventListener('focusin', () => watch()); d.addEventListener('focusout', () => setTimeout(watch, 0));
         if (i === 0 && ed && ed.focusFirst) { ed.focusFirst = false; try { fr.contentWindow.focus(); d.body.focus(); } catch {} }
       };
       fr.srcdoc = fieldDoc(ed.vals[i] ?? '', f);
@@ -327,7 +355,11 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
   function watch() {
     if (!ed || !el) return;
     const boxes = frames(), a = document.activeElement;
-    boxes.forEach((box, i) => { const fr = box.querySelector('iframe'); if (!fr.hidden) fit(fr); if (a === fr || a === box.querySelector('textarea')) ed.cur = i; });
+    let focused = -1;
+    boxes.forEach((box, i) => { const fr = box.querySelector('iframe'); if (!fr.hidden) fit(fr); if (a === fr || a === box.querySelector('textarea')) { ed.cur = i; focused = i; } });
+    // 実機: フィールドを選んでいない（入力の場所が無い）ときは、目と </> のほかは押せない。メニューを開いているあいだは、開いたときのまま
+    if (!document.getElementById('etools') && !document.getElementById('epop')) for (const b of el.querySelectorAll('.etb button')) if (!ALWAYS.has(b.dataset.k)) b.disabled = focused < 0;
+    if (ed.mode === 'edit') { const go = el.querySelector('.go'), ch = hasChanges(); if (go.hidden === ch) go.hidden = !ch; }   // 保存は変えたときだけ
     // iOS の殻に、文字を打っているかを知らせる（フィールドの枠の中に入ったことは、親の focusin では分からないため）
     const t = !!a && el.contains(a) && a.matches('iframe,textarea,input');
     if (t !== typing) { typing = t; env.typing?.(t); }
@@ -352,26 +384,22 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
     }
     if (ed.html.has(i)) return;
     const run = (cmd, val = null) => { try { fr.contentWindow.focus(); fr.contentDocument.execCommand(cmd, false, val); fit(fr); } catch {} };
-    if (k === 'color') {   // 絵筆: 文字色（iOS の色の選択画面。最後に選んだ色を覚える）。選んでいた文字に色を付ける
-      const inp = document.createElement('input'); inp.type = 'color'; inp.value = ls('editColor') || '#ff0000';
-      inp.style.cssText = 'position:fixed;left:-100px;top:0;opacity:0';
-      document.body.append(inp);
-      inp.addEventListener('change', () => { lsSet('editColor', inp.value); try { fr.contentDocument.execCommand('styleWithCSS', false, true); } catch {} run('foreColor', inp.value); inp.remove(); });
-      inp.addEventListener('blur', () => setTimeout(() => inp.remove(), 500));
-      inp.click(); return;
+    if (k === 'color') {   // 絵筆（実機 11/23）: 8色の丸が横に並ぶ吹き出し。押した色を、選んでいる文字に付ける
+      const pal = env.isDark() ? PAL_DARK : PAL_LIGHT;
+      hpop(el.querySelector('.etb [data-k="color"]'), pal.map(c => [`<span class="dot" style="background:${c}"></span>`, c, () => { try { fr.contentDocument.execCommand('styleWithCSS', false, true); } catch {} run('foreColor', c); }]), 'above');
+      return;
     }
     if (k === 'attach') {   // クリップ: カメラ・写真ライブラリ・ファイルから（画像は Anki の貼り付けと同じく paste-<sha1>、ファイルは元の名前）
-      menu('メディアを追加', [['カメラ', () => pickMedia(fr, ta, i, 'image/*,video/*', 'environment')], ['写真ライブラリ', () => pickMedia(fr, ta, i, 'image/*,video/*')], ['ファイル', () => pickMedia(fr, ta, i, '', null, true)]],
+      menu('メディアを追加', [['カメラから', () => pickMedia(fr, ta, i, 'image/*,video/*', 'environment')], ['写真から', () => pickMedia(fr, ta, i, 'image/*,video/*')], ['ファイルから', () => pickMedia(fr, ta, i, '', null, true)]],
         el.querySelector('.etb [data-k="attach"]'));
       return;
     }
     if (k === 'mic') { recordInto(fr, ta, i); return; }
     if (k === 'draw') { drawInto(fr, ta, i); return; }
-    if (k === 'math') {   // √: 下付き・上付きと MathJax（文言は Anki の訳。選んでいた文字を囲む）
+    if (k === 'math') {   // √（実機 11/23）: ボタンの下の小さな横並びの吹き出しに、上付き・下付き・MathJax インライン・MathJax ブロック。選んでいた文字を囲む
       const wrap = (a, b) => () => { const sel = fr.contentDocument.getSelection()?.toString() ?? ''; run('insertText', a + sel + b); };
-      menu('数式', [['下付き文字', () => run('subscript')], ['上付き文字', () => run('superscript')],
-        ['MathJax インライン数式', wrap('\\(', '\\)')], ['MathJax ブロック数式', wrap('\\[', '\\]')], ['MathJax 化学式', wrap('\\(\\ce{', '}\\)')]],
-        el.querySelector('.etb [data-k="math"]'));
+      hpop(el.querySelector('.etb [data-k="math"]'), [['x<sup>2</sup>', '上付き文字', () => run('superscript')], ['x<sub>2</sub>', '下付き文字', () => run('subscript')],
+        ['\\(', 'MathJax インライン数式', wrap('\\(', '\\)')], ['\\[', 'MathJax ブロック数式', wrap('\\[', '\\]')]], 'below');
       return;
     }
     run(k);
@@ -432,7 +460,7 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
   }
   // マイク: 録って、保存で入れる（Anki の「音声を録音」と同じく録り終えてから入れる）
   async function recordInto(fr, ta, i) {
-    let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { env.iosAlert('音声を録音', 'マイクを使えません（' + (e?.message || e) + '）'); return; }
+    let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { env.iosAlert('', MIC_DENIED); return; }   // 文言は実機（11/23）
     const mr = new MediaRecorder(stream), chunks = []; mr.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
     const d = document.createElement('div'); d.id = 'erec';
     d.innerHTML = '<div class="box"><div class="t">録音中</div><div class="tm">0:00</div><div class="bt"><button class="no">キャンセル</button><button class="yes">保存</button></div></div>';
@@ -448,33 +476,58 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
     d.querySelector('.no').onclick = () => finish(false); d.querySelector('.yes').onclick = () => finish(true);
     mr.start();
   }
-  // ペン: 白い紙に描いて、PNG で入れる（AnkiMobile は iPad だけ。描いた画像をあとで直す機能は無い）
+  // ペン（実機 11/23）: 全画面の「手書き」。左上キャンセル・右上保存・白い紙。下に iOS の手書きの道具に似せた帯（元に戻す・やり直す・5色。ペンの種類・定規は無い）。
+  // 保存で、描いた所を切り出して PNG で入れる（あとで描き直す機能は無い）
   function drawInto(fr, ta, i) {
     const d = document.createElement('div'); d.id = 'edraw';
-    d.innerHTML = '<nav><button class="no">キャンセル</button><button class="undo">元に戻す</button><button class="yes">完了</button></nav><canvas></canvas>';
+    d.innerHTML = `<nav><button class="no">キャンセル</button><b>手書き</b><button class="yes">保存</button></nav><canvas></canvas>
+<div class="pk"><button class="undo" title="元に戻す"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button><button class="redo" title="やり直す"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button><span class="sep"></span><span class="cols">${PEN_COLORS.map((c, k) => `<button class="col${k ? '' : ' on'}" data-c="${c}" style="--c:${c}"></button>`).join('')}</span></div>`;
     document.body.append(d);
     const cv = d.querySelector('canvas'), ctx = cv.getContext('2d'), dpr = window.devicePixelRatio || 1;
     const W = cv.clientWidth, H = cv.clientHeight; cv.width = W * dpr; cv.height = H * dpr; ctx.scale(dpr, dpr);
-    let strokes = [], cur = null;
-    const paint = () => { ctx.clearRect(0, 0, W, H); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#000';
-      for (const s of cur ? [...strokes, cur] : strokes) { ctx.beginPath(); s.forEach((p, k) => { ctx.lineWidth = p.w; k ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); if (s.length === 1) ctx.lineTo(s[0].x + .01, s[0].y); ctx.stroke(); } };
+    let strokes = [], redo = [], cur = null, color = PEN_COLORS[0];
+    const tools = () => { d.querySelector('.undo').disabled = !strokes.length; d.querySelector('.redo').disabled = !redo.length; };
+    const paint = () => { ctx.clearRect(0, 0, W, H); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      for (const s of cur ? [...strokes, cur] : strokes) { ctx.strokeStyle = s.c; ctx.beginPath(); s.p.forEach((p, k) => { ctx.lineWidth = p.w; k ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); if (s.p.length === 1) ctx.lineTo(s.p[0].x + .01, s.p[0].y); ctx.stroke(); }
+      tools(); };
     const pt = e => { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top, w: e.pointerType === 'pen' && e.pressure > 0 ? 1 + 4 * e.pressure : 3 }; };
-    cv.addEventListener('pointerdown', e => { e.preventDefault(); if (env.pref?.('drawNoFinger') && e.pointerType === 'touch') return; try { cv.setPointerCapture(e.pointerId); } catch {} cur = [pt(e)]; paint(); });   // 「手書きスクリーンで指での入力を無視」
-    cv.addEventListener('pointermove', e => { if (!cur) return; for (const x of (e.getCoalescedEvents?.() || [e])) cur.push(pt(x)); paint(); });
-    const end = () => { if (cur) { strokes.push(cur); cur = null; paint(); } }; cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
-    d.querySelector('.undo').onclick = () => { strokes.pop(); paint(); };
+    cv.addEventListener('pointerdown', e => { e.preventDefault(); if (env.pref?.('drawNoFinger') && e.pointerType === 'touch') return; try { cv.setPointerCapture(e.pointerId); } catch {} cur = { c: color, p: [pt(e)] }; paint(); });   // 「手書きスクリーンで指での入力を無視」
+    cv.addEventListener('pointermove', e => { if (!cur) return; for (const x of (e.getCoalescedEvents?.() || [e])) cur.p.push(pt(x)); paint(); });
+    const end = () => { if (cur) { strokes.push(cur); redo = []; cur = null; paint(); } }; cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+    d.querySelector('.undo').onclick = () => { if (strokes.length) redo.push(strokes.pop()); paint(); };
+    d.querySelector('.redo').onclick = () => { if (redo.length) strokes.push(redo.pop()); paint(); };
+    for (const b of d.querySelectorAll('.col')) b.onclick = () => { color = b.dataset.c; for (const x of d.querySelectorAll('.col')) x.classList.toggle('on', x === b); };
     d.querySelector('.no').onclick = () => d.remove();
     d.querySelector('.yes').onclick = async () => {
       if (!strokes.length) { d.remove(); return; }
       // 描いた所だけを切り出す（周りに 10pt の余白）
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      for (const s of strokes) for (const p of s) { x0 = Math.min(x0, p.x - p.w); y0 = Math.min(y0, p.y - p.w); x1 = Math.max(x1, p.x + p.w); y1 = Math.max(y1, p.y + p.w); }
+      for (const s of strokes) for (const p of s.p) { x0 = Math.min(x0, p.x - p.w); y0 = Math.min(y0, p.y - p.w); x1 = Math.max(x1, p.x + p.w); y1 = Math.max(y1, p.y + p.w); }
       x0 = Math.max(0, x0 - 10); y0 = Math.max(0, y0 - 10); x1 = Math.min(W, x1 + 10); y1 = Math.min(H, y1 + 10);
       const out = document.createElement('canvas'); out.width = Math.round((x1 - x0) * dpr); out.height = Math.round((y1 - y0) * dpr);
       const o = out.getContext('2d'); o.fillStyle = '#fff'; o.fillRect(0, 0, out.width, out.height); o.drawImage(cv, x0 * dpr, y0 * dpr, out.width, out.height, 0, 0, out.width, out.height);
       const bytes = new Uint8Array(await (await new Promise(r => out.toBlob(r, 'image/png'))).arrayBuffer());
       d.remove(); await addBytes(fr, ta, i, `paste-${await env.sha1Of(bytes)}.png`, bytes);
     };
+    tools();
+  }
+  // 道具の帯から出す、横並びの小さな吹き出し（√ はボタンの下、絵筆は帯の上。実機 11/23）。items: [中身の HTML, 名前, 押したとき]
+  function hpop(anchor, items, where) {
+    document.getElementById('epop')?.remove(); document.getElementById('etools')?.remove();
+    const pop = document.createElement('div'); pop.id = 'epop'; pop.className = where;
+    for (const [html, title, fn] of items) {
+      const b = document.createElement('button'); b.innerHTML = html; b.title = title;
+      b.addEventListener('pointerdown', e => e.preventDefault());   // フィールドから入力の場所を外さない
+      b.onclick = () => { close(); fn(); }; pop.append(b);
+    }
+    document.body.append(pop);
+    const r = anchor.getBoundingClientRect(), bar = anchor.parentElement.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+    const left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2));
+    pop.style.left = left + 'px'; pop.style.top = (where === 'above' ? Math.max(4, bar.top - h - 6) : r.bottom + 10) + 'px';
+    pop.style.setProperty('--ax', (r.left + r.width / 2 - left) + 'px');   // 矢印の位置（ボタンの真ん中）
+    const off = e => { if (!pop.contains(e.target)) close(); };
+    function close() { pop.remove(); document.removeEventListener('pointerdown', off, true); }
+    setTimeout(() => document.addEventListener('pointerdown', off, true), 0);
   }
   // 道具の帯から出す小さなメニュー（ツールの吹き出しと同じ見た目で、押したボタンの下に出す）
   function menu(title, items, anchor) {
@@ -551,7 +604,7 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
   }
   async function close(force = false) {
     if (!ed) return;
-    if (!force && hasChanges() && !(await env.confirm('', '現在の編集を破棄しますか？', { ok: '破棄', cancel: '編集を続ける' }))) return;
+    if (!force && hasChanges() && !(await env.confirm('変更を破棄しますか？', '', { ok: '破棄', cancel: '編集を続ける' }))) return;
     document.getElementById('etools')?.remove();
     clearInterval(tick); tick = null; if (typing) { typing = false; env.typing?.(false); }
     el.hidden = true; el.querySelector(':scope > .pbody').innerHTML = ''; el.querySelector('.esub').hidden = true; el.querySelector('.eprev').hidden = true;
