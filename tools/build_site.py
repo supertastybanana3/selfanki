@@ -77,6 +77,7 @@ def build(export_dir, rebase=False, fetch_media=True, log=print):
     shutil.copytree(os.path.join(ROOT, 'app'), os.path.join(out, 'app'), ignore=shutil.ignore_patterns('test', '*.bak*', '__pycache__'))
     shutil.copytree(os.path.join(ROOT, 'fsrs'), os.path.join(out, 'fsrs'), ignore=shutil.ignore_patterns('*.bak*'))
     if os.path.exists(os.path.join(out, 'app', 'sw.js')): shutil.move(os.path.join(out, 'app', 'sw.js'), os.path.join(out, 'sw.js'))
+    apply_icon_name(out, load_config(), log)
     for sub, mark, what in (('mathjax', 'tex-chtml.js', 'MathJax'), ('sqljs', 'sql-wasm-browser.wasm', 'sql.js'), ('fzstd', 'index.mjs', 'fzstd')):
         if not os.path.isfile(os.path.join(VENDOR, sub, mark)): raise SetupError(L(f'{what} がありません。先に python tools/fetch_vendor.py を動かしてください。', f'{what} is missing. Run python tools/fetch_vendor.py first.'))
     shutil.copytree(VENDOR, os.path.join(out, 'vendor'), copy_function=link_or_copy)
@@ -243,6 +244,35 @@ def build_i18n(out, code, log=print):
     with open(os.path.join(out, 'app', 'i18n', 'ui.json'), 'w', encoding='utf-8') as f: json.dump(table, f, ensure_ascii=False)
     log(L(f'画面の言語: {code}（置き換え {len(table)} 件）', f'Screen language: {code} ({len(table)} replacements)'))
     return tag
+
+def apply_icon_name(out, cfg, log=print):
+    """ホーム画面のアイコンと名前。config.json の icon（正方形の PNG 1枚・512 以上）があれば manifest の全部と apple-touch-icon に使う。
+    app_name があればそれ、無ければ言語が日本語なら「暗記」、ほかは「selfanki」。どちらも組んだもの（site）だけを書き換える"""
+    man_p, idx_p = os.path.join(out, 'app', 'manifest.webmanifest'), os.path.join(out, 'app', 'index.html')
+    man = json.load(open(man_p, encoding='utf-8'))
+    name = str(cfg.get('app_name') or '').strip() or ('暗記' if str(cfg.get('language') or 'ja_JP').lower().startswith('ja') else 'selfanki')
+    man['name'] = man['short_name'] = name
+    touch = './icons/icon-192.png'
+    v = str(cfg.get('icon') or '').strip()
+    if v:
+        src = expand(v if os.path.isabs(os.path.expanduser(v)) else os.path.join(ROOT, v))
+        if not os.path.isfile(src): raise SetupError(L(f'config.json の icon の画像が見つかりません: "{src}"', f'The image in "icon" in config.json was not found: "{src}"'))
+        head = open(src, 'rb').read(24)
+        if head[:8] != b'\x89PNG\r\n\x1a\n': raise SetupError(L(f'icon は PNG にしてください: "{src}"', f'"icon" must be a PNG: "{src}"'))
+        w, h = __import__('struct').unpack('>II', head[16:24])
+        if w != h or w < 512: raise SetupError(L(f'icon は正方形で 512×512 以上にしてください（いまは {w}×{h}）', f'"icon" must be square and at least 512×512 (it is {w}×{h})'))
+        shutil.copy2(src, os.path.join(out, 'app', 'icons', 'custom.png'))
+        man['icons'] = [{'src': '/app/icons/custom.png', 'sizes': f'{w}x{h}', 'type': 'image/png'},
+                        {'src': '/app/icons/custom.png', 'sizes': f'{w}x{h}', 'type': 'image/png', 'purpose': 'maskable'}]
+        touch = './icons/custom.png'
+        log(L(f'アイコン: {os.path.basename(src)}（{w}×{h}）', f'Icon: {os.path.basename(src)} ({w}×{h})'))
+    with open(man_p, 'w', encoding='utf-8') as f: json.dump(man, f, ensure_ascii=False, indent=2)
+    html = open(idx_p, encoding='utf-8').read()
+    link = '<link rel="manifest" href="./manifest.webmanifest">'
+    if link in html:
+        esc = name.replace('&', '&amp;').replace('"', '&quot;').replace('<', '&lt;').replace('>', '&gt;')
+        html = html.replace(link, link + f'\n<link rel="apple-touch-icon" href="{touch}">\n<meta name="apple-mobile-web-app-title" content="{esc}">', 1)
+        with open(idx_p, 'w', encoding='utf-8') as f: f.write(html)
 
 def safe_name(n):
     return bool(n) and '/' not in n and '\\' not in n and n not in ('.', '..') and not n.startswith('.') and '\0' not in n

@@ -218,6 +218,8 @@ Copy `config.example.json` to a file named `config.json` and fill it in. You can
 | `cloudflare_account_id` | You don't need to write it. Write it only if you have several Cloudflare accounts and are told to choose |
 | `d1_location` | You don't need to write it. Your preferred region for D1 (`apac`, `wnam` and so on). Takes effect only the first time, in Step 4 |
 | `lock_command` | You don't need to write it. A command (an array) called with `on` or `off` appended before and after write-back. Use it if you want to keep other tools from touching Anki at the same time |
+| `icon` | You don't need to write it. An image to use as the home screen icon (a square PNG, at least 512×512). See [Changing the icon and name](#changing-the-icon-and-name) |
+| `app_name` | You don't need to write it. The name on the home screen. If you leave it out, it is "暗記" when the language is Japanese and "selfanki" otherwise |
 
 Check: with `python tools/doctor.py`, `config.json`, `Anki collection` and `Media folder` show `[OK]`.
 
@@ -512,6 +514,25 @@ To other devices and Anki, they are sent with "Sync" (recorded in the server's c
 - When Anki was newer and nothing was written, or when a deck with the same name existed in Anki and a `+` was added, the add-on returns Anki's name to the device (it shows on the device at the next sync)
 - If you rename on the device a deck that was deleted in Anki, it isn't created in Anki (it also disappears from the device when you rebuild in Step 9)
 - A note added on the device to a deck created on the device is added to Anki after the deck is created. If you deleted that deck on the device after adding, the note isn't added to Anki
+
+### Changing the icon and name
+
+You can use your own icon and name on the home screen.
+
+1. Prepare one square PNG (at least 512×512; 1024×1024 is recommended). Android crops it to a circle or rounded square, so keep the important part in the middle (inside a circle 80% of the width)
+2. Write it in `config.json` (a path relative to the repository folder, or an absolute path)
+   ```json
+   "icon": "my_icon.png",
+   "app_name": "My Anki"
+   ```
+   If you leave out `app_name`, it is "暗記" when the language is Japanese and "selfanki" otherwise
+3. Upload again with `python tools/build_site.py --deploy`
+
+Check: the build prints `Icon: my_icon.png (1024×1024)`.
+
+An icon and name already on a home screen do not change when you upload again. You need to add it to the home screen again, but **removing the home screen icon also removes that device's data**. First tap "Sync" to send your answers, then remove it, add it again, and enter a new code from `python tools/pair_code.py` ([6-1](#6-1-add-to-the-home-screen-without-the-shell)).
+
+For the iPad/iPhone shell (Step 7), put a square PNG at `ios/icon.png` in the private repository you made in 7-1, commit it, and run build-ipa again. Transparent areas turn black. The name is the variable `APP_NAME` (7-1, item 2). Before reinstalling, sync any answers that haven't been synced yet.
 
 ### Changing the passphrase / starting over
 

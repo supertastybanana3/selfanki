@@ -1,6 +1,7 @@
 # iPad / iPhone 用の殻（ios/SelfAnki.swiftpm）を、署名なしの IPA に組む。できた IPA は Actions の成果物「SelfAnki-ipa」から落とし、
 # iloader などで自分の Apple ID で署名して入れる（README の「手順 7」）。
 # 使う前に: リポジトリの Settings → Secrets and variables → Actions → Variables に APP_HOST（例 myanki.pages.dev）を入れる
+# アイコンを変えるなら ios/icon.png（正方形の PNG）を置く（README「アイコンと名前を変える」）
 name: build-ipa
 on:
   workflow_dispatch:
@@ -14,6 +15,17 @@ jobs:
         run: |
           sw_vers
           xcodebuild -version
+      - name: Icon
+        # ios/icon.png（正方形の PNG）を置いておくと、それをアプリのアイコンにする。無ければ同梱のまま
+        run: |
+          set -e
+          if [ -f ios/icon.png ]; then
+            sips -g pixelWidth -g pixelHeight ios/icon.png
+            sips -s format png -z 1024 1024 ios/icon.png --out ios/SelfAnki.swiftpm/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
+            echo "ios/icon.png をアイコンにした / using ios/icon.png as the app icon"
+          else
+            echo "ios/icon.png が無いので同梱のアイコン / no ios/icon.png, using the bundled icon"
+          fi
       - name: Build
         working-directory: ios/SelfAnki.swiftpm
         env:
