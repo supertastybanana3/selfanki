@@ -15,21 +15,27 @@ export const CENTER = new Set(['cardMod', 'noteCrt', 'noteMod', 'cardReps', 'car
 
 // ---------- 比べ方 ----------
 // SQLite の NOCASE（ASCII の A〜Z だけを小文字に）と、文字のコードポイント順（UTF-8 のバイト順と同じ）
-const cpCmp = (a, b) => {
-  const x = [...a], y = [...b], n = Math.min(x.length, y.length);
-  for (let i = 0; i < n; i++) { const d = x[i].codePointAt(0) - y[i].codePointAt(0); if (d) return d; }
-  return x.length - y.length;
-};
+// UTF-16 の単位で比べ、違った所がサロゲート（U+D800〜DFFF）と U+E000〜FFFF なら入れ替える（＝コードポイントの順）
+function cpCmp(a, b) {
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    let x = a.charCodeAt(i), y = b.charCodeAt(i);
+    if (x === y) continue;
+    if (x >= 0xD800 && y >= 0xD800) { x = x >= 0xE000 ? x - 0x800 : x + 0x2000; y = y >= 0xE000 ? y - 0x800 : y + 0x2000; }
+    return x - y;
+  }
+  return a.length - b.length;
+}
 const nocase = s => s.replace(/[A-Z]/g, ch => ch.toLowerCase());
 // Anki の unicase（大文字小文字を区別しない）
 const unicase = (a, b) => cpCmp(a.toLowerCase(), b.toLowerCase());
 // notes.sfld は数の形なら数として入る（SQLite の型の順: NULL < 数 < 文字）
 const NUM = /^\s*[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?\s*$/;
-function sfldCmp(a, b) {
-  const na = NUM.test(a) && Number.isFinite(+a), nb = NUM.test(b) && Number.isFinite(+b);
-  if (na && nb) return +a - +b;
-  if (na !== nb) return na ? -1 : 1;
-  return cpCmp(nocase(a), nocase(b));
+const sfldKey = v => { const t = String(v); return NUM.test(t) && Number.isFinite(+t) ? { n: +t } : { s: nocase(t) }; };
+function sfldCmp(a, b) {   // a・b は sfldKey
+  if (a.n != null && b.n != null) return a.n - b.n;
+  if ((a.n != null) !== (b.n != null)) return a.n != null ? -1 : 1;
+  return cpCmp(a.s, b.s);
 }
 const numCmp = (a, b) => (a == null ? (b == null ? 0 : -1) : b == null ? 1 : a - b);   // NULL が先
 
@@ -144,8 +150,8 @@ export function makeOrder(ctx) {
   }
   // 並べ替えのあいだに何度も引くキーは、カードごとに1回だけ作る（5万枚でも重くならないように）
   const memo = fn => { const m = new Map(); return c => { let v = m.get(c.id); if (v === undefined) { v = fn(c); m.set(c.id, v); } return v; }; };
-  const tagsKey = memo(c => ` ${ctx.tagsOf(c).join(' ')} `);
-  const sortFld = memo(c => String(ctx.sortFld ? ctx.sortFld(c) : (c.sfld ?? '')));   // notes.sfld（HTML を除いただけ。前後の空白も残る）
+  const tagsRaw = c => ` ${ctx.tagsOf(c).join(' ')} `, sortRaw = c => sfldKey(ctx.sortFld ? ctx.sortFld(c) : (c.sfld ?? ''));   // notes.sfld（HTML を除いただけ。前後の空白も残る）
+  const tagsKey = memo(tagsRaw), sortFld = memo(sortRaw);
   const dueKey = memo(c => { const d = E(c, ctx).due; return d > 1e9 || c.type === 0 ? d : (d - ctx.days) * 86400 + ctx.now; });
   // カードモードの比べ方（並べ替えのキー → (a, b) => 数）
   const card = {
@@ -166,8 +172,13 @@ export function makeOrder(ctx) {
   // 並べ替える（rev＝後ろからソート。Anki は SQL の asc を全部 desc にするので、2つ目のキーも逆になる。同点は id の小さい順）
   // 読む順（同点のとき。逆順でも逆にならない）: デッキで並べるときはカードの索引 (did, queue, due) の順、ほかは id の順
   const scan = { deck: (a, b) => E(a, ctx).queue - E(b, ctx).queue || E(a, ctx).due - E(b, ctx).due };
+  // ソートフィールドとタグ（文字で比べるもの）は、先にキーを作ってから並べる（5万枚で速くするため）
+  const keyed = { noteFld: [sortRaw, (x, y) => sfldCmp(x[0], y[0]) || x[1].ord - y[1].ord], noteTags: [tagsRaw, (x, y) => cpCmp(x[0], y[0])] };
   function sortCards(cards, key, rev) {
-    const f = card[key] || card.noteFld, s = rev ? -1 : 1, t = scan[key];
+    const s = rev ? -1 : 1, t = scan[key];
+    if (!card[key]) key = 'noteFld';
+    if (keyed[key]) { const [kf, kc] = keyed[key]; return cards.map(c => [kf(c), c]).sort((x, y) => s * kc(x, y) || x[1].id - y[1].id).map(x => x[1]); }
+    const f = card[key];
     return cards.slice().sort((a, b) => s * f(a, b) || (t ? t(a, b) : 0) || a.id - b.id);
   }
   // ノートモード: groups＝[[ノートのカード…]…]（どのノートも ord 順）。allByNote＝コレクション全部のカード（並びの下ごしらえは全部のカードから）
