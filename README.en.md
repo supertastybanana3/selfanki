@@ -186,8 +186,8 @@ Copy `config.example.json` to a file named `config.json` and fill it in. You can
 {
   "project_name": "myanki-7f3a",
   "site_url": "",
-  "anki_collection": "C:/Users/名前/AppData/Roaming/Anki2/ユーザー 1/collection.anki2",
-  "anki_media_dir": "C:/Users/名前/AppData/Roaming/Anki2/ユーザー 1/collection.media",
+  "anki_collection": "C:/Users/NAME/AppData/Roaming/Anki2/User 1/collection.anki2",
+  "anki_media_dir": "C:/Users/NAME/AppData/Roaming/Anki2/User 1/collection.media",
   "language": "ja_JP",
   "ankiconnect_url": "http://127.0.0.1:8765",
   "ankiweb_sync": false,
@@ -219,7 +219,7 @@ Copy `config.example.json` to a file named `config.json` and fill it in. You can
 | `d1_location` | You don't need to write it. Your preferred region for D1 (`apac`, `wnam` and so on). Takes effect only the first time, in Step 4 |
 | `lock_command` | You don't need to write it. A command (an array) called with `on` or `off` appended before and after write-back. Use it if you want to keep other tools from touching Anki at the same time |
 
-Check: with `python tools/doctor.py`, `config.json`, `Anki のコレクション` (the Anki collection) and `画像・音声のフォルダ` (the images/audio folder) show `[OK]`.
+Check: with `python tools/doctor.py`, `config.json`, `Anki collection` and `Media folder` show `[OK]`.
 
 ### Step 3: MathJax and other vendor files
 
@@ -227,7 +227,7 @@ Check: with `python tools/doctor.py`, `config.json`, `Anki のコレクション
 python tools/fetch_vendor.py
 ```
 
-Check: `入れた: …mathjax 106 ファイル`, `入れた: …sqljs 3 ファイル` and `入れた: …fzstd 2 ファイル` appear (from the second run on, `もう入っている`). sql.js and fzstd are used to export and import .apkg and .colpkg. Even if you finished Step 3 with an earlier version, run it again after upgrading (without it, Step 5 stops).
+Check: `Installed: …mathjax 106 files`, `Installed: …sqljs 3 files` and `Installed: …fzstd 2 files` appear (from the second run on, `… is already installed`). sql.js and fzstd are used to export and import .apkg and .colpkg. Even if you finished Step 3 with an earlier version, run it again after upgrading (without it, Step 5 stops).
 
 ### Step 4: Cloudflare setup (first time only)
 
@@ -241,7 +241,7 @@ Check: `入れた: …mathjax 106 ファイル`, `入れた: …sqljs 3 ファ�
    ```
    This creates a passphrase and saves it to `token_file` (it is not displayed), creates the D1 database, `cloud/wrangler.toml`, the tables and the Pages project, puts the passphrase into the Pages secret `SA_TOKEN`, and fills in `site_url` in `config.json`
 
-Check: `[1/6]` to `[6/6]` appear, and the last line says `あなたのサイトは https://….pages.dev です` ("Your site is https://….pages.dev").
+Check: `[1/6]` to `[6/6]` appear, and the last line says `Your site is https://….pages.dev`.
 
 If a database or project with the same name already exists, it is used. Don't use the same name as one made for a different collection.
 
@@ -252,12 +252,12 @@ If a database or project with the same name already exists, it is used. Don't us
    ```
    python tools/export_anki.py
    ```
-   Check: `cards <count>` and `最上位デッキごと [...]` ("per top-level deck [...]") appear, and `missing(コピーに無い) 0` ("missing (not in the copy) 0"). If it isn't 0, that many images/audio files are missing from Anki's folder (in Anki, "Tools" → "Check Media")
+   Check: `cards <count>` and `per top-level deck [...]` appear, and `missing 0`. If it isn't 0, that many images/audio files are missing from Anki's folder (in Anki, "Tools" → "Check Media")
 3. Build and upload (the first time takes a few minutes)
    ```
    python tools/build_site.py --deploy
    ```
-   Check: `site を組んだ: …` ("site built: …") and `Pages に上げた … Deployment complete!` ("Uploaded to Pages … Deployment complete!"). Then with `python tools/doctor.py`, `合言葉なしでは中身が見えない（401）` ("contents not visible without the passphrase (401)") and `合言葉ありで manifest が読める（200）` ("manifest readable with the passphrase (200)") show `[OK]`
+   Check: `Built the site: …` and `Uploaded to Pages … Deployment complete!`. Then with `python tools/doctor.py`, `Content is hidden without the passphrase (401)` and `The manifest can be read with the passphrase (200)` show `[OK]`
 
 For a few minutes after creation, the site may be unreachable.
 
@@ -352,7 +352,7 @@ The device to reinstall to is the one written in `udid` in `config.json`. If it 
 
 Prerequisites:
 - You have done 7-2 with iloader and, when logging in to your Apple ID in iloader, checked "Save Credentials". This program uses as they are the password that iloader saved in the Windows Credential Manager, the signing key, and the "this PC" registration. It can't be used if you installed with something other than iloader (Sideloadly, AltStore and so on) (untested, but it should stop because it asks for a verification code, or try to create a new certificate and hit the free Apple ID limit)
-- The iPad/iPhone is connected by USB or is on the same Wi-Fi as the computer. Whether it is visible over Wi-Fi depends on whether iTunes (Apple Mobile Device) discovers the device over Wi-Fi. Unplug the USB and run step 3 below (if still connected, `--check --wifi`); if "Wi-Fi で見えている" (visible over Wi-Fi) doesn't appear, connect by USB, open iTunes, turn on "Sync with this iPad over Wi-Fi" for that device, and try again
+- The iPad/iPhone is connected by USB or is on the same Wi-Fi as the computer. Whether it is visible over Wi-Fi depends on whether iTunes (Apple Mobile Device) discovers the device over Wi-Fi. Unplug the USB and run step 3 below (if still connected, `--check --wifi`); if "visible via Wi-Fi" doesn't appear, connect by USB, open iTunes, turn on "Sync with this iPad over Wi-Fi" for that device, and try again
 - The computer is awake at the reinstall time (it doesn't run during sleep; a missed run happens the next time it wakes)
 - Windows 11 (the author only checked Windows 11. The task runs without showing a window by using `conhost.exe --headless`, so it may not work on older Windows 10)
 
@@ -363,12 +363,12 @@ Steps:
    ```
    selfanki_resign.exe --check
    ```
-   Check: it prints `確認: 端末は USB（か Wi-Fi）で見えている・パスワードと IPA はある` ("Checked: the device is visible over USB (or Wi-Fi), and the password and IPA are present"). If two or more devices are visible it stops; choose from the identifiers it prints and write it in `udid` in the `config.json` in the same folder (created the first time)
+   Check: it prints `Check: the device is visible via USB (or Wi-Fi), the password and IPA exist`. If two or more devices are visible it stops; choose from the identifiers it prints and write it in `udid` in the `config.json` in the same folder (created the first time)
 4. Reinstall right now, once, to confirm it works
    ```
    selfanki_resign.exe --force
    ```
-   Check: `成功: 入れ直した（USB か Wi-Fi）。次の期限 …` ("Success: reinstalled (USB or Wi-Fi). Next deadline …"). "暗記" opens on the device without "Trust". If it stops asking for a verification code (two-factor authentication), run `selfanki_resign.exe --force --interactive` and type the code in the window. If there are answers that haven't been synced yet, sync them before reinstalling
+   Check: `Success: re-signed (USB or Wi-Fi). Next expiry …`. "暗記" opens on the device without "Trust". If it stops asking for a verification code (two-factor authentication), run `selfanki_resign.exe --force --interactive` and type the code in the window. If there are answers that haven't been synced yet, sync them before reinstalling
 5. Register a task that runs every 2 hours (in PowerShell)
    ```
    powershell -ExecutionPolicy Bypass -File register_task.ps1
@@ -437,7 +437,7 @@ A method for when you don't want to install the add-on, or want it to run automa
    ```
    python tools/mirror.py --dry
    ```
-   Check: `比べた: Anki へ カード N 記録 N ／サーバーへ …` ("Compared: to Anki, cards N, logs N / to the server …")
+   Check: `Compared: to Anki, cards N reviews N / to server, cards …`
 3. The real run
    ```
    python tools/mirror.py
@@ -449,8 +449,8 @@ A method for when you don't want to install the add-on, or want it to run automa
 - Don't study or edit in Anki while it runs
 - It stops if the profile open in Anki differs from the profile of `anki_collection`
 - If `ankiweb_sync` is `true`, it syncs with AnkiWeb before and after writing, and also takes a copy before syncing (up to 20 in `cloud/state/snap/`)
-- Decks created, renamed or deleted on a device are not written (AnkiConnect can't make a deck's id match the device's). Bring them in with the 8-A add-on. The log says `端末で作った・名前を変えた・消したデッキが N 件…` ("N decks created, renamed or deleted on a device…")
-- Notes edited or deleted on a device are written to Anki. Notes added on a device, and edits that add cards, are not written (AnkiConnect can't make note and card ids match the device's). Bring those in with the 8-A add-on. The log says `端末で追加したノート・カードが増える編集 N 件は…` ("N notes added on a device / edits that add cards …")
+- Decks created, renamed or deleted on a device are not written (AnkiConnect can't make a deck's id match the device's). Bring them in with the 8-A add-on. The log says `N decks were created, renamed or deleted on a device…`
+- Notes edited or deleted on a device are written to Anki. Notes added on a device, and edits that add cards, are not written (AnkiConnect can't make note and card ids match the device's). Bring those in with the 8-A add-on. The log says `Notes added on a device, edits that add cards, and notes whose note type was edited or changed: …`
 - If card contents or decks changed, the site is rebuilt and uploaded again (Step 9 is done at the same time)
 - To run it at a fixed time (Anki must be running at that time, and the computer must not be asleep):
   - Windows: in Command Prompt (use your own paths)
@@ -528,30 +528,30 @@ To start over with a different project or collection, rename `cloud/state` to so
 
 | What you see | Cause and fix |
 |---|---|
-| `npx が見つかりません` (npx not found) | Node.js isn't installed. Step 1. After installing, reopen the terminal |
-| `Python の anki パッケージがありません` (no Python anki package) | You aren't running the virtual environment's python. The table in Step 1 |
-| `config.json の文字コードが UTF-8 ではありません` (config.json isn't UTF-8) | In Notepad or similar, choose "UTF-8" and save again |
-| `仮想環境を作れませんでした` (could not create the virtual environment) (Ubuntu, Debian) | `sudo apt install python3-venv` |
-| `AnkiConnect が古く…` (AnkiConnect is out of date…) | Update AnkiConnect in Anki under "Tools" → "Add-ons" |
-| `base.json は置き場「…」用です` (base.json is for project "…") | You're using the working folder of a different project. "Starting over" above |
-| `Cloudflare にログインしていません` (not logged in to Cloudflare) / `not authenticated` | `npx --yes wrangler@4.165.0 login` |
+| `npx was not found` | Node.js isn't installed. Step 1. After installing, reopen the terminal |
+| `The Python package "anki" is not installed` | You aren't running the virtual environment's python. The table in Step 1 |
+| `config.json is not UTF-8` | In Notepad or similar, choose "UTF-8" and save again |
+| `Could not create the virtual environment` (Ubuntu, Debian) | `sudo apt install python3-venv` |
+| `AnkiConnect is too old…` | Update AnkiConnect in Anki under "Tools" → "Add-ons" |
+| `cloud/state/base.json is for the project "…"` | You're using the working folder of a different project. "Starting over" above |
+| `Not logged in to Cloudflare` / `not authenticated` | `npx --yes wrangler@4.165.0 login` |
 | `More than one account available` | You have several Cloudflare accounts. Add `"cloudflare_account_id": "…"` to `config.json` (the ID is the 32-character string in the URL in the Cloudflare dashboard) |
-| `コレクションの写しが3回とも壊れていました` (the collection copy was corrupted all 3 times) | The copy was taken while you were studying or editing in Anki. Close Anki and try again |
-| `config.json の書き方がまちがっています` (config.json is written incorrectly) | Most often a `\` in a Windows path. Change it to `/` |
-| `書き出すカードが0枚でした` (0 cards to export) | `exclude_top_decks` excludes everything |
-| `missing(コピーに無い)` in the export isn't 0 | Those images/audio are missing from Anki's folder. In Anki, "Tools" → "Check Media" |
+| `The copy of the collection was corrupted all 3 times` | The copy was taken while you were studying or editing in Anki. Close Anki and try again |
+| `config.json is not valid JSON` | Most often a `\` in a Windows path. Change it to `/` |
+| `There were 0 cards to export` | `exclude_top_decks` excludes everything |
+| `missing` in the export isn't 0 | Those images/audio are missing from Anki's folder. In Anki, "Tools" → "Check Media" |
 | An error saying 20,000 files were exceeded when uploading | There are too many images/audio. Put unused decks in `exclude_top_decks` and redo Step 5 |
 | An error saying the collection is too new to open when exporting | Take a backup first, then in Anki on your computer choose "File" → "Switch Profile" → "Downgrade & Quit", and then export |
 | `Unauthorized` on a device / the code screen appears | That device hasn't been connected yet. Step 6 |
-| `番号が違うか、期限が切れています` (the code is wrong or has expired) | A code is valid 15 minutes, single use. Show a new one with `python tools/pair_code.py` |
+| `Wrong or expired code` | A code is valid 15 minutes, single use. Show a new one with `python tools/pair_code.py` |
 | The site isn't reachable | If it was just created, wait a few minutes. `python tools/doctor.py` |
 | The iOS shell says "Unable to Verify" | The free signature's 7 days have run out. Reinstall as in Step 7-2 and "Trust". From next time you can automate it with 7-3 |
 | `Failed to connect to usbmuxd` in iloader | On Windows, you haven't launched iTunes and accepted the license agreement |
 | A `keyring` error in ipatool (Windows) | Step 4 of A. Add `--keychain-passphrase` to every command |
-| `AnkiConnect … につながりません` (cannot connect to AnkiConnect) during write-back | Anki isn't running, or AnkiConnect isn't installed |
-| "プロファイルが違います" (wrong profile) during write-back | In Anki, switch to the profile of `anki_collection` |
-| In the add-on: "このプロファイルには、暗記のカード … しかありません" (this profile has only … of selfanki's cards) | You connected to a different profile. Switch profiles in Anki, or "Tools" → "selfanki" → "Disconnect" |
-| In the add-on: "合言葉が違う" (the passphrase is wrong) | The passphrase was changed. Re-enter the code in "Tools" → "selfanki" → "Connect" |
+| `Cannot connect to AnkiConnect …` during write-back | Anki isn't running, or AnkiConnect isn't installed |
+| `The profile open in Anki ("…") differs from the profile of anki_collection` during write-back | In Anki, switch to the profile of `anki_collection` |
+| In the add-on: `This profile has only … of the … selfanki cards` | You connected to a different profile. Switch profiles in Anki, or "Tools" → "selfanki" → "Disconnect" |
+| In the add-on: `The selfanki server refused access (wrong passphrase)` | The passphrase was changed. Re-enter the code in "Tools" → "selfanki" → "Connect" |
 
 ### Fixing and changing note types
 
