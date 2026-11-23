@@ -16,6 +16,8 @@ import { repositionNew } from '../fsrs/reposition.mjs';
 import { createNotes } from './notes.mjs';
 import { createNtScreen } from './ntscreen.mjs';
 import { createFilter } from './bfilter.mjs';
+import { SORTS, COLUMNS, DEF_COLS, DEF_SORT, CENTER, cardCell, noteCell, makeOrder, highlightTerms } from './bcols.mjs';
+import { createOptions, createDeckPicker, createPreview } from './bpages.mjs';
 import { createDecks, attachSwipe } from './decks.mjs';
 import { setupExchange } from './xui.mjs';
 import { ntFrom11 } from './exchange.mjs';
@@ -620,16 +622,35 @@ function showDecks() {
 }
 
 // ---------- 出題 ----------
-// ---------- ブラウザ（AnkiMobile 25.09 と同じ並べ替え項目・カードの種類・期日の3列。休止は黄色地で期日をかっこ書き） ----------
-const BR = { list: [], rowH: 30, sel: null };   // sel: 選ぶ状態のとき、選んだカードの id の Set
-const pad2 = n => String(n).padStart(2, '0');
-const ymd = secs => { const d = new Date(secs * 1000); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
-function dueText(c, t, now) {
-  let s;
-  if (c.type === 0 || c.queue === 0) s = `新規 #${c.due}`;
-  else if (c.queue === 1 || (c.type === 1 || c.type === 3) && c.due > 1e9) s = ymd(c.due);
-  else s = ymd(now + (c.due - t.daysElapsed) * 86400);
-  return c.queue < 0 ? `(${s})` : s;
+// ---------- ブラウザ（AnkiMobile 25.09。列・並べ替え・ノートモードは「オプション」（歯車）で選ぶ。列の文字と並びは Anki 25.9.4 の browser_table と同じ＝app/bcols.mjs） ----------
+// BR.list: カードモードではカード、ノートモードでは各ノートの代表のカード（id のいちばん小さいもの）。BR.groups: ノートモードのとき nid → そのノートのカード（id 順）
+const BR = { list: [], rowH: 30, sel: null, groups: null, opts: null, ctx: null, hl: [] };   // sel: 選ぶ状態のとき、選んだ行（カードの id）の Set
+// オプションの値（この端末だけ。Anki の列の設定とは別）
+function brOpts() {
+  if (BR.opts) return BR.opts;
+  let o = {}; try { o = JSON.parse(localStorage.getItem('browserOpts') || '{}') || {}; } catch {}
+  const cols = Array.isArray(o.cols) && o.cols.length === 6 && o.cols.every(k => COLUMNS.some(c => c[0] === k)) ? o.cols : DEF_COLS;
+  return (BR.opts = { sort: SORTS.some(x => x[0] === o.sort) ? o.sort : DEF_SORT, rev: !!o.rev, notes: !!o.notes, cols: [...cols] });
+}
+function brSet(patch) {
+  BR.opts = { ...brOpts(), ...patch }; try { localStorage.setItem('browserOpts', JSON.stringify(BR.opts)); } catch {}
+  if ('notes' in patch && BR.sel) BR.sel = new Set();   // 行の単位が変わるので選び直す
+  runBrowse();
+}
+// 選んだ行のカード（ノートモードではそのノートのカード全部。Anki のノートモードの操作と同じ）
+const brCards = rows => (BR.groups ? rows.flatMap(c => BR.groups.get(c.nid) || [c]) : rows);
+const brSelCards = () => brCards(BR.list.filter(c => BR.sel?.has(c.id)));
+// 列の文字・並べ替えに使う、この端末のカードの見方（フィルターデッキの中のカードは中での did・due・queue）
+function brCtx() {
+  const now = nowSecs(), t = timingToday(now, S.meta), N = S.notes;
+  return {
+    ntOf: mid => S.meta.notetypes?.[mid], deckName: did => deckName(did) || '(Deck)',
+    inFiltered: c => !!fltOf(c), eff: c => { const f = fltOf(c); return f ? { did: f.d, due: f.due, queue: f.q } : c; },
+    tagsOf: c => c.tags || [], noteMod: c => N?.get(c.nid)?.mod ?? c.nmod ?? 0,
+    sortFld: c => N?.get(c.nid)?.sfld ?? c.sfld ?? '',
+    cardMod: c => (c.rev ? Math.floor(c.rev / 1000) : c.mod || 0),   // 束はカードの mod を持たず、rev（＝mod×1000 か最後の記録の時刻の大きいほう。端末で変えたらその時刻）で持つ
+    days: t.daysElapsed, now, decks: [...S.meta.decks, ...[...S.fdecks.values()].filter(f => !f.removed)], notetypes: Object.entries(S.meta.notetypes || {}),
+  };
 }
 let measureCtx = null;
 function fitMiddle(text, width) {
@@ -637,11 +658,11 @@ function fitMiddle(text, width) {
   if (!measureCtx) { measureCtx = document.createElement('canvas').getContext('2d'); measureCtx.font = '16px -apple-system, "Hiragino Sans", sans-serif'; }
   const w = x => measureCtx.measureText(x).width;
   if (w(text) <= width) return text;
-  const half = (width - w('…')) / 2;
-  const fit = f => { let lo = 0, hi = text.length; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (f(m)) lo = m; else hi = m - 1; } return lo; };
-  const a = fit(k => w(text.slice(0, k)) <= half);
-  const b = Math.min(text.length - a, fit(k => w(text.slice(text.length - k)) <= half));
-  return text.slice(0, a) + '…' + text.slice(text.length - b);
+  const half = (width - w('…')) / 2, ch = Array.from(text), n = ch.length, cut = (i, j) => ch.slice(i, j).join('');   // 文字（コードポイント）で切る（🔉 などを半分にしない）
+  const fit = f => { let lo = 0, hi = n; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (f(m)) lo = m; else hi = m - 1; } return lo; };
+  const a = fit(k => w(cut(0, k)) <= half);
+  const b = Math.min(n - a, fit(k => w(cut(n - k, n)) <= half));
+  return cut(0, a) + '…' + cut(n - b, n);
 }
 // ブラウザの「選択」（AnkiMobile 25.09: 右上が「アクション」「すべて選択」「キャンセル」、題が「N/M 件選択」、選んだ行の左に ✓）
 function setBrowseSelect(on) {
@@ -649,7 +670,8 @@ function setBrowseSelect(on) {
   const nav = $('#browse > .pnav'); nav.classList.toggle('selmode', on);
   paintBrowseTitle(); paintBrowse(true);
 }
-function paintBrowseTitle() { $('#browse > .pnav .ptitle').textContent = BR.sel ? `${BR.sel.size}/${BR.list.length} 件選択` : 'ブラウザ'; }
+const brSelLabel = () => `${BR.sel?.size ?? 0}/${BR.list.length} 件選択`;
+function paintBrowseTitle() { $('#browse > .pnav .ptitle').textContent = BR.sel ? brSelLabel() : 'ブラウザ'; }
 // 「アクション」の一覧（実機の並び）。暗記で写せないもの（デッキ・タグ・ノートタイプの変更、検索して置換）は薄く出して押せない
 const BROWSE_ACTIONS = [
   ['deck', 'デッキの変更', cs => moveCards(cs)],
@@ -666,7 +688,7 @@ const BROWSE_ACTIONS = [
 ];
 function openBrowseActions() {
   if (!BR.sel || !BR.sel.size) return;
-  const cs = BR.list.filter(c => BR.sel.has(c.id));
+  const cs = brSelCards();
   let pop = $('#bactions'); if (pop) { pop.remove(); return; }
   pop = document.createElement('div'); pop.id = 'bactions';
   pop.innerHTML = '<div class="h">アクション</div>';
@@ -725,21 +747,23 @@ function recMenu() {
   add(recording ? '録音を止める' : '声を録音', recToggle); add('録音した声を再生', recPlay); add('キャンセル', null, 'cancel');
   document.body.append(d);
 }
-// 「デッキの変更」: デッキを選ぶ一覧（フィルターデッキは選べない）。フィルターデッキに入っているカードは、元のデッキが変わる（Anki の set_deck と同じ）
+// 「デッキの変更」: 全画面の「デッキを選択」（app/bpages.mjs。フィルターデッキは選べない）。フィルターデッキに入っているカードは、元のデッキが変わる（Anki の set_deck と同じ）
+let deckPicker = null, moveCs = [];
 function moveCards(cs) {
-  const d = document.createElement('div'); d.id = 'flagdlg'; d.innerHTML = '<div class="box decks"><b>デッキの変更</b><div class="lst"></div></div>';
-  const lst = d.querySelector('.lst');
-  for (const dk of [...S.meta.decks].filter(x => !x.dyn).sort(deckCmp)) {
-    const b = document.createElement('button'); b.textContent = dk.name.replace(/::/g, ' › ');
-    b.onclick = () => { d.remove(); const at = Date.now(); changeCards(cs, c => { c.did = dk.id; c.didAt = at; }, `${cs.length}枚のカードを「${dk.name}」に移しました`, 'デッキの変更', false).then(() => paintBrowse(true)); };
-    lst.append(b);
-  }
-  const no = document.createElement('button'); no.textContent = 'キャンセル'; no.className = 'cancel'; no.onclick = () => d.remove(); d.firstChild.append(no);
-  document.body.append(d);
+  moveCs = cs;
+  deckPicker ||= createDeckPicker({
+    host: () => $('#browse'), backLabel: brSelLabel,
+    decks: () => { const used = new Set(S.cards.map(c => c.did)); return S.meta.decks.filter(d => !d.dyn && !(d.id === 1 && !used.has(1) && !S.meta.decks.some(x => x.name.startsWith(d.name + '::')))).sort(deckCmp); },
+    current: () => { const ds = new Set(moveCs.map(c => c.did)); return ds.size === 1 ? [...ds][0] : null; },
+    pick: async did => { const dk = S.decksById.get(did), cs = moveCs, at = Date.now(); if (!dk || !cs.length) return; await changeCards(cs, c => { c.did = did; c.didAt = at; }, `${cs.length}枚のカードを「${dk.name}」に移しました`, 'デッキの変更', false); paintBrowse(true); },
+    // 「新規追加」: デッキを作って（デッキの一覧の「新しいデッキを作る」と同じ小窓）、そこへ移す
+    create: async () => { const before = new Set(S.meta.decks.map(d => d.id)); await deckOps.create(); const made = S.meta.decks.filter(d => !d.dyn && !before.has(d.id)); return made.length ? made.sort((a, b) => b.name.length - a.name.length)[0].id : null; },
+  });
+  deckPicker.open();
 }
 // 「タグを追加」「タグを解除」（rslib add_tags_to_notes・remove_tags_from_notes と同じ: 大文字小文字を区別しない。外すほうは * が使え、子のタグ（親::子）も外れる）
 async function editTags(cs, add) {
-  const r = await iosPrompt({ title: add ? 'タグを追加' : 'タグを解除', message: '空白で区切って複数書けます', input: '' });
+  const r = await iosPrompt({ title: add ? '追加するタグを指定してください（選択中のノートに追加します）' : '選択中のノートから解除するタグを指定してください', input: '' });   // 実機の文言
   const words = (r?.value || '').split(/\s+/).filter(Boolean); if (!words.length) return;
   const nids = [...new Set(cs.map(c => c.nid))];
   const re = words.map(w => new RegExp('^' + w.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '(::.*)?$', 'i'));
@@ -751,19 +775,14 @@ async function editTags(cs, add) {
   }, add ? 'タグを追加' : 'タグを解除');
   toast(`${n}件のノートを更新しました。`);
 }
-// 「検索して置換」（rslib find_and_replace と同じ: 正規表現でなければ文字どおり、大文字小文字は区別しないのが既定。フィールドを空にするとすべて、「tags」でタグ）
+// 「検索して置換」（AnkiMobile の小窓: 入力欄2つだけ。Anki の find_and_replace の既定と同じく、文字どおり・大文字小文字を区別しない・すべてのフィールド）
 async function findReplace(cs) {
-  const r = await iosPrompt({ title: '検索して置換', texts: [{ label: '検索' }, { label: '置換' }, { label: 'フィールド（空ならすべて）' }], toggles: [{ label: '正規表現として扱う', on: false }, { label: '大文字小文字を区別する', on: false }] });
+  const r = await iosPrompt({ title: '検索して置換', texts: [{ placeholder: '検索文字列:' }, { placeholder: '置換文字列:' }] });
   if (!r || !r.texts[0]) return;
-  const [find, repl, field] = r.texts, [isRe, matchCase] = r.toggles;
-  let rx; try { rx = new RegExp(isRe ? find : find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), matchCase ? 'g' : 'gi'); } catch (e) { iosAlert('Error', String(e.message)); return; }
-  const rep = isRe ? repl.replace(/\$\{(\w+)\}/g, (m, g) => (/^\d+$/.test(g) ? '$' + g : '$<' + g + '>')) : repl.replace(/\$/g, '$$$$');   // Anki（Rust の regex）の ${1}・${name} を JS の $1・$<name> に
+  const [find, repl] = r.texts;
+  const rx = new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), rep = repl.replace(/\$/g, '$$$$');
   const nids = [...new Set(cs.map(c => c.nid))];
-  const n = await notes.bulkEdit(nids, (c0, t) => {
-    if (field.trim().toLowerCase() === 'tags') return { flds: c0.flds, tags: c0.tags.replace(rx, rep) };
-    const idx = field.trim() ? t.flds.findIndex(f => f.name === field.trim()) : -1;
-    return { flds: c0.flds.map((v, i) => (field.trim() && i !== idx) ? v : v.replace(rx, rep)), tags: c0.tags };
-  }, '検索して置換');
+  const n = await notes.bulkEdit(nids, c0 => ({ flds: c0.flds.map(v => v.replace(rx, rep)), tags: c0.tags }), '検索して置換');
   toast(`${n}件のノートを更新しました。`);
 }
 // 「フラグを変更」の小窓（実機: フラグ1 (レッド)〜フラグ7 (パープル)・フラグを消去・キャンセル）
@@ -843,6 +862,7 @@ async function handleXcb(raw) {
 }
 function openBrowse(query) {
   $('#browse').hidden = false; $('#bprev').hidden = true; if (BR.sel) setBrowseSelect(false);
+  for (const q of ['#bopts', '#bdeck', '#bfilter']) { const e = $(q); if (e) e.hidden = true; } $('#browse').classList.remove('bfopen');
   if (query != null) $('#bq').value = query;
   runBrowse();
 }
@@ -851,7 +871,15 @@ async function runBrowse() {
   let pred;
   try { await loadNotes(S, BUNDLE); pred = compileSearch(S, $('#bq').value, cur); }
   catch (e) { iosAlert('Error', displayText(String(e && e.message || e))); return; } // AnkiMobile と同じく、一覧は前の結果のまま
-  BR.list = S.cards.filter(pred).sort((x, y) => { const a = x.sfld || '', b = y.sfld || ''; return a < b ? -1 : a > b ? 1 : x.ord - y.ord || x.id - y.id; });
+  const o = brOpts(), ctx = brCtx(), order = makeOrder(ctx), hit = S.cards.filter(pred);
+  if (o.notes) {   // ノートモード: 当たったカードのノートを1行ずつ（行の中身はそのノートのカード全部から。Anki と同じ）
+    const nids = new Set(hit.map(c => c.nid)), groups = new Map();
+    for (const c of S.cards) if (nids.has(c.nid)) { let g = groups.get(c.nid); if (!g) groups.set(c.nid, g = []); g.push(c); }
+    for (const g of groups.values()) g.sort((a, b) => a.id - b.id);
+    BR.groups = groups; BR.list = order.sortNotes([...groups.values()], o.sort, o.rev, groups).map(g => g[0]);
+  } else { BR.groups = null; BR.list = order.sortCards(hit, o.sort, o.rev); }
+  BR.ctx = ctx; BR.hl = highlightTerms($('#bq').value);
+  if (BR.sel) { const ids = new Set(BR.list.map(c => c.id)); for (const id of [...BR.sel]) if (!ids.has(id)) BR.sel.delete(id); }
   const box = $('#blist'); box.scrollTop = 0;
   box.querySelector('.spacer').style.height = BR.list.length * BR.rowH + 'px';
   if (BR.sel) paintBrowseTitle();
@@ -859,29 +887,58 @@ async function runBrowse() {
   if (!BR.list.length) { const e = document.createElement('div'); e.className = 'empty'; e.textContent = '一致するカードはありません'; box.appendChild(e); }
   paintBrowse(true);
 }
+// 検索した語を一覧の中で青く（大文字小文字を区別しない。全部の所）
+function hlInto(el, text, terms) {
+  if (!terms.length || !text) { el.textContent = text; return; }
+  const lo = text.toLowerCase(), on = new Uint8Array(text.length);
+  for (const t of terms) { const q = t.toLowerCase(); if (!q) continue; for (let j = lo.indexOf(q); j >= 0; j = lo.indexOf(q, j + q.length)) on.fill(1, j, j + q.length); }
+  let i = 0;
+  while (i < text.length) { let j = i; while (j < text.length && on[j] === on[i]) j++; const part = text.slice(i, j); if (on[i]) { const s = document.createElement('span'); s.className = 'hl'; s.textContent = part; el.append(s); } else el.append(part); i = j; }
+}
+// 行の地の色（rslib get_row_color: カードはフラグ → マーク → 休止 → 非表示、ノートはマークだけ）。非表示の色は実機で見ていないので付けない
+const brRowClass = c => (BR.groups ? (isMarked(c) ? ' mark' : '') : (c.flags & 7) ? ` f${c.flags & 7}` : isMarked(c) ? ' mark' : c.queue === -1 ? ' susp' : '');
 function paintBrowse(force = false) {
   const box = $('#blist'), sp = box.querySelector('.spacer'); const h = BR.rowH;
   const from = Math.max(0, Math.floor(box.scrollTop / h) - 10), to = Math.min(BR.list.length, Math.ceil((box.scrollTop + box.clientHeight) / h) + 10);
   if (!force && BR.from === from && BR.to === to) return; BR.from = from; BR.to = to;
   sp.querySelectorAll('.br').forEach(e => e.remove());
-  const now = nowSecs(), t = timingToday(now, S.meta), frag = document.createDocumentFragment();
-  const c1w = Math.max(40, box.clientWidth / 3 - 16); // 1列目の幅（窓の 1/3 から余白を引いたもの）
+  const ctx = BR.ctx || brCtx(), frag = document.createDocumentFragment();
+  let keys = brOpts().cols.filter(k => k !== 'off'); if (!keys.length) keys = ['noteFld'];
+  // 列は窓を等分（AnkiMobile と同じく、どの幅でも等分。3列なら 左6px・1/3＋3.5px・2/3 から真ん中寄せ）
+  const n = keys.length, W = box.clientWidth / n, pct = 100 / n;
+  const geo = keys.map((k, i) => {
+    const last = i === n - 1, sel0 = BR.sel && i === 0;
+    if (CENTER.has(k)) return { left: `${i * pct}%`, width: `calc(${pct}% - ${last ? 10 : 0}px${sel0 ? ' - 20px' : ''})`, pad: sel0 ? 20 : 0, center: true, w: W - (last ? 10 : 0) - (sel0 ? 20 : 0) };
+    const l = sel0 ? 20 : i === 0 ? 6 : 3.5;
+    return { left: `calc(${i * pct}% + ${l}px)`, width: `calc(${pct}% - ${sel0 ? 30 : 16}px)`, center: false, w: Math.max(20, W - (sel0 ? 30 : 16)) };
+  });
   for (let i = from; i < to; i++) {
-    const c = BR.list[i]; const r = document.createElement('div');
-    r.className = 'br' + (c.queue === -1 ? ' susp' : (c.flags & 7) ? ` f${c.flags & 7}` : isMarked(c) ? ' mark' : '') + (BR.sel ? ' selmode' : '') + (BR.sel?.has(c.id) ? ' on' : '');
+    const c = BR.list[i]; const r = document.createElement('div'), cs = BR.groups?.get(c.nid);
+    r.className = 'br' + brRowClass(c) + (BR.sel ? ' selmode' : '') + (BR.sel?.has(c.id) ? ' on' : '');
     r.style.top = i * h + 'px'; r.dataset.i = i;
-    r.innerHTML = '<span class="c1"></span><span class="c2"></span><span class="c3"></span>';
-    r.children[0].textContent = fitMiddle(c.sfld || '', c1w); r.children[1].textContent = c.tname || ''; r.children[2].textContent = dueText(c, t, now);
+    keys.forEach((k, j) => {
+      const g = geo[j], sp2 = document.createElement('span'); sp2.className = 'bc' + (g.center ? ' ctr' : ''); sp2.dataset.k = k;
+      sp2.style.left = g.left; sp2.style.width = g.width; if (g.pad) sp2.style.marginLeft = g.pad + 'px';
+      let text = ''; try { text = cs ? noteCell(k, cs, ctx) : cardCell(k, c, ctx); } catch {}
+      hlInto(sp2, fitMiddle(text, g.w), BR.hl);
+      r.appendChild(sp2);
+    });
     frag.appendChild(r);
   }
   sp.appendChild(frag);
 }
-async function previewCard(c) { $('#bprev').hidden = false; await previewInto($('#bprevf'), c); }
-// カードの裏をプレビューの枠に出す（ブラウザのプレビューと、編集の画面の目のボタン）
-async function previewInto(f, c) {
+// 「表示」（目）: 一覧のカードを1枚ずつ（app/bpages.mjs）。右上の四角で 問題だけ ⇔ 問題と解答
+let brPreview = null;
+function openBrowsePreview() {
+  brPreview ||= createPreview({ el: $('#bprev'), list: () => BR.list, render: (f, c, both) => previewInto(f, c, both ? 'a' : 'q') });
+  if (BR.list.length) brPreview.open(0);
+}
+// カードの裏（side='q' なら表）をプレビューの枠に出す（ブラウザの「表示」と、編集の画面の目のボタン・カードテンプレートの画面）
+async function previewInto(f, c, side = 'a') {
   const css = c.css ?? S.meta.notetypes[c.mid]?.css ?? ''; const dark = isDark();   // c.css＝カードテンプレートの画面で直している途中のスタイル
-  const math = /\\\(|\\\[/.test(c.a) ? `<script src="${MJCONF_URL}"></script><script src="${MATHJAX_URL}" async></script>` : '';
-  const body = c.a.replace(/\[\[type:[^\]]*\]\]/g, '').replace(/\[anki:play:(q|a):(\d+)\]/g, '');
+  const src = (side === 'q' ? c.q : c.a) || '';
+  const math = /\\\(|\\\[/.test(src) ? `<script src="${MJCONF_URL}"></script><script src="${MATHJAX_URL}" async></script>` : '';
+  const body = src.replace(/\[\[type:[^\]]*\]\]/g, '').replace(/\[anki:play:(q|a):(\d+)\]/g, '');
   f.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="${MEDIA}"><style id="sa-base">${BASE_LIGHT}</style><style>${CARD_EXTRA}</style><style>${css}</style><style id="sa-dark"></style>${math}</head><body class="card${dark ? ' nightMode night_mode' : ''}">${body}</body></html>`;
   await new Promise(r => { f.onload = r; });
   if (dark) try { darkify(f.contentDocument); } catch {}
@@ -1198,6 +1255,7 @@ function iosPrompt({ title, message = '', input = null, toggles = [], numbers = 
 #iosDialog .m:empty{display:none}
 #iosDialog input[type=text]{margin:0 16px 16px;height:26px;border:.5px solid var(--al-line);border-radius:7px;padding:0 6px;font-size:13px;background:var(--al-bg);color:var(--al-text)}
 #iosDialog label{display:flex;align-items:center;gap:8px;font-size:13px;padding:0 16px 12px}
+#iosDialog input.ph + input.ph{margin-top:-10px}
 #iosDialog .txl{font-size:12px;color:var(--al-sub,#8e8e93);padding:0 16px 3px}
 #iosDialog .num{display:flex;align-items:center;gap:8px;font-size:13px;padding:0 16px 10px} #iosDialog .num span{flex:1} #iosDialog .num input{width:90px;height:26px;border:.5px solid var(--al-line);border-radius:7px;padding:0 6px;font-size:13px;background:var(--al-bg);color:var(--al-text);text-align:right}
 #iosDialog .bt{display:flex;border-top:.5px solid var(--al-line)} #iosDialog .bt button{flex:1;height:44px;font-size:17px;color:var(--al-blue)}
@@ -1211,7 +1269,7 @@ function iosPrompt({ title, message = '', input = null, toggles = [], numbers = 
   el.querySelector('.no').textContent = cancel; el.querySelector('.yes').textContent = ok; el.querySelector('.yes').classList.toggle('danger', danger);
   const f = el.querySelector('.f'); f.innerHTML = '';
   let inp = null; const tgs = [], nums = [], txs = [];
-  for (const t of texts) { const l = document.createElement('div'); l.className = 'txl'; l.textContent = t.label; const c = document.createElement('input'); c.type = 'text'; c.value = t.value ?? ''; c.placeholder = t.placeholder ?? ''; f.append(l, c); txs.push(c); }
+  for (const t of texts) { const l = document.createElement('div'); l.className = 'txl'; l.textContent = t.label ?? ''; const c = document.createElement('input'); c.type = 'text'; c.value = t.value ?? ''; c.placeholder = t.placeholder ?? ''; if (t.label) f.append(l); else c.className = 'ph'; f.append(c); txs.push(c); }
   for (const n of numbers) { const l = document.createElement('div'); l.className = 'num'; const s = document.createElement('span'); s.textContent = n.label; const c = document.createElement('input'); c.type = 'number'; c.inputMode = 'numeric'; c.value = n.value; if (n.min != null) c.min = n.min; if (n.max != null) c.max = n.max; l.append(s, c); f.append(l); nums.push(c); }
   if (input != null) { inp = document.createElement('input'); inp.type = 'text'; inp.value = input; inp.setAttribute('inputmode', 'text'); f.append(inp); }
   for (const t of toggles) { const l = document.createElement('label'); const c = document.createElement('input'); c.type = 'checkbox'; c.checked = !!t.on; l.append(c, document.createTextNode(t.label)); f.append(l); tgs.push(c); }
@@ -1723,7 +1781,7 @@ function onKey(e) {
   if ($('#iosDialog') && !$('#iosDialog').hidden) return;   // 確認の小窓（入力欄・OK はその中で受ける）
   if (!$('#iosAlert').hidden) { if (['Enter', 'Escape'].includes(e.key) || e.code === 'Space' || keyOf(e) === ' ') { e.preventDefault(); $('#iosAlert').hidden = true; } return; }
   // ブラウザ・設定・統計などを開いているあいだは、下の出題に答えない（Esc で閉じる）
-  const over = ['#bfilter', '#ntpage', '#editor', '#bprev', '#browse', '#awpage', '#prefs'].map(q => $(q)).find(el => el && !el.hidden);
+  const over = ['#bfilter', '#ntpage', '#editor', '#bdeck', '#bopts', '#bprev', '#browse', '#awpage', '#prefs'].map(q => $(q)).find(el => el && !el.hidden);
   if (over) { if (e.key === 'Escape') { e.preventDefault(); over.querySelector('.back')?.click(); } return; }
   // 日本語入力のままのキーボードで、処理しなかったキー（表の面の数字など）を iPad が文字入力として変換に回し、候補が出て
   // 以後のキーが全部変換に吸われてしまう。入力欄の外では、文字・数字・スペース・Enter・Backspace は全部ここで止める
@@ -2046,8 +2104,11 @@ window.ankiBridge = cmd => {
 function notesChanged(nids) {
   refreshCards(); S.mainQ = null; if (S.lb) rebuildLB();
   if (!$('#browse').hidden) {   // ブラウザ: 消したカードを外す（並びと位置はそのまま）
-    BR.list = BR.list.filter(c => !c.gone);
-    if (BR.sel) { for (const id of [...BR.sel]) if (S.byId.get(id)?.gone) BR.sel.delete(id); paintBrowseTitle(); }
+    if (BR.groups) {   // ノートモード: 消したカードをノートのカードから外し、カードが残っていなければその行を外す（代表のカードが消えたら次のカードを代表に）
+      for (const [nid, g] of BR.groups) { const live = g.filter(c => !c.gone); if (live.length) BR.groups.set(nid, live); else BR.groups.delete(nid); }
+      BR.list = BR.list.map(c => (c.gone ? BR.groups.get(c.nid)?.[0] : c)).filter(Boolean);
+    } else BR.list = BR.list.filter(c => !c.gone);
+    if (BR.sel) { const ids = new Set(BR.list.map(c => c.id)); for (const id of [...BR.sel]) if (!ids.has(id)) BR.sel.delete(id); paintBrowseTitle(); }
     $('#blist .spacer').style.height = BR.list.length * BR.rowH + 'px'; paintBrowse(true);
   }
   const view = document.body.dataset.view;
@@ -2282,9 +2343,20 @@ function setupTools() {
     if (BR.sel) { if (BR.sel.has(c.id)) BR.sel.delete(c.id); else BR.sel.add(c.id); paintBrowseTitle(); paintBrowse(true); return; }
     notes.openEdit(c);   // 行を押すとそのノートの編集（プレビューは編集の画面の目のボタン）
   });
-  // 「絞り込み」（app/bfilter.mjs。押す＝検索を置き換え、スワイプ＝今の検索に足す）
-  const bfilter = createFilter({ S, loadNotes: () => loadNotes(S, BUNDLE), current: () => $('#bq').value, apply: q => { $('#bq').value = q; runBrowse(); } });
-  { const fb = $('#browse > .pnav .nr [title="絞り込み"]'); fb.disabled = false; fb.onclick = () => bfilter.open(); }
+  // 「絞り込み」（app/bfilter.mjs。ボタンの下の吹き出し。押す＝検索を置き換え、スワイプ＝今の検索の後ろに空白でつなぐ）
+  const fbtn = $('#browse > .pnav .nr [title="絞り込み"]');
+  const bfilter = createFilter({ host: () => $('#browse'), anchor: () => fbtn, current: () => $('#bq').value, apply: q => { $('#bq').value = q; runBrowse(); },
+    names: async () => {
+      let tags = []; try { const m = await loadNotes(S, BUNDLE); const set = new Set(); for (const n of m.values()) for (const t of String(n.tags || '').split(/\s+/)) if (t) set.add(t); tags = [...set]; } catch { tags = [...new Set(S.cards.flatMap(c => c.tags || []))]; }
+      return { decks: [...S.meta.decks.map(d => d.name), ...[...S.fdecks.values()].filter(f => !f.removed).map(f => f.name)], tags, notetypes: Object.values(S.meta.notetypes || {}).map(n => n.name) };
+    } });
+  fbtn.disabled = false; fbtn.onclick = () => bfilter.open();
+  // 歯車＝「オプション」（列・並べ替え・ノートモード。app/bpages.mjs）、目＝「表示」（一覧のカードを1枚ずつ）
+  const bopts = createOptions({ host: () => $('#browse'), get: brOpts, set: brSet,
+    undoLabel: () => { const top = S.undo[S.undo.length - 1]; return top ? (top.kind && top.label ? top.label : 'カードへの回答') : null; },
+    undo: async () => { await undoAnswer(); await runBrowse(); } });
+  { const g = $('#browse > .pnav .ic.g'); g.disabled = false; g.onclick = () => bopts.open(); }
+  { const e = $('#browse > .pnav .ic.e'); e.disabled = false; e.onclick = () => openBrowsePreview(); }
   { const nr = $('#browse > .pnav .nr'); const selBtn = nr.querySelector('[title="選択"]'); selBtn.disabled = false; selBtn.onclick = () => setBrowseSelect(true);
     const mk = (t, cls, fn) => { const b = document.createElement('button'); b.className = 'tx ' + cls; b.textContent = t; b.onclick = fn; nr.append(b); };
     mk('アクション', 'sel-act', openBrowseActions);
@@ -2353,6 +2425,9 @@ const OVERLAYS = [
   ['#customPage', el => el.classList.contains('open'), () => $('#cp-back').click()],
   ['#askPanel', el => !el.hidden, () => $('#ask-close').click()],
   ['#editor', el => !el.hidden, () => notes.close()],
+  ['#bfilter', el => !el.hidden, () => $('#bfilter .back').click()],
+  ['#bdeck', el => !el.hidden, () => $('#bdeck .back').click()],
+  ['#bopts', el => !el.hidden, () => $('#bopts .back').click()],
   ['#bprev', el => !el.hidden, () => $('#bprev .back').click()],
   ['#browse', el => !el.hidden, () => $('#browse > .pnav .back').click()],
   ['#awpage', el => !el.hidden, () => $('#awpage .back').click()],

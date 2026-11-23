@@ -73,15 +73,21 @@ body.notools #gear{display:none} body.toolsleft #corner{right:auto;left:2.75px;a
 #timer{display:none}
 #browse{position:fixed;inset:0;z-index:24;background:var(--am-bg);display:flex;flex-direction:column} #browse[hidden],#bprev[hidden]{display:none}
 #browse .pnav{grid-template-columns:1fr auto 1fr} #browse .nl,#browse .nr{display:flex;align-items:center} #browse .nr{justify-content:flex-end;gap:35px;padding-right:22.5px}
-#browse .ic{color:var(--am-bartext);height:44px;display:flex;align-items:center;justify-content:center} #browse .ic:disabled{opacity:.4} #browse .nl .g{margin-left:19px} #browse .nl .e{margin-left:35px}
+#browse .ic{color:var(--am-bartext);height:44px;padding:0;display:flex;align-items:center;justify-content:center} #browse .ic:disabled{opacity:.4} #browse .nl .g{margin-left:19px} #browse .nl .e{margin-left:35px}
 #browse .sbar{flex:none;height:55px;padding:9.5px 9px;background:var(--br-sbar)} #browse .sfield{display:flex;align-items:center;gap:6px;height:36px;border-radius:10px;background:var(--br-field);padding:0 8px 0 11px;color:var(--am-zero)}
 #browse .sfield input{flex:1;min-width:0;height:100%;border:0;background:transparent;color:var(--am-text);font-size:17px;outline:none;-webkit-appearance:none;appearance:none} #browse .sfield input::-webkit-search-cancel-button{display:none}
 #browse .clr{width:22px;height:22px;border-radius:50%;background:var(--am-zero);color:var(--br-field);font-size:16px;line-height:22px;display:flex;align-items:center;justify-content:center}
 #blist{flex:1;overflow:auto;position:relative;-webkit-overflow-scrolling:touch} #blist .spacer{position:relative} #blist .br{position:absolute;left:0;right:0;height:30px;background:var(--br-row);border-bottom:.5px solid var(--br-line);font-size:16px;color:var(--am-text);white-space:nowrap}
-#blist .br span{position:absolute;top:0;line-height:29.5px;overflow:hidden} /* 列は窓を3等分（AnkiMobile と同じく、どの幅でも3等分） */
-#blist .br .c1{left:6px;width:calc(33.333% - 16px)} #blist .br .c2{left:calc(33.333% + 3.5px);width:calc(33.333% - 16px)} #blist .br .c3{left:66.667%;right:10px;text-align:center}
-#blist .br.susp{background:var(--br-susp)} #blist .br.f1{background:#7a3b39} #blist .br.f2{background:#7e5a2c} #blist .br.f3{background:#3d6b3a} #blist .br.f4{background:#2f4f7f} #blist .br.f5{background:#7a3d68} #blist .br.f6{background:#2f6b66} #blist .br.f7{background:#5a3f7f} #blist .br.mark{background:var(--br-mark)}
-#blist .br.selmode .c1{left:20px;width:calc(33.333% - 30px)} #blist .br.on::before{content:"✓";position:absolute;left:5px;top:0;line-height:29.5px;font-size:14px}
+#blist .br > span{position:absolute;top:0;line-height:29.5px;overflow:hidden} /* 列は窓を等分（位置と幅は app.mjs の paintBrowse）。日時・数の列は真ん中寄せ */
+#blist .br > span.ctr{text-align:center} #blist .br .hl{color:var(--br-hl)}
+/* フラグの行の地（実機のレッドは #d26061＝Anki の FLAG_1 の暗い色の 0.85 倍。ほかの色と明るい画面は Anki の色からの推定）。文字は白 */
+:root{--br-f1:#ffb0b0;--br-f2:#ffd7b6;--br-f3:#a3ffc5;--br-f4:#afcdff;--br-f5:#fdf2ff;--br-f6:#75ffee;--br-f7:#e6cbff;--br-ftext:#000;--br-hl:#007aff}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--br-f1:#d36060;--br-f2:#d79e63;--br-f3:#72cb92;--br-f4:#528cd4;--br-f5:#cc91d6;--br-f6:#50c7b4;--br-f7:#a370d6;--br-ftext:#fff;--br-hl:#77ccff}}
+:root[data-theme=dark]{--br-f1:#d36060;--br-f2:#d79e63;--br-f3:#72cb92;--br-f4:#528cd4;--br-f5:#cc91d6;--br-f6:#50c7b4;--br-f7:#a370d6;--br-ftext:#fff;--br-hl:#77ccff}
+#blist .br.susp{background:var(--br-susp)} #blist .br.mark{background:var(--br-mark)}
+#blist .br.f1{background:var(--br-f1)} #blist .br.f2{background:var(--br-f2)} #blist .br.f3{background:var(--br-f3)} #blist .br.f4{background:var(--br-f4)} #blist .br.f5{background:var(--br-f5)} #blist .br.f6{background:var(--br-f6)} #blist .br.f7{background:var(--br-f7)}
+#blist .br.f1,#blist .br.f2,#blist .br.f3,#blist .br.f4,#blist .br.f5,#blist .br.f6,#blist .br.f7{color:var(--br-ftext)}
+#blist .br.on::before{content:"✓";position:absolute;left:5px;top:0;line-height:29.5px;font-size:14px}
 #browse > .pnav .tx{display:none;color:var(--am-bartext);font-size:16px;background:none;border:0;padding:0} #browse > .pnav.selmode .tx{display:block} #browse > .pnav.selmode .ic,#browse > .pnav.selmode .nl .ic{display:none}
 #browse > .pnav.selmode .nr{gap:12px;padding-right:14px}
 #bactions{position:fixed;z-index:30;top:calc(40px + env(safe-area-inset-top));width:304px;border-radius:13px;background:var(--br-pop,#2c2c2e);box-shadow:0 8px 30px rgba(0,0,0,.45);overflow:hidden;display:flex;flex-direction:column}
