@@ -1,8 +1,8 @@
 {
-  "project_name": "<英小文字のプロジェクト名。例 myanki>",
+  "project_name": "<英小文字のプロジェクト名 / lowercase project name. 例 e.g. myanki>",
   "site_url": "",
-  "anki_collection": "<collection.anki2 の場所。例 C:/Users/あなた/AppData/Roaming/Anki2/User 1/collection.anki2>",
-  "anki_media_dir": "<collection.media の場所。例 C:/Users/あなた/AppData/Roaming/Anki2/User 1/collection.media>",
+  "anki_collection": "<collection.anki2 の場所 / path to collection.anki2. 例 e.g. C:/Users/YOU/AppData/Roaming/Anki2/User 1/collection.anki2>",
+  "anki_media_dir": "<collection.media の場所 / path to collection.media. 例 e.g. C:/Users/YOU/AppData/Roaming/Anki2/User 1/collection.media>",
   "language": "ja_JP",
   "ankiconnect_url": "http://127.0.0.1:8765",
   "ankiweb_sync": false,
