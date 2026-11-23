@@ -206,7 +206,7 @@ export function createDecks(env) {
   const cardsIn = ids => S.cards.filter(c => ids.has(c.did));
   async function remove(did) {
     const d = deckOf(did); if (!d) return;
-    const ok = await env.prompt({ title: 'デッキを削除', message: `${d.name} を削除しますか？`, ok: '削除', danger: true });
+    const ok = await env.prompt({ title: '削除の確認', message: '本当によろしいですか？', ok: 'OK' });   // 実機の文言（AnkiMobile 25.09）
     if (!ok) return;
     if (fids().has(did)) { await env.deleteFDeck(did); env.done(`デッキ「${d.name}」（カード0枚）を削除しました`); return; }   // フィルターデッキ: カードは元のデッキに戻る（rslib remove_single_deck は 0 枚と数える）
     const plan = planRemove(names(), did, env.defaultName());
@@ -218,8 +218,9 @@ export function createDecks(env) {
   return { reset, applyRows, rebuild, hides, create, rename, remove, undo, inverse, recs, base };
 }
 
-// ---------- デッキの一覧の行を左へスワイプ（iOS の表と同じ）: 右から「エクスポート」「名前変更」「削除」が出る ----------
-const ACTS = [['export', 'エクスポート', false], ['rename', '名前変更', false], ['delete', '削除', false]];
+// ---------- デッキの一覧の行を左へスワイプ（iOS の表と同じ）: 右から「エクスポート」「名前を変更」「削除」が出る（AnkiMobile 25.09 の実機の文言と色）。
+// 最後まで（行の幅の6割を超えて）スワイプして離すと、そのまま削除（確かめの小窓が出る。実機）
+const ACTS = [['export', 'エクスポート', false], ['rename', '名前を変更', false], ['delete', '削除', false]];
 export function attachSwipe(row, { onAct, isOpen, setOpen }) {
   const acts = document.createElement('div'); acts.className = 'acts';
   for (const [k, label, disabled] of ACTS) { const b = document.createElement('button'); b.className = 'act-' + k; b.textContent = label; b.disabled = disabled; b.onclick = e => { e.stopPropagation(); setOpen(null); onAct(k); }; acts.append(b); }
@@ -236,13 +237,14 @@ export function attachSwipe(row, { onAct, isOpen, setOpen }) {
     if (x0 == null || e.pointerId !== pid) return;
     const mx = x0 - e.clientX, my = Math.abs(e.clientY - y0);
     if (!dragging) { if (Math.abs(mx) < 8 || my > Math.abs(mx)) { if (my > 10) x0 = null; return; } dragging = true; setOpen(row); try { row.setPointerCapture(pid); } catch {} }
-    dx = Math.max(0, Math.min(W() * 1.15, start + mx)); set(dx, false);
+    dx = Math.max(0, Math.min(row.offsetWidth || W() * 1.15, start + mx)); set(dx, false);
   });
   const end = e => {
     if (x0 == null || e.pointerId !== pid) return;
     x0 = null;
     if (!dragging) return;
     row.dataset.swiped = '1'; setTimeout(() => { delete row.dataset.swiped; }, 0);
+    if (row.offsetWidth && dx > row.offsetWidth * 0.6) { set(0, true); setOpen(null); onAct('delete'); return; }   // 最後までスワイプ＝削除
     const open = dx > W() / 2; set(open ? W() : 0, true); setOpen(open ? row : null);
   };
   row.addEventListener('pointerup', end); row.addEventListener('pointercancel', end);

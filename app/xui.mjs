@@ -35,6 +35,9 @@ export function setupExchange(ctx) {
     const q = await queue(); if (!q.some(x => x.name === name)) { q.push({ name, sha1, size: bytes.length }); await store.set('kv', q, 'mediaq'); }
   }
   const localMedia = new Map(), uploadBytes = new Map();
+  // メディアログ（設定＞同期）: 送った画像・音声の最近の200件（端末の中だけ）
+  const logMedia = (name, size) => { try { const l = JSON.parse(localStorage.getItem('mediaLog') || '[]'); l.unshift([Date.now(), name, size]); localStorage.setItem('mediaLog', JSON.stringify(l.slice(0, 200))); } catch {} };
+  const mediaLog = () => { try { return JSON.parse(localStorage.getItem('mediaLog') || '[]'); } catch { return []; } };
   // まだ送っていない画像・音声をサーバーへ（同期のたびに。かけらごとに送り、全部届いたら積んだ名前を消す）
   let uploading = null;
   async function uploadPending() {
@@ -54,6 +57,7 @@ export function setupExchange(ctx) {
           if ((await r.clone().json().catch(() => ({}))).have) break;   // 同じ中身がもうある
         }
         q = (await queue()).filter(x => x.name !== m.name); await store.set('kv', q, 'mediaq'); uploadBytes.delete(m.name); n++;
+        logMedia(m.name, bytes.length);
       }
       return n;
     })().finally(() => { uploading = null; });
@@ -242,5 +246,5 @@ export function setupExchange(ctx) {
     if (!blob) { ctx.iosAlert('バックアップ', 'ファイルが壊れています。バックアップから復元してください。'); return; }
     await importCollection(new File([blob], name));
   }
-  return { backup, backups, backupsCached: () => bkCache, bkLimits, setBkLimit, restoreBackup, exportDeck, exportCollection, importFile, pickFile, uploadPending, mediaIndex, addMedia, sha1Of, ex, share };
+  return { mediaLog, pendingMedia: queue, backup, backups, backupsCached: () => bkCache, bkLimits, setBkLimit, restoreBackup, exportDeck, exportCollection, importFile, pickFile, uploadPending, mediaIndex, addMedia, sha1Of, ex, share };
 }
