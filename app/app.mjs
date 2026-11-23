@@ -879,7 +879,7 @@ function paintBrowse(force = false) {
 async function previewCard(c) { $('#bprev').hidden = false; await previewInto($('#bprevf'), c); }
 // カードの裏をプレビューの枠に出す（ブラウザのプレビューと、編集の画面の目のボタン）
 async function previewInto(f, c) {
-  const css = S.meta.notetypes[c.mid]?.css || ''; const dark = isDark();
+  const css = c.css ?? S.meta.notetypes[c.mid]?.css ?? ''; const dark = isDark();   // c.css＝カードテンプレートの画面で直している途中のスタイル
   const math = /\\\(|\\\[/.test(c.a) ? `<script src="${MJCONF_URL}"></script><script src="${MATHJAX_URL}" async></script>` : '';
   const body = c.a.replace(/\[\[type:[^\]]*\]\]/g, '').replace(/\[anki:play:(q|a):(\d+)\]/g, '');
   f.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="${MEDIA}"><style id="sa-base">${BASE_LIGHT}</style><style>${CARD_EXTRA}</style><style>${css}</style><style id="sa-dark"></style>${math}</head><body class="card${dark ? ' nightMode night_mode' : ''}">${body}</body></html>`;
@@ -2071,7 +2071,7 @@ function setupNotes() {
   // 「カードテンプレート」「ノートタイプを変更」（app/ntscreen.mjs）
   ntScreen = createNtScreen({ S, notes, prompt: o => iosPrompt(o), alert: (t, m) => iosAlert(t, m), confirm: (title, message, o = {}) => iosPrompt({ title, message, ...o }).then(r => !!r),
     toast, commitConf: async rows => { applyConf(rows); for (const r of rows) await store.addOp({ t: 'conf', ...r }); }, pushUndo: e => undoPush(e),
-    loadNotes: () => loadNotes(S, BUNDLE), deckName, changed: () => notesChanged(new Set(S.card ? [S.card.nid] : [])) });
+    loadNotes: () => loadNotes(S, BUNDLE), deckName, changed: () => notesChanged(new Set(S.card ? [S.card.nid] : [])), showPreview: (f, c) => previewInto(f, c) });
 }
 // 書き出し・読み込み（app/xui.mjs・exchange.mjs・pkg.mjs）
 function setupXchg() {

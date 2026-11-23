@@ -1,11 +1,15 @@
-// 「カードテンプレート」（学習画面のアクション。AnkiMobile のマニュアル study-tools.md: 表面・裏面に出すフィールドとスタイルを直す）と、
-// その中の「フィールド...」（フィールドの追加・名前変更・削除・並べ替え・ソートフィールド）、ブラウザの「ノートタイプを変更」の画面。
-// 見た目と並びは AnkiMobile の実機とは見比べていない（PC 版 Anki のカードタイプ・フィールド・ノートタイプを変更の画面の項目と文言に合わせた）。
+// 「カードテンプレート」（学習画面のアクション）と、ブラウザの「ノートタイプを変更」の画面。
+// カードテンプレートは AnkiMobile 25.09 の実機（11/23）のとおり: 上に 戻る・「カードテンプレート」・元に戻す（変えるまで薄い）、その下に「表面｜裏面｜スタイル｜プレビュー」、
+// 中は今のカードのカードタイプのテンプレートをそのまま直す欄。プレビューでは右上が「反転」（表と裏）。戻ると保存する。
+// 実機に無い「オプション」（カードタイプの追加・削除・名前変更・順序）と「フィールド...」は、?debug のときだけ出す（同期の仕組みの試験のため。関数と同期は残す）。
 // 決まりは app/ntedit.mjs（rslib の写し）、ノートとカードの書き換えは app/notes.mjs、保存は conf の nt:<id>（アドオンが Anki に書く）
 import { prepareNotetype, finalizeOrds, randomId, NtError, defaultFieldMap, defaultTemplateMap, templateMap, singleNotetype, fixFieldName } from './ntedit.mjs';
 import { renderCard } from './template.mjs';
 import { ntTo11 } from './exchange.mjs';
 
+const DEV = (() => { try { return new URLSearchParams(location.search).has('debug'); } catch { return false; } })();
+const BACK_SVG = '<svg viewBox="0 0 12 20" width="12" height="20" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2 2 10l8 8"/></svg>';
+const SEGS = [['q', '表面'], ['a', '裏面'], ['css', 'スタイル'], ['pv', 'プレビュー']];
 const CSS = `#ntpage{position:fixed;inset:0;z-index:29;background:var(--am-bg);color:var(--am-text);display:flex;flex-direction:column}
 #ntpage[hidden],#ntpage [hidden]{display:none !important}
 #ntpage .pnav{flex:none;height:calc(50.5px + env(safe-area-inset-top));padding-top:env(safe-area-inset-top);display:grid;grid-template-columns:1fr auto 1fr;align-items:center;background:var(--am-bar);border-bottom:.5px solid var(--am-barline)}
@@ -20,6 +24,13 @@ const CSS = `#ntpage{position:fixed;inset:0;z-index:29;background:var(--am-bg);c
 #ntpage .row .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap} #ntpage .row .s{font-size:13px;color:var(--am-zero)}
 #ntpage .sec{font-size:13px;color:var(--am-zero);padding:14px 14px 6px} #ntpage .note{font-size:13px;line-height:1.5;padding:6px 14px;white-space:pre-wrap}
 #ntpage iframe{flex:1;border:0;background:#fff}
+#ntpage .pnav .l{display:flex;align-items:center;gap:6px} #ntpage .pnav .r:disabled{color:var(--am-zero);opacity:.6} #ntpage .pnav .r.tm{font-weight:400}
+#ntpage .segw{flex:none;display:flex;justify-content:center;padding:8px 12px 6px}
+#ntpage .seg2{display:flex;padding:2px;border-radius:9px;background:var(--nt-seg,#232325)} #ntpage .seg2 button{min-width:80px;height:30px;padding:0 12px;border-radius:7px;font-size:15px;color:var(--am-text);opacity:.65}
+#ntpage .pnav .t{color:var(--am-text)}   /* 実機は白（デッキの一覧の題のような青ではない） */
+#ntpage .seg2 button.on{background:var(--nt-segon,#444449);opacity:1;font-weight:600}
+#ntpage textarea.code{font:12px/1.5 ui-monospace,Menlo,monospace;padding:12px 8px}
+@media (prefers-color-scheme:light){:root:not([data-theme=dark]) #ntpage{--nt-seg:#e3e3e8;--nt-segon:#fff}} :root[data-theme=light] #ntpage{--nt-seg:#e3e3e8;--nt-segon:#fff}
 #ntsheet{position:fixed;inset:0;z-index:82;background:rgba(0,0,0,.35);display:flex;align-items:flex-end;justify-content:center}
 #ntsheet .box{width:min(420px,100%);margin:0 8px calc(8px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:8px}
 #ntsheet .g{border-radius:13px;overflow:hidden;background:var(--al-bg,#fff)} #ntsheet button{display:block;width:100%;height:56px;font-size:19px;color:var(--am-blue);border-top:.5px solid var(--am-sep)}
@@ -59,34 +70,41 @@ export function createNtScreen(env) {
   async function openTemplates(card) {
     if (!card || !S.meta.notetypes?.[card.mid]) return;
     const nt0 = S.meta.notetypes[card.mid];
-    st = { mode: 'tmpl', mid: +card.mid, work: working(nt0), ti: nt0.type === 1 ? 0 : Math.min(card.ord, nt0.templates.length - 1), side: 'q', card, page: 'edit' };
+    st = { mode: 'tmpl', mid: +card.mid, work: working(nt0), ti: nt0.type === 1 ? 0 : Math.min(card.ord, nt0.templates.length - 1), side: 'q', pvSide: 'q', card, page: 'edit' };
     st.orig = JSON.stringify(st.work);
     build(); el.hidden = false; paint();
   }
   function paint() {
     const w = st.work, t = w.templates[st.ti];
     if (st.page === 'fields') return paintFields();
-    if (st.page === 'preview') return;
-    el.innerHTML = `<nav class="pnav"><button class="l">閉じる</button><span class="t"></span><button class="r">保存</button></nav>
-<div class="bar"><select class="tsel"></select><button class="btn opt">オプション</button><button class="btn flds">フィールド...</button></div>
-<div class="bar"><div class="seg"><button data-s="q">表面のテンプレート</button><button data-s="a">裏面のテンプレート</button><button data-s="css">スタイル</button></div>
-<button class="btn pq">表面のプレビュー</button><button class="btn pa">裏面のプレビュー</button></div><textarea spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>`;
-    el.querySelector('.t').textContent = `「${w.name}」が使用するカードタイプ`;
-    const sel = el.querySelector('.tsel');
-    w.templates.forEach((x, i) => { const o = document.createElement('option'); o.value = i; o.textContent = `${i + 1}: ${x.name}`; sel.append(o); });
-    sel.value = st.ti; sel.onchange = () => { keep(); st.ti = +sel.value; paint(); };
-    for (const b of el.querySelectorAll('.seg button')) { b.classList.toggle('on', b.dataset.s === st.side); b.onclick = () => { keep(); st.side = b.dataset.s; paint(); }; }
-    const ta = el.querySelector('textarea'); ta.value = st.side === 'css' ? w.css : st.side === 'q' ? t.qfmt : t.afmt;
-    el.querySelector('.l').onclick = () => close();
-    el.querySelector('.r').onclick = () => save();
-    el.querySelector('.opt').onclick = () => options();
-    el.querySelector('.flds').onclick = () => { keep(); st.page = 'fields'; paint(); };
-    el.querySelector('.pq').onclick = () => { keep(); preview('q'); };
-    el.querySelector('.pa').onclick = () => { keep(); preview('a'); };
+    const pv = st.side === 'pv';
+    el.innerHTML = `<nav class="pnav"><button class="l">${BACK_SVG}<span>戻る</span></button><span class="t">カードテンプレート</span><button class="r${pv ? '' : ' tm'}"></button></nav>
+<div class="segw"><div class="seg2">${SEGS.map(([k, l]) => `<button data-s="${k}">${l}</button>`).join('')}</div></div>
+${DEV ? '<div class="bar dev"><select class="tsel"></select><button class="btn opt">オプション</button><button class="btn flds">フィールド...</button></div>' : ''}
+${pv ? '<iframe title="プレビュー"></iframe>' : '<textarea class="code" spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>'}`;
+    for (const b of el.querySelectorAll('.seg2 button')) { b.classList.toggle('on', b.dataset.s === st.side); b.onclick = () => { keep(); st.side = b.dataset.s; paint(); }; }
+    const r = el.querySelector('.r');
+    if (pv) { r.textContent = '反転'; r.onclick = () => { st.pvSide = st.pvSide === 'q' ? 'a' : 'q'; showPreview(); }; showPreview(); }
+    else {
+      const ta = el.querySelector('textarea'); ta.value = st.side === 'css' ? w.css : st.side === 'q' ? t.qfmt : t.afmt;
+      r.textContent = '元に戻す'; r.disabled = !dirty();
+      ta.addEventListener('input', () => { keep(); r.disabled = !dirty(); });
+      r.onclick = () => { st.work = JSON.parse(st.orig); paint(); };   // 開いたときの中身に戻す
+    }
+    el.querySelector('.l').onclick = () => back();
+    if (DEV) {
+      const sel = el.querySelector('.tsel');
+      w.templates.forEach((x, i) => { const o = document.createElement('option'); o.value = i; o.textContent = `${i + 1}: ${x.name}`; sel.append(o); });
+      sel.value = st.ti; sel.onchange = () => { keep(); st.ti = +sel.value; paint(); };
+      el.querySelector('.opt').onclick = () => options();
+      el.querySelector('.flds').onclick = () => { keep(); st.page = 'fields'; paint(); };
+    }
   }
+  // 戻る: 変えていれば保存してから閉じる（実機には保存のボタンが無い）
+  async function back() { keep(); if (dirty()) await save(); else hide(); }
   function keep() {
-    if (st.page !== 'edit') return;
-    const ta = el.querySelector('textarea'); if (!ta) return;
+    if (st.page !== 'edit' || st.side === 'pv') return;
+    const ta = el.querySelector('textarea.code'); if (!ta) return;
     const t = st.work.templates[st.ti];
     if (st.side === 'css') st.work.css = ta.value; else if (st.side === 'q') t.qfmt = ta.value; else t.afmt = ta.value;
   }
@@ -168,8 +186,9 @@ export function createNtScreen(env) {
     }
     paint();
   }
-  // ---------- プレビュー（今のカードのノートで描く） ----------
-  async function preview(side) {
+  // ---------- プレビュー（今のカードのノートを、直している途中のテンプレートとスタイルで描く。「反転」で表と裏） ----------
+  async function showPreview() {
+    const f = el.querySelector('iframe'); if (!f) return;
     const w = clone(st.work), notesMap = await env.loadNotes(), n = notesMap.get(st.card.nid);
     const prev = S.meta.notetypes[st.mid];
     let html;
@@ -182,12 +201,11 @@ export function createNtScreen(env) {
       const t = { name: w.name, type: w.type, sortf: w.sortf, flds: w.fields, tmpls: w.templates };
       const ord = w.type === 1 ? st.card.ord : st.ti;
       const r = renderCard(t, { fields: flds, tags: (n?.tags || '').trim().split(/\s+/).filter(Boolean) }, { ord, flags: st.card.flags || 0, id: st.card.id, deckName: env.deckName(st.card.did) });
-      html = side === 'q' ? r.q : r.a;
+      html = st.pvSide === 'q' ? r.q : r.a;
     } catch (e) { html = `<p>${String(e.message || e).replace(/[<&]/g, c => (c === '<' ? '&lt;' : '&amp;'))}</p>`; }
-    st.page = 'preview';
-    el.innerHTML = `<nav class="pnav"><button class="l">‹ 戻る</button><span class="t">${side === 'q' ? '表面のプレビュー' : '裏面のプレビュー'}</span><span></span></nav><iframe sandbox="allow-same-origin"></iframe>`;
-    el.querySelector('iframe').srcdoc = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${w.css}</style><body class="card">${html}</body>`;
-    el.querySelector('.l').onclick = () => { st.page = 'edit'; paint(); };
+    if (!el.contains(f)) return;
+    if (env.showPreview) await env.showPreview(f, { a: html, mid: st.mid, css: w.css });
+    else f.srcdoc = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${w.css}</style><body class="card">${html}</body>`;
   }
   // ---------- 保存 ----------
   async function save() {
@@ -227,11 +245,7 @@ export function createNtScreen(env) {
     env.changed();
   }
   async function inverse(e) { return { ...e, prevNt: clone(S.meta.notetypes[e.mid]), items: (await notes.inverse({ items: e.items })).items }; }
-  async function close() {
-    keep();
-    if (st && st.mode === 'tmpl' && dirty() && !(await env.confirm('', tr.discard, { ok: 'はい', cancel: 'いいえ' }))) return;
-    hide();
-  }
+  async function close() { if (st && st.mode === 'tmpl') return back(); hide(); }
   function hide() { if (el) { el.hidden = true; el.innerHTML = ''; } st = null; }
 
   // ---------- ブラウザの「ノートタイプを変更」 ----------
