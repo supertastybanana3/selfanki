@@ -14,12 +14,7 @@ from aqt.utils import askUser, askUserDialog, getText, showInfo, showWarning, to
 
 from . import core
 
-try:
-    from anki.lang import current_lang
-except ImportError:  # 古い Anki
-    current_lang = 'en'
-
-_JA = str(current_lang or '').startswith('ja')
+# 言葉は Anki の画面の言語で選ぶ（日本語なら日本語、ほかは英語。core.lang。試験では環境変数 SELFANKI_LANG で決められる）
 _T = {
     'menu': ('暗記', 'selfanki'),
     'sync': ('同期する', 'Sync'),
@@ -30,7 +25,7 @@ _T = {
     'ask_url': ('暗記のサイトの住所（https://….pages.dev）', 'Address of your selfanki site (https://….pages.dev)'),
     'ask_code': ('パソコンで python tools/pair_code.py を動かして出た6桁の番号', '6-digit code from python tools/pair_code.py'),
     'connected': ('このプロファイル「{p}」を暗記につなぎました。', 'Connected this profile "{p}" to selfanki.'),
-    'not_connected': ('このプロファイルはまだ暗記につないでいません。「ツール」→「暗記」→「つなぐ」で番号を入れてください。', 'This profile is not connected yet. Use Tools > selfanki > Connect.'),
+    'not_connected': ('このプロファイルはまだ暗記につないでいません。「ツール」→「暗記」→「つなぐ」で番号を入れてください。', 'This profile is not connected to selfanki yet. Use Tools → selfanki → Connect to enter a code.'),
     'disconnected': ('つなぎを外しました。', 'Disconnected.'),
     'confirm_disconnect': ('このプロファイルの、暗記へのつなぎを外しますか？', 'Disconnect this profile from selfanki?'),
     'done': ('暗記と同期しました。\n\nAnki に書いたカード {to_anki} 枚・記録 {rev_to_anki} 件\n暗記へ送ったカード {to_src} 枚・記録 {rev_to_srv} 件', 'Synced with selfanki.\n\nWritten to Anki: {to_anki} cards, {rev_to_anki} reviews\nSent to selfanki: {to_src} cards, {rev_to_srv} reviews'),
@@ -63,11 +58,15 @@ _T = {
     'schema_ask': ('暗記の端末で、ノートタイプの形（フィールド・カードの種類の並びや数）を変えました。Anki に書くと、次のようになります。\n\n{detail}\n\n{anki}\n\n書きますか？',
                    'Note type structure (fields / card types) was changed on your selfanki devices. Writing it to Anki will do the following:\n\n{detail}\n\n{anki}\n\nWrite it?'),
     'failed': ('暗記と同期できませんでした。\n\n{e}', 'Could not sync with selfanki.\n\n{e}'),
+    'profile_changed': ('プロファイルが切り替わったので止めました。', 'Stopped because the profile was switched.'),
+    'logp': ('[暗記と同期]', '[selfanki Sync]'),
+    'sep': ('、', ', '),
+    'bullet': ('・', '- '),
 }
 
 
 def t(k, **kw):
-    s = _T[k][0 if _JA else 1]
+    s = _T[k][0 if core.is_ja() else 1]
     return s.format(**kw) if kw else s
 
 
@@ -138,7 +137,7 @@ def _message(s, dry):
     if s.get('conf_fail'): m += t('warn_conf', e=s['conf_fail'])
     pend = s.get('pending')
     if pend and dry:   # 試すとき: 同期すると確かめる消す操作の数
-        if pend['decks'] or pend['deck_cards']: m += t('pend_decks', n=pend['decks'], names='、'.join(pend['deck_names']) or '-', c=pend['deck_cards'])
+        if pend['decks'] or pend['deck_cards']: m += t('pend_decks', n=pend['decks'], names=t('sep').join(pend['deck_names']) or '-', c=pend['deck_cards'])
         if pend['notes_removed']: m += t('pend_notes', n=pend['notes_removed'])
         if pend['gone_in_anki']: m += t('pend_gone', n=pend['gone_in_anki'])
     return m
@@ -160,11 +159,11 @@ def sync(dry=False, auto=False, allow_schema=False, allow_destructive=False, rea
     result = {}; profile = mw.pm.name
 
     def work(col):
-        if mw.pm.name != profile: raise core.SyncError('プロファイルが切り替わったので止めました。')
+        if mw.pm.name != profile: raise core.SyncError(t('profile_changed'))
         if not dry:
             # 書く前にバックアップを取る（Anki の「ファイル」→「バックアップから復元」で戻せる）
             col.create_backup(backup_folder=mw.pm.backupFolder(), force=True, wait_for_completion=True)
-        result['s'] = core.run(col, link['site_url'], link['token'], dry=dry, log=lambda *a: print('[暗記と同期]', *a), allow_schema=allow_schema,
+        result['s'] = core.run(col, link['site_url'], link['token'], dry=dry, log=lambda *a: print(t('logp'), *a), allow_schema=allow_schema,
                                allow_destructive=allow_destructive, readd_missing=readd_missing)
 
     def done(*_):
@@ -175,7 +174,7 @@ def sync(dry=False, auto=False, allow_schema=False, allow_destructive=False, rea
         # 見せて、Anki の確認の文言も添えて、いつも聞く（Anki の confirm_schema_modification は、もうスキーマを変えてあると聞かずに通すため）。自動の同期では聞かない書く
         if s.get('schema_pending') and not dry and not allow_schema:
             if not auto:
-                detail = '\n'.join('・' + x for x in (s.get('schema_detail') or [])) or '・' + t('schema_left', n=s['schema_pending'])
+                detail = '\n'.join(t('bullet') + x for x in (s.get('schema_detail') or [])) or t('bullet') + t('schema_left', n=s['schema_pending'])
                 anki_msg = mw.col.tr.qt_misc_the_requested_change_will_require_a() if not mw.col.schema_changed() else ''
                 if askUser(t('schema_ask', detail=detail, anki=anki_msg), parent=mw, defaultno=True):
                     sync(auto=auto, allow_schema=True, allow_destructive=allow_destructive, readd_missing=readd_missing); return
@@ -187,7 +186,7 @@ def sync(dry=False, auto=False, allow_schema=False, allow_destructive=False, rea
             if auto: tooltip(t('pend_auto', n=total), period=8000)
             else:
                 msg = t('pend_head')
-                if pend['decks'] or pend['deck_cards']: msg += t('pend_decks', n=pend['decks'], names='、'.join(pend['deck_names']) or '-', c=pend['deck_cards'])
+                if pend['decks'] or pend['deck_cards']: msg += t('pend_decks', n=pend['decks'], names=t('sep').join(pend['deck_names']) or '-', c=pend['deck_cards'])
                 if pend['notes_removed']: msg += t('pend_notes', n=pend['notes_removed'])
                 if pend['gone_in_anki']: msg += t('pend_gone', n=pend['gone_in_anki'])
                 buttons = [t('btn_delete')] + ([t('btn_readd')] if pend['gone_in_anki'] else []) + [t('btn_later')]
