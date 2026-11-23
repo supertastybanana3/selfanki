@@ -309,7 +309,7 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
     el.querySelector('.go').textContent = edit ? '保存' : '追加';
     el.querySelector('.go').hidden = edit;   // 変えたら watch() が出す
     el.querySelector('.tools').hidden = !edit;
-    const row = (lab, val, fn) => { const b = document.createElement('button'); b.className = 'it'; b.innerHTML = `<span class="lab"></span><span class="val"></span><span class="chev">${CHEV}</span>`; b.children[0].textContent = lab; b.children[1].textContent = val; b.onclick = fn; return b; };
+    const row = (lab, val, fn) => { const b = document.createElement('button'); b.className = 'it'; b.innerHTML = `<span class="lab"></span><span class="val" translate="no"></span><span class="chev">${CHEV}</span>`; b.children[0].textContent = lab; b.children[1].textContent = val; b.onclick = fn; return b; };
     if (ed.mode === 'add') {   // ノートタイプとデッキは追加のときだけ（マニュアルのとおり、編集には無い）
       const g = document.createElement('div'); g.className = 'grp';
       g.append(row('ノートタイプ', S.meta.notetypes[ed.mid].name, pickType), row('デッキ', deckName(ed.did), pickDeck));
@@ -320,7 +320,7 @@ img{max-width:100%;height:auto}</style></head><body contenteditable="true" spell
     // allow-scripts は、WebKit が枠の中の出来事（貼り付けなど）を親の受け口に渡すために要る（無いと WebKit は受け口を動かさない）。
     // 変えたかどうかは読み込んだときの HTML と比べ、高さと選んでいるフィールドは watch() で見る
     t.flds.forEach((f, i) => {
-      const sec = document.createElement('div'); sec.className = 'sec'; sec.textContent = f.name;
+      const sec = document.createElement('div'); sec.className = 'sec'; sec.textContent = f.name; sec.setAttribute('translate', 'no');   // フィールド名は訳さない
       const box = document.createElement('div'); box.className = 'fbox';
       const fr = document.createElement('iframe'); fr.setAttribute('sandbox', 'allow-same-origin allow-scripts'); fr.title = f.name;
       const ta = document.createElement('textarea'); ta.hidden = true; ta.spellcheck = false; ta.setAttribute('autocapitalize', 'off'); ta.setAttribute('autocorrect', 'off');

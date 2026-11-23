@@ -1051,5 +1051,1679 @@
  {
   "ja": "コレクションを書き出しました。",
   "key": "exporting-collection-exported"
+ },
+ {
+  "ja": "考え中…",
+  "en": "Thinking…"
+ },
+ {
+  "ja": "（エラー {0}）",
+  "en": "(Error {0})"
+ },
+ {
+  "ja": "カードタイプ",
+  "key": "card-stats-card-template"
+ },
+ {
+  "ja": "カード更新日時",
+  "key": "search-card-modified"
+ },
+ {
+  "ja": "ソートフィールド",
+  "key": "browsing-sort-field"
+ },
+ {
+  "ja": "タグ",
+  "key": "editing-tags"
+ },
+ {
+  "ja": "ノートタイプ",
+  "key": "card-stats-note-type"
+ },
+ {
+  "ja": "ノート作成日時",
+  "key": "browsing-created"
+ },
+ {
+  "ja": "ノート更新日時",
+  "key": "search-note-modified"
+ },
+ {
+  "ja": "学習回数",
+  "key": "card-stats-review-count"
+ },
+ {
+  "ja": "学習回数",
+  "en": "Review",
+  "ctx": "#bfilter"
+ },
+ {
+  "ja": "復習での忘却",
+  "key": "scheduling-lapses"
+ },
+ {
+  "ja": "復習間隔",
+  "key": "browsing-interval"
+ },
+ {
+  "ja": "易しさ",
+  "key": "browsing-ease"
+ },
+ {
+  "ja": "解答",
+  "key": "browsing-answer"
+ },
+ {
+  "ja": "質問",
+  "key": "browsing-question"
+ },
+ {
+  "ja": "(フィルター)",
+  "key": "browsing-filtered"
+ },
+ {
+  "ja": "(新規)",
+  "key": "browsing-new"
+ },
+ {
+  "ja": "(習得中)",
+  "key": "browsing-learning"
+ },
+ {
+  "ja": "新規#{0}",
+  "en": "New #{0}"
+ },
+ {
+  "ja": "コレクション全体",
+  "key": "browsing-whole-collection"
+ },
+ {
+  "ja": "現在のデッキ",
+  "key": "browsing-current-deck"
+ },
+ {
+  "ja": "今日追加した",
+  "en": "Added Today"
+ },
+ {
+  "ja": "今日学習した",
+  "en": "Studied Today"
+ },
+ {
+  "ja": "今日間違えた（「もう一度」と回答した）",
+  "en": "Again Today"
+ },
+ {
+  "ja": "新規カード",
+  "key": "scheduling-new-cards"
+ },
+ {
+  "ja": "習得中",
+  "en": "Learning"
+ },
+ {
+  "ja": "課題 (期日・予定時刻が到来済み)",
+  "en": "Due"
+ },
+ {
+  "ja": "休止中",
+  "key": "browsing-suspended"
+ },
+ {
+  "ja": "フラグ{0} ({1})",
+  "en": "Flag {0} ({~1})"
+ },
+ {
+  "ja": "フラグなし",
+  "key": "browsing-no-flag"
+ },
+ {
+  "ja": "フラグあり",
+  "key": "browsing-any-flag"
+ },
+ {
+  "ja": "デッキ： {0}",
+  "en": "Deck: {0}"
+ },
+ {
+  "ja": "タグ： {0}",
+  "en": "Tag: {0}"
+ },
+ {
+  "ja": "ノート： {0}",
+  "en": "Note: {0}"
+ },
+ {
+  "ja": "{0} を元に戻す",
+  "en": "Undo {~0}"
+ },
+ {
+  "ja": "{0} をやり直す",
+  "en": "Redo {~0}"
+ },
+ {
+  "ja": "ノートモード",
+  "en": "Notes Mode"
+ },
+ {
+  "ja": "ソート順",
+  "en": "Sort Order"
+ },
+ {
+  "ja": "後ろからソート",
+  "en": "Reverse Sort"
+ },
+ {
+  "ja": "列{0}",
+  "en": "Column {0}"
+ },
+ {
+  "ja": "使用されていないタグを削除",
+  "key": "browsing-clear-unused-tags"
+ },
+ {
+  "ja": "デッキを選択",
+  "key": "browsing-select-deck"
+ },
+ {
+  "ja": "新規追加",
+  "en": "Add New"
+ },
+ {
+  "ja": "問題と解答",
+  "en": "Question and Answer"
+ },
+ {
+  "ja": "前",
+  "en": "Previous"
+ },
+ {
+  "ja": "最初",
+  "en": "First"
+ },
+ {
+  "ja": "最後",
+  "en": "Last"
+ },
+ {
+  "ja": "次",
+  "en": "Next"
+ },
+ {
+  "ja": "フィルターデッキにサブデッキは作れません。",
+  "key": "errors-filtered-parent-deck"
+ },
+ {
+  "ja": "デッキがありません。",
+  "en": "No decks."
+ },
+ {
+  "ja": "デッキを作成",
+  "key": "decks-create-deck"
+ },
+ {
+  "ja": "新しいデッキ名",
+  "key": "decks-new-deck-name"
+ },
+ {
+  "ja": "デッキの追加",
+  "key": "actions-add-deck"
+ },
+ {
+  "ja": "デッキ名の変更",
+  "key": "actions-rename-deck"
+ },
+ {
+  "ja": "削除の確認",
+  "en": "Confirm Delete"
+ },
+ {
+  "ja": "本当によろしいですか？",
+  "en": "Are you sure?"
+ },
+ {
+  "ja": "デッキ「{0}」（カード{1}枚）を削除しました",
+  "en": "Deleted deck \"{0}\" ({1} {1|card|cards})"
+ },
+ {
+  "ja": "デッキを削除",
+  "key": "decks-delete-deck"
+ },
+ {
+  "ja": "名前を変更",
+  "key": "actions-rename"
+ },
+ {
+  "ja": "削除",
+  "key": "actions-delete"
+ },
+ {
+  "ja": "メディアを集めています… {0}/{1}",
+  "en": "Gathering media… {0}/{1}"
+ },
+ {
+  "ja": "指定したファイルは正当な .apkg ファイルではありません。",
+  "key": "importing-the-provided-file-is-not-a"
+ },
+ {
+  "ja": "メディアを読み込んでいます… {0}/{1}",
+  "en": "Importing media… {0}/{1}"
+ },
+ {
+  "ja": "ZIP の形になっていません（.apkg・.colpkg ではないか、途中で切れています）。",
+  "en": "Not a ZIP file (it is not an .apkg/.colpkg, or it is incomplete)."
+ },
+ {
+  "ja": "ZIP64 の目次が壊れています。",
+  "en": "The ZIP64 directory is corrupt."
+ },
+ {
+  "ja": "ZIP の目次が壊れています。",
+  "en": "The ZIP directory is corrupt."
+ },
+ {
+  "ja": "ZIP の中のファイルが壊れています: {0}",
+  "en": "A file inside the ZIP is corrupt: {0}"
+ },
+ {
+  "ja": "対応していない縮め方です（{0}）: {1}",
+  "en": "Unsupported compression ({0}): {1}"
+ },
+ {
+  "ja": "protobuf が読めません",
+  "en": "Unable to read protobuf"
+ },
+ {
+  "ja": "コレクションの中身がありません。",
+  "en": "The collection is empty."
+ },
+ {
+  "ja": "このパッケージは新しすぎる形で、読めません（Anki を新しくしてから書き出し直してください）。",
+  "en": "This package uses a newer format that cannot be read (update Anki and export again)."
+ },
+ {
+  "ja": "zstd を開く部品がありません。",
+  "en": "The zstd decoder is missing."
+ },
+ {
+  "ja": "パッケージの中にコレクションがありません。",
+  "en": "There is no collection in the package."
+ },
+ {
+  "ja": "画像・音声の一覧が壊れています。",
+  "en": "The media list is corrupt."
+ },
+ {
+  "ja": "sql.js を読めませんでした（tools/fetch_vendor.py を動かしてから、組み直してください）。",
+  "en": "Could not load sql.js (run tools/fetch_vendor.py, then rebuild)."
+ },
+ {
+  "ja": "同じ名前で中身の違うファイルがサーバーにあるので送らない",
+  "en": "Not sent: the server has a different file with the same name"
+ },
+ {
+  "ja": "画像・音声を送れませんでした（{0}）",
+  "en": "Could not upload media ({0})"
+ },
+ {
+  "ja": "{0}枚のカードを書き出しました。",
+  "en": "{0} {0|card|cards} exported."
+ },
+ {
+  "ja": "ファイル内にあるノート: {0}枚",
+  "key": "importing-notes-found-in-file",
+  "en": "Notes found in file: {0}",
+  "vars": [
+   "val"
+  ]
+ },
+ {
+  "ja": "ファイルから追加したノート: {0}枚",
+  "key": "importing-notes-added-from-file",
+  "en": "Notes added from file: {0}",
+  "vars": [
+   "val"
+  ]
+ },
+ {
+  "ja": "既存のノートを更新しました（より新しい版がファイル内にあるため）: {0}個",
+  "key": "importing-notes-updated-as-file-had-newer",
+  "en": "Notes updated, as file had newer version: {0}",
+  "vars": [
+   "val"
+  ]
+ },
+ {
+  "ja": "すでにコレクション内に最新版が存在するためスキップされたノート: {0}枚",
+  "key": "importing-notes-skipped-as-theyre-already-in",
+  "en": "Notes skipped, as up-to-date copies are already in your collection: {0}",
+  "vars": [
+   "val"
+  ]
+ },
+ {
+  "ja": "ノートタイプが変更されたためインポートできなかったノート：{0}",
+  "key": "importing-notes-that-could-not-be-imported",
+  "en": "Notes that could not be imported as note type has changed: {0}",
+  "vars": [
+   "val"
+  ]
+ },
+ {
+  "ja": "{0}個のメディアファイルをインポートしました",
+  "en": "Imported {0} media {0|file|files}"
+ },
+ {
+  "ja": "この処理は、既存のコレクションを削除し、今からインポートするファイルのデータに置き換えます。本当に実行しますか？",
+  "key": "importing-this-will-delete-your-existing-collection"
+ },
+ {
+  "ja": "追加: {0}・更新: {1}・削除: {2}",
+  "en": "Added: {0} · Updated: {1} · Deleted: {2}"
+ },
+ {
+  "ja": "カードの状態を合わせる: {0}枚・学習履歴を足す: {1}件",
+  "en": "Card states to update: {0} · Review entries to add: {1}"
+ },
+ {
+  "ja": "そのままにするもの: ノートタイプ {0}・ノート {1}・カード {2}・学習履歴 {3}・デッキ {4}・メディア {5}",
+  "en": "Kept as is: note types {0} · notes {1} · cards {2} · review entries {3} · decks {4} · media {5}"
+ },
+ {
+  "ja": "次の同期で、パソコンの Anki にも同じ変更が入ります。",
+  "en": "The next sync will make the same changes in Anki on your computer."
+ },
+ {
+  "ja": "コレクションをインポートしました。\n追加: {0}・更新: {1}・削除: {2}・カード: {3}・メディア: {4}",
+  "en": "Collection imported.\nAdded: {0} · Updated: {1} · Deleted: {2} · Cards: {3} · Media: {4}"
+ },
+ {
+  "ja": "バックアップを作成中…",
+  "key": "profiles-creating-backup"
+ },
+ {
+  "ja": "ファイルが壊れています。バックアップから復元してください。",
+  "key": "importing-invalid-file-please-restore-from-backup"
+ },
+ {
+  "ja": "太字",
+  "key": "editing-bold-text"
+ },
+ {
+  "ja": "イタリック",
+  "key": "editing-italic-text"
+ },
+ {
+  "ja": "下線を追加",
+  "key": "editing-underline-text"
+ },
+ {
+  "ja": "書式を取り除く",
+  "key": "editing-remove-formatting"
+ },
+ {
+  "ja": "文字色",
+  "key": "editing-text-color"
+ },
+ {
+  "ja": "音声を録音",
+  "key": "editing-record-audio"
+ },
+ {
+  "ja": "メディアを追加",
+  "key": "editing-add-media"
+ },
+ {
+  "ja": "手書き",
+  "en": "Draw"
+ },
+ {
+  "ja": "数式",
+  "key": "editing-equations"
+ },
+ {
+  "ja": "HTMLエディタ",
+  "key": "editing-html-editor"
+ },
+ {
+  "ja": "お使いのデバイスの「設定」→「プライバシー」→「マイク」からAnkiがマイクを使用できるように設定してください。",
+  "en": "Please allow Anki to use the microphone in Settings > Privacy > Microphone on your device."
+ },
+ {
+  "ja": "ノートの追加",
+  "key": "actions-add-note"
+ },
+ {
+  "ja": "ノートの編集",
+  "en": "Edit Note"
+ },
+ {
+  "ja": "この束にはテンプレートが入っていません。手順 9 で書き出し直してください。",
+  "en": "This bundle has no templates. Export it again (step 9)."
+ },
+ {
+  "ja": "ノートを削除",
+  "key": "studying-delete-note"
+ },
+ {
+  "ja": "ツール",
+  "en": "Tools"
+ },
+ {
+  "ja": "保存",
+  "key": "actions-save"
+ },
+ {
+  "ja": "カメラから",
+  "en": "From Camera"
+ },
+ {
+  "ja": "写真から",
+  "en": "From Photos"
+ },
+ {
+  "ja": "ファイルから",
+  "en": "From Files"
+ },
+ {
+  "ja": "上付き文字",
+  "key": "editing-superscript"
+ },
+ {
+  "ja": "下付き文字",
+  "key": "editing-subscript"
+ },
+ {
+  "ja": "MathJax インライン数式",
+  "key": "editing-mathjax-inline"
+ },
+ {
+  "ja": "MathJax ブロック数式",
+  "key": "editing-mathjax-block"
+ },
+ {
+  "ja": "録音中",
+  "en": "Recording"
+ },
+ {
+  "ja": "キャンセル",
+  "key": "actions-cancel"
+ },
+ {
+  "ja": "最初のフィールドが空欄です。",
+  "key": "adding-the-first-field-is-empty"
+ },
+ {
+  "ja": "穴埋め問題用のノートタイプを使用していますが、穴埋め問題用の範囲がまだ指定されていません。このままの状態でカードを追加してもよろしいですか？",
+  "key": "adding-you-have-a-cloze-deletion-note"
+ },
+ {
+  "ja": "追加しました",
+  "key": "adding-added"
+ },
+ {
+  "ja": "変更を破棄しますか？",
+  "key": "card-templates-discard-changes"
+ },
+ {
+  "ja": "破棄",
+  "key": "actions-discard"
+ },
+ {
+  "ja": "編集を続ける",
+  "key": "adding-keep-editing"
+ },
+ {
+  "ja": "この束にはノートタイプのテンプレートが入っていません。パソコンで書き出して上げ直してください（README の手順 9）。",
+  "en": "This bundle has no note type templates. Export and upload again from your computer (README step 9)."
+ },
+ {
+  "ja": "このノートは編集できません（ノートタイプのテンプレートがありません）。",
+  "en": "This note cannot be edited (its note type template is missing)."
+ },
+ {
+  "ja": "ノートを削除しました（カード{0}枚）",
+  "en": "Note deleted ({0} {0|card|cards})"
+ },
+ {
+  "ja": "ノートを削除する",
+  "key": "browsing-delete-notes"
+ },
+ {
+  "ja": "{0}件のノートを削除しました（カード{1}枚）",
+  "en": "Deleted {0} {0|note|notes} ({1} {1|card|cards})"
+ },
+ {
+  "ja": "ノートタイプを変更",
+  "key": "browsing-change-notetype"
+ },
+ {
+  "ja": "カードタイプ{0}のテンプレートに不備があります。",
+  "key": "card-templates-invalid-template-number",
+  "en": "Card template {0} has a problem.",
+  "vars": [
+   "number"
+  ]
+ },
+ {
+  "ja": "詳細はプレビューをご覧ください。",
+  "key": "card-templates-see-preview"
+ },
+ {
+  "ja": "「{0}」というフィールドが見つかりません。",
+  "key": "card-templates-field-not-found",
+  "en": "Field '{0}' not found.",
+  "vars": [
+   "field"
+  ]
+ },
+ {
+  "ja": "表面のカードテンプレートには「{{表面}}」といったフィールドを指定する置換え文字列が必要です。",
+  "key": "card-templates-no-front-field",
+  "en": "Expected to find a field replacement on the front of the card template."
+ },
+ {
+  "ja": "表面側がカードタイプ{0}のテンプレートと同一です。",
+  "key": "card-templates-identical-front",
+  "en": "The front side is identical to card template {0}.",
+  "vars": [
+   "number"
+  ]
+ },
+ {
+  "ja": "表面と裏面のカードテンプレートには 「{{cloze:テキスト}}」といった置換え文字列が必要です。",
+  "key": "card-templates-missing-cloze",
+  "en": "Expected to find '{{cloze:Text}}' or similar on the front and back of the card template."
+ },
+ {
+  "ja": "同じノートタイプのノートを選択してください。",
+  "key": "errors-multiple-notetypes-selected"
+ },
+ {
+  "ja": "この変更を他のデバイスと同期するには、次回の同期の際にデータベースの完全なアップロードが必要となります。他のデバイスでカード学習やその他の変更を行って、まだこのデバイスとの同期が済んでいない場合、それらの変更は失われます。処理を続行しますか？",
+  "key": "qt-misc-the-requested-change-will-require-a"
+ },
+ {
+  "ja": "表面",
+  "key": "notetypes-front-field"
+ },
+ {
+  "ja": "裏面",
+  "key": "notetypes-back-field"
+ },
+ {
+  "ja": "スタイル",
+  "key": "card-templates-template-styling"
+ },
+ {
+  "ja": "変更を保存しました。",
+  "key": "card-templates-changes-saved"
+ },
+ {
+  "ja": "最低一つのカードタイプが必要です。",
+  "key": "card-templates-at-least-one-card-type-is"
+ },
+ {
+  "ja": "ノートには最低一つのフィールドが必要です。",
+  "key": "fields-notes-require-at-least-one-field"
+ },
+ {
+  "ja": "そのフィールド名は既に使用しています。",
+  "key": "fields-that-field-name-is-already-used"
+ },
+ {
+  "ja": "{0} からこのフィールドを削除しますか？",
+  "key": "fields-delete-field-from",
+  "en": "Delete field from {0}?",
+  "vars": [
+   "val"
+  ]
+ },
+ {
+  "ja": "カードタイプ「{0}」とそれを使用している{1}枚のカードを削除しますか？",
+  "en": "Delete the '{0}' card type, and its {1} {1|card|cards}?"
+ },
+ {
+  "ja": "{0}枚のカードが作成されます。続行しますか？",
+  "en": "This will create {0} {0|card|cards}. Proceed?"
+ },
+ {
+  "ja": "カードの新しい位置を入力してください (1...{0}):",
+  "key": "card-templates-enter-new-card-position-1",
+  "en": "Enter new card position (1...{0}):",
+  "vars": [
+   "val"
+  ]
+ },
+ {
+  "ja": "新しい位置 (1...{0}):",
+  "en": "New position (1...{0}):"
+ },
+ {
+  "ja": "カードテンプレート",
+  "en": "Card Templates"
+ },
+ {
+  "ja": "フィールド...",
+  "en": "Fields..."
+ },
+ {
+  "ja": "反転",
+  "key": "card-templates-flip"
+ },
+ {
+  "ja": "カードタイプを追加...",
+  "key": "card-templates-add-card-type"
+ },
+ {
+  "ja": "このカードタイプを削除",
+  "key": "card-templates-remove-card-type"
+ },
+ {
+  "ja": "このカードタイプ名を変更...",
+  "key": "card-templates-rename-card-type"
+ },
+ {
+  "ja": "このカードタイプの順序を変更...",
+  "key": "card-templates-reposition-card-type"
+ },
+ {
+  "ja": "はい",
+  "en": "Yes"
+ },
+ {
+  "ja": "いいえ",
+  "en": "No"
+ },
+ {
+  "ja": "新しい名前:",
+  "key": "actions-new-name"
+ },
+ {
+  "ja": "並び替える",
+  "key": "actions-reposition"
+ },
+ {
+  "ja": "{0} のフィールド",
+  "key": "fields-fields-for",
+  "en": "Fields for {0}",
+  "vars": [
+   "val"
+  ]
+ },
+ {
+  "ja": "ソート",
+  "en": "Sort"
+ },
+ {
+  "ja": "フィールドを追加",
+  "key": "fields-add-field"
+ },
+ {
+  "ja": "フィールド名:",
+  "key": "fields-field-name"
+ },
+ {
+  "ja": "このフィールドをブラウザでのソート（並び替え用）フィールドにする",
+  "key": "fields-sort-by-this-field-in-the"
+ },
+ {
+  "ja": "保存してから選んでください。",
+  "en": "Save first, then choose."
+ },
+ {
+  "ja": "現在のノートタイプ:",
+  "en": "Current note type:"
+ },
+ {
+  "ja": "変更後のノートタイプ:",
+  "en": "New note type:"
+ },
+ {
+  "ja": "フィールド",
+  "en": "Fields"
+ },
+ {
+  "ja": "テンプレート",
+  "en": "Templates"
+ },
+ {
+  "ja": "(なし)",
+  "key": "change-notetype-nothing"
+ },
+ {
+  "ja": "穴埋め問題ノートタイプへ変更、あるいは穴埋め問題から別のノートタイプへ変更する場合、カード番号はそのまま変わりません。\n\n穴埋め問題ノートタイプから通常のノートタイプへ変更する際、カードテンプレートよりも多くの穴埋め問題がある場合は、超過分のカードは削除されます。",
+  "en": "When changing to or from a Cloze note type, card numbers remain unchanged.\n\nIf changing to a regular note type, and there are more cloze deletions than available card templates, any extra cards will be removed."
+ },
+ {
+  "ja": "これらのフィールドの内容が破棄されます:",
+  "key": "change-notetype-will-discard-content"
+ },
+ {
+  "ja": "これらのカードが削除されます:",
+  "key": "change-notetype-will-discard-cards"
+ },
+ {
+  "ja": "{0}件のノートのノートタイプを変更しました",
+  "en": "Changed the note type of {0} {0|note|notes}"
+ },
+ {
+  "ja": "細い",
+  "en": "Thin"
+ },
+ {
+  "ja": "太い",
+  "en": "Thick"
+ },
+ {
+  "ja": "不透明",
+  "en": "Opaque"
+ },
+ {
+  "ja": "透明（中）",
+  "en": "Moderately transparent"
+ },
+ {
+  "ja": "完全透明",
+  "en": "Very transparent"
+ },
+ {
+  "ja": "[ツール] から [白紙カードをチェック] を実行してください。",
+  "key": "studying-please-run-toolsempty-cards"
+ },
+ {
+  "ja": "解答キー入力: 不明なフィールド ⁨{0}⁩",
+  "key": "studying-type-answer-unknown-field",
+  "en": "Type answer: unknown field {0}",
+  "vars": [
+   "val"
+  ]
+ },
+ {
+  "ja": "小",
+  "en": "Small"
+ },
+ {
+  "ja": "大",
+  "en": "Large"
+ },
+ {
+  "ja": "特大",
+  "en": "Extra Large"
+ },
+ {
+  "ja": "書き込みのデザインを読めませんでした",
+  "en": "Could not load the handwriting design"
+ },
+ {
+  "ja": "オプションを保存しました（{0}枚の記憶の値を計算し直しました）",
+  "en": "Options saved (memory states recalculated for {0} {0|card|cards})"
+ },
+ {
+  "ja": "ログアウト",
+  "key": "sync-log-out-button"
+ },
+ {
+  "ja": "この端末の、サーバーへのつなぎを外します。まだ送っていない答えは、この端末に残ります。もう一度使うには、パソコンで出した番号を入れ直してください。",
+  "en": "This device will be disconnected from the server. Answers not yet sent stay on this device. To use it again, enter a new code generated on your computer."
+ },
+ {
+  "ja": "直近のバックアップから変更がありません。",
+  "key": "profiles-backup-unchanged"
+ },
+ {
+  "ja": "バックアップを作成しました。",
+  "key": "profiles-backup-created"
+ },
+ {
+  "ja": "コレクションが大きすぎて、この端末にはバックアップを置けません。パソコンの Anki のバックアップを使ってください。",
+  "en": "The collection is too large to back up on this device. Use the backups of Anki on your computer."
+ },
+ {
+  "ja": "同期できません: {0}",
+  "en": "Can't sync: {~0}"
+ },
+ {
+  "ja": "未送信 {0}",
+  "en": "{0} unsent"
+ },
+ {
+  "ja": "検索条件に一致するカードがありません。別のフィルターデッキ内にあるカードや休止中のカードが除外されている可能性があります。",
+  "key": "decks-filtered-deck-search-empty"
+ },
+ {
+  "ja": "再構築",
+  "key": "actions-rebuild"
+ },
+ {
+  "ja": "空にする",
+  "key": "studying-empty"
+ },
+ {
+  "ja": "このアクションはフィルターデッキでのみ使用できます。",
+  "key": "errors-filtered-deck-required"
+ },
+ {
+  "ja": "フィルターデッキ",
+  "en": "Filtered Deck"
+ },
+ {
+  "ja": "作成",
+  "key": "decks-build"
+ },
+ {
+  "ja": "このデッキを削除すると、残りのカードもすべて元のデッキに戻ります。",
+  "key": "studying-deleting-this-deck-from-the-deck"
+ },
+ {
+  "ja": "無効な入力です。",
+  "key": "errors-invalid-input-empty"
+ },
+ {
+  "ja": "バッジ",
+  "en": "Badge"
+ },
+ {
+  "ja": "カードへの回答",
+  "key": "actions-answer-card"
+ },
+ {
+  "ja": "{0}/{1} 件選択",
+  "en": "{0}/{1} selected"
+ },
+ {
+  "ja": "デッキの変更",
+  "key": "browsing-change-deck"
+ },
+ {
+  "ja": "フラグを変更",
+  "en": "Change Flag"
+ },
+ {
+  "ja": "休止 / 休止解除",
+  "key": "browsing-toggle-suspend"
+ },
+ {
+  "ja": "{0}枚の休止を解除しました",
+  "en": "Unsuspended {0} {0|card|cards}"
+ },
+ {
+  "ja": "{0}枚を休止しました",
+  "en": "Suspended {0} {0|card|cards}"
+ },
+ {
+  "ja": "期日を指定",
+  "key": "actions-set-due-date"
+ },
+ {
+  "ja": "カードをリセット",
+  "key": "actions-forget-card"
+ },
+ {
+  "ja": "検索して置換",
+  "key": "browsing-find-and-replace"
+ },
+ {
+  "ja": "タグを追加",
+  "en": "Add Tags"
+ },
+ {
+  "ja": "タグを解除",
+  "en": "Remove Tags"
+ },
+ {
+  "ja": "アクション",
+  "en": "Actions"
+ },
+ {
+  "ja": "位置（新規カード番号）を変更",
+  "key": "browsing-reposition-new-cards"
+ },
+ {
+  "ja": "先頭: {0}\n最後: {1}",
+  "en": "Queue top: {0}\nQueue bottom: {1}"
+ },
+ {
+  "ja": "開始位置:",
+  "key": "browsing-start-position"
+ },
+ {
+  "ja": "間隔:",
+  "key": "browsing-step"
+ },
+ {
+  "ja": "ランダムに並べ替える",
+  "key": "browsing-randomize-order"
+ },
+ {
+  "ja": "既存のカードの順序を移動する",
+  "key": "browsing-shift-position-of-existing-cards"
+ },
+ {
+  "ja": "新規カードの位置を{0}枚変更しました。",
+  "en": "Repositioned {0} new {0|card|cards}."
+ },
+ {
+  "ja": "声を録音",
+  "en": "Record Voice"
+ },
+ {
+  "ja": "マイクを使えません（{0}）",
+  "en": "Cannot use the microphone ({0})"
+ },
+ {
+  "ja": "録音を止めました",
+  "en": "Recording stopped"
+ },
+ {
+  "ja": "録音しています（もう一度で止める）",
+  "en": "Recording (again to stop)"
+ },
+ {
+  "ja": "このカードで録った声はありません",
+  "en": "No recording for this card"
+ },
+ {
+  "ja": "録音",
+  "en": "Record"
+ },
+ {
+  "ja": "録音を止める",
+  "en": "Stop Recording"
+ },
+ {
+  "ja": "録音した声を再生",
+  "en": "Play Recorded Voice"
+ },
+ {
+  "ja": "{0}枚のカードを「{1}」に移しました",
+  "en": "Moved {0} {0|card|cards} to \"{1}\""
+ },
+ {
+  "ja": "追加するタグを指定してください（選択中のノートに追加します）",
+  "key": "browsing-enter-tags-to-add"
+ },
+ {
+  "ja": "選択中のノートから解除するタグを指定してください",
+  "key": "browsing-enter-tags-to-delete"
+ },
+ {
+  "ja": "{0}件のノートを更新しました。",
+  "en": "Updated {0} {0|note|notes}."
+ },
+ {
+  "ja": "検索文字列:",
+  "en": "Find:"
+ },
+ {
+  "ja": "置換文字列:",
+  "en": "Replace With:"
+ },
+ {
+  "ja": "フラグ{0}（{1}）を付けました",
+  "en": "Flag {0} ({~1}) set"
+ },
+ {
+  "ja": "フラグを消去",
+  "en": "Clear Flag"
+ },
+ {
+  "ja": ".apkg ファイルをインポートするためのリンク先：",
+  "en": "Link to the .apkg file to import:"
+ },
+ {
+  "ja": "ダウンロード中…",
+  "en": "Downloading…"
+ },
+ {
+  "ja": "プロファイル「{0}」は開いていません。",
+  "en": "Profile \"{0}\" is not open."
+ },
+ {
+  "ja": "type と deck が要ります。",
+  "en": "type and deck are required."
+ },
+ {
+  "ja": "ノートタイプ「{0}」が見つかりません。",
+  "en": "Note type \"{0}\" not found."
+ },
+ {
+  "ja": "デッキ「{0}」が見つかりません。",
+  "en": "Deck \"{0}\" not found."
+ },
+ {
+  "ja": "フィールド「{0}」がありません。",
+  "en": "No field \"{0}\"."
+ },
+ {
+  "ja": "「{0}」を取ってこられませんでした（{1}）。",
+  "en": "Could not fetch \"{0}\" ({1})."
+ },
+ {
+  "ja": "同じ内容のノートがすでにあります（dupes=1 を付けると足せます）。",
+  "en": "A note with the same content already exists (add dupes=1 to add it anyway)."
+ },
+ {
+  "ja": "やり直せません",
+  "en": "Nothing to redo"
+ },
+ {
+  "ja": "やり直しました（{0}）",
+  "en": "{~0} redone"
+ },
+ {
+  "ja": "元に戻しました（{0}）",
+  "en": "{~0} undone"
+ },
+ {
+  "ja": "ノートを今日は非表示にしました（{0}枚）",
+  "en": "Note buried ({0} {0|card|cards})"
+ },
+ {
+  "ja": "フラグ{0}",
+  "en": "Flag {0}"
+ },
+ {
+  "ja": "新規カードにリセット",
+  "en": "Reset to New"
+ },
+ {
+  "ja": "可能な限り元の位置に復元",
+  "key": "scheduling-restore-position"
+ },
+ {
+  "ja": "学習回数と復習での忘却回数をリセット",
+  "key": "scheduling-reset-counts"
+ },
+ {
+  "ja": "{0}枚のカードを新規カードに戻しました。",
+  "en": "Reset {0} {0|card|cards} to new."
+ },
+ {
+  "ja": "何日後にカードを表示しますか？\n\n入力例）\n　0    = 今日\n　1!   = 明日。かつ、復習間隔を1日に変更\n　3-7 = 3日後～7日後からランダムに選択",
+  "en": "Show card in how many days?\n\nExamples:\n  0 = today\n  1! = tomorrow + change interval to 1\n  3-7 = random choice of 3-7 days"
+ },
+ {
+  "ja": "{0}枚のカードの期日を設定しました。",
+  "en": "Set the due date of {0} {0|card|cards}."
+ },
+ {
+  "ja": "上乗せ可能な新規カード: {0} 枚",
+  "en": "New cards available: {0}"
+ },
+ {
+  "ja": "上乗せ可能な復習カード: {0} 枚",
+  "en": "Review cards available: {0}"
+ },
+ {
+  "ja": "もう一度と回答したカードを復習: 直近",
+  "key": "custom-study-review-cards-forgotten-in-last"
+ },
+ {
+  "ja": "新規カードのプレビュー: 追加日が過去",
+  "key": "custom-study-preview-new-cards-added-in-the"
+ },
+ {
+  "ja": "このデッキから",
+  "key": "custom-study-select"
+ },
+ {
+  "ja": "枚のカードを抽出する",
+  "key": "custom-study-cards-from-the-deck"
+ },
+ {
+  "ja": "すでに存在しているカスタム学習デッキの名前を変更してください。",
+  "key": "custom-study-must-rename-deck"
+ },
+ {
+  "ja": "カードの自動送り",
+  "key": "actions-auto-advance"
+ },
+ {
+  "ja": "ツールアイコン",
+  "en": "Tool Icons"
+ },
+ {
+  "ja": "デッキ内非表示解除",
+  "en": "Unbury Deck"
+ },
+ {
+  "ja": "マークする",
+  "en": "Mark"
+ },
+ {
+  "ja": "マーク＋今日は非表示",
+  "en": "Mark + Bury"
+ },
+ {
+  "ja": "マーク＋休止",
+  "en": "Mark + Suspend"
+ },
+ {
+  "ja": "上にスクロール",
+  "en": "Scroll Up"
+ },
+ {
+  "ja": "下にスクロール",
+  "en": "Scroll Down"
+ },
+ {
+  "ja": "回答 (もう一度)",
+  "key": "deck-config-answer-again"
+ },
+ {
+  "ja": "回答 (正解)",
+  "key": "deck-config-answer-good"
+ },
+ {
+  "ja": "回答 (簡単)",
+  "en": "Answer Easy"
+ },
+ {
+  "ja": "回答 (難しい)",
+  "key": "deck-config-answer-hard"
+ },
+ {
+  "ja": "手書きサイズ",
+  "en": "Scratchpad Size"
+ },
+ {
+  "ja": "解答を表示 / 回答 (正解)",
+  "en": "Show Answer / Answer Good"
+ },
+ {
+  "ja": "録音メニュー",
+  "en": "Recording Menu"
+ },
+ {
+  "ja": "音声 +5秒",
+  "en": "Audio +5s"
+ },
+ {
+  "ja": "音声 -5秒",
+  "en": "Audio -5s"
+ },
+ {
+  "ja": "音声を一時停止/再開",
+  "key": "studying-pause-audio"
+ },
+ {
+  "ja": "音声を再生",
+  "key": "actions-replay-audio"
+ },
+ {
+  "ja": "左ショルダー",
+  "en": "Left Shoulder"
+ },
+ {
+  "ja": "右ショルダー",
+  "en": "Right Shoulder"
+ },
+ {
+  "ja": "左トリガー",
+  "en": "Left Trigger"
+ },
+ {
+  "ja": "右トリガー",
+  "en": "Right Trigger"
+ },
+ {
+  "ja": "左スティック",
+  "en": "Left Stick"
+ },
+ {
+  "ja": "右スティック",
+  "en": "Right Stick"
+ },
+ {
+  "ja": "カードの自動送りを開始しました",
+  "key": "actions-auto-advance-activated"
+ },
+ {
+  "ja": "カードの自動送りを停止しました",
+  "key": "actions-auto-advance-deactivated"
+ },
+ {
+  "ja": "質問表示時間が経過しました",
+  "key": "studying-question-time-elapsed"
+ },
+ {
+  "ja": "回答する時間になりました",
+  "key": "studying-answer-time-elapsed"
+ },
+ {
+  "ja": "サーバーにつながりませんでした。ネットにつないでから、もう一度試してください。",
+  "en": "Could not reach the server. Connect to the internet and try again."
+ },
+ {
+  "ja": "データベースを再構築し最適化しました。",
+  "key": "database-check-rebuilt"
+ },
+ {
+  "ja": "欠落しているファイル：{0}個",
+  "key": "media-check-missing-count",
+  "en": "Missing files: {0}",
+  "vars": [
+   "count"
+  ]
+ },
+ {
+  "ja": "使用されていないファイル：{0}個",
+  "key": "media-check-unused-count",
+  "en": "Unused files: {0}",
+  "vars": [
+   "count"
+  ]
+ },
+ {
+  "ja": "▼ 次のファイルを参照しているカードがありますが、該当するファイルがメディアフォルダ内にありません",
+  "key": "media-check-missing-header"
+ },
+ {
+  "ja": "▼ 次のファイルはメディアフォルダ内に存在していますが、どのカードにも使用されていません",
+  "key": "media-check-unused-header"
+ },
+ {
+  "ja": "実物なし（欠落）：{0}",
+  "en": "Missing: {0}"
+ },
+ {
+  "ja": "使用なし：{0}",
+  "en": "Unused: {0}"
+ },
+ {
+  "ja": "{0}枚中{1}枚のカードが白紙（{2}）",
+  "en": "{1} of {0} cards are empty ({2})"
+ },
+ {
+  "ja": "白紙カードはありません。",
+  "key": "empty-cards-not-found"
+ },
+ {
+  "ja": "{0} の白紙カード：",
+  "key": "empty-cards-for-note-type",
+  "en": "Empty cards for {0}:",
+  "vars": [
+   "notetype"
+  ]
+ },
+ {
+  "ja": "消すときは、パソコンの Anki の「ツール」→「白紙カード」で消してから、手順 9 で組み直してください。",
+  "en": "To delete them, use Tools > Empty Cards in Anki on your computer, then rebuild (step 9)."
+ },
+ {
+  "ja": "入れたデザイン「{0}」で、カードの上に Apple Pencil で書けます。歯車メニューの「手書きパッド」（本家の機能）とは別のものです。",
+  "en": "With the installed design \"{0}\", you can write on cards with Apple Pencil. This is separate from the Scratchpad in the gear menu (an AnkiMobile feature)."
+ },
+ {
+  "ja": "左側",
+  "en": "Left side"
+ },
+ {
+  "ja": "文字入力で解答しない",
+  "en": "Don't type in the answer"
+ },
+ {
+  "ja": "手書きパッドを表示しない",
+  "en": "Don't show scratchpad"
+ },
+ {
+  "ja": "シェイクアクション",
+  "en": "Shake Action"
+ },
+ {
+  "ja": "ダブルタップ防止",
+  "en": "Double-tap protection"
+ },
+ {
+  "ja": "リンクをこのアプリの外部で開く",
+  "en": "Open links outside this app"
+ },
+ {
+  "ja": "日付更新時刻",
+  "key": "preferences-next-day-starts-at"
+ },
+ {
+  "ja": "習得学習の前倒し許容時間 (分)",
+  "en": "Learn ahead limit (mins)"
+ },
+ {
+  "ja": "スティックは、いつもカードを上下に送ります。",
+  "en": "The sticks always scroll the card."
+ },
+ {
+  "ja": "この端末（ブラウザ）では、アイコンに数を出せません。iPhone・iPad はホーム画面に追加したアプリ（iOS 16.4 以降）で使えます。",
+  "en": "This device (browser) cannot show a number on the icon. On iPhone and iPad, it works in the app added to the Home Screen (iOS 16.4 or later)."
+ },
+ {
+  "ja": "ボタン{0}",
+  "en": "Button {0}"
+ },
+ {
+  "ja": "カメラ・写真ライブラリから入れる写真（と、下の設定がオンなら貼り付けた画像）の長辺をここまで小さくします。0 なら小さくしません。",
+  "en": "Photos added from the camera or photo library (and pasted images, if the setting below is on) are scaled down so the long side is at most this size. 0 means no resizing."
+ },
+ {
+  "ja": "ピクセル",
+  "en": "pixels"
+ },
+ {
+  "ja": "Anki は一定時間（分）ごとにコレクションのバックアップを作成しています。各期間（日／週／月）の代表として保管するバックアップ以外のバックアップは、ディスク領域を空けるために、作成から2日以上経過した後に削除していきます。",
+  "key": "preferences-backup-explanation",
+  "en": "Anki periodically backs up your collection. After backups are more than 2 days old, Anki will start removing some of them to free up disk space."
+ },
+ {
+  "ja": "現在利用可能なバックアップ",
+  "en": "Available Backups"
+ },
+ {
+  "ja": "今すぐ作成",
+  "en": "Create Now"
+ },
+ {
+  "ja": "つないでいるサイト: {0}",
+  "en": "Connected site: {0}"
+ },
+ {
+  "ja": "メディアログ",
+  "key": "sync-media-log-button"
+ },
+ {
+  "ja": "一方向同期",
+  "en": "One-way sync"
+ },
+ {
+  "ja": "ネットワークタイムアウト",
+  "key": "preferences-network-timeout"
+ },
+ {
+  "ja": "セルフホスト同期サーバー",
+  "key": "preferences-custom-sync-url"
+ },
+ {
+  "ja": "上級ユーザー向け - 詳細についてはマニュアルを参照してください",
+  "key": "preferences-custom-sync-url-disclaimer"
+ },
+ {
+  "ja": "まだ送っていない画像・音声（{0}）",
+  "en": "Media not yet sent ({0})"
+ },
+ {
+  "ja": "送った画像・音声",
+  "en": "Media sent"
+ },
+ {
+  "ja": "まだありません",
+  "en": "None yet"
+ },
+ {
+  "ja": "すべて選択",
+  "key": "editing-image-occlusion-select-all"
+ },
+ {
+  "ja": "読み込みに失敗: {0}",
+  "en": "Failed to load: {0}"
+ },
+ {
+  "ja": "暗記",
+  "en": "selfanki"
+ },
+ {
+  "ja": "無効な検索:⁨{0}⁩",
+  "en": "Invalid search: {~0}"
+ },
+ {
+  "ja": "検索でandが使用されていますが、２つの検索条件を接続していません。その文字列自体を検索したい場合は、二重引用符で囲んでください：\"and\"",
+  "en": "an and was found but it is not connecting two search terms. If you want to search for the word itself, wrap it in double quotes: \"and\"."
+ },
+ {
+  "ja": "検索でorが使用されていますが、２つの検索用語を接続していません。その文字列自体を検索したい場合は、二重引用符で囲んでください：\"or\"",
+  "en": "an or was found but it is not connecting two search terms. If you want to search for the word itself, wrap it in double quotes: \"or\"."
+ },
+ {
+  "ja": "検索で(...)が使用されていますが、カッコ内に検索するものがありません。カッコ自体を検索したい場合は、二重引用符で囲んでください：\"( )\"",
+  "en": "a group (...) was found, but there was nothing between the brackets to search for. If you want to search for literal brackets, wrap them in double quotes: \"( )\"."
+ },
+ {
+  "ja": "検索で)が使用されていますが、それに先立つ(がみつかりません。)の記号自体を検索したい場合は、二重引用符で囲むか手前にバックスラッシュをつけてください：\")\" または \\)",
+  "en": "a closing bracket ) was found, but there was no opening bracket ( preceding it. If you want to search for a literal ), wrap it in double quotes or prepend a backslash: \")\" or \\)."
+ },
+ {
+  "ja": "検索で(が使用されていますが、それに続く)がみつかりません。(の記号自体を検索したい場合は、二重引用符で囲むか手前にバックスラッシュをつけてください：\"(\" または \\(",
+  "en": "an opening bracket ( was found, but there was no closing bracket ) following it. If you want to search for a literal (, wrap it in double quotes or prepend a backslash: \"(\" or \\( ."
+ },
+ {
+  "ja": "検索で二重引用符\"\"が使用されていますが、引用符内に検索するものがありません。二重引用符の記号自体を検索したい場合は、手前にバックスラッシュをつけてください：\\\"\\\"",
+  "en": "a pair of double quotes \"\" was found, but there was nothing between them to search for. If you want to search for literal double quotes, prepend backslashes: \\\"\\\"."
+ },
+ {
+  "ja": "検索で二重引用符\"が使用されていますが、それを閉じるもう片方がみつかりません。\"の記号自体を検索したい場合は、手前にバックスラッシュをつけてください：\\\"",
+  "en": "an opening double quote \" was found, but there was no second one to close it. If you want to search for a literal \", prepend a backslash: \\\"."
+ },
+ {
+  "ja": "検索でコロン:が使用されていますが、その手前にキーワードがありません。:の記号自体を検索したい場合は、手前にバックスラッシュをつけてください：\\:",
+  "en": "a colon : was found, but there was no keyword preceding it. If you want to search for a literal :, prepend a backslash: \\:."
+ },
+ {
+  "ja": "エスケープシーケンス⁨{0}⁩は定義されていません。バックスラッシュ\\自体を検索したい場合は、前にもう一つ付け加えてください：\\\\",
+  "en": "the escape sequence {0} is not defined. If you want to search for a literal backslash \\, prepend another one: \\\\."
+ },
+ {
+  "ja": "⁨{0}⁩ に無効な引数 '⁨{1}⁩'が使用されています。",
+  "en": "{0} was given an invalid argument '{1}'."
+ },
+ {
+  "ja": "flag:に続けて有効なフラグ番号を入力してください：1 (赤) 2 (橙) 3 (緑) 4 (青) 5 (ピンク), 6 (ターコイズ), 7 (紫)  0 (フラグなし)",
+  "en": "flag: must be followed by a valid flag number: 1 (red), 2 (orange), 3 (green), 4 (blue), 5 (pink), 6 (turquoise), 7 (purple) or 0 (no flag)."
+ },
+ {
+  "ja": "prop:⁨{0}⁩の後には、以下の比較演算子のうちのいずれかが続く必要があります：=, !=, <, >, <= , >=",
+  "en": "prop:{0} must be followed by one of the following comparison operators: =, !=, <, >, <= or >=."
+ },
+ {
+  "ja": "入力ミスがないか確認してください。",
+  "en": "please check for typing mistakes."
+ },
+ {
+  "ja": "\"⁨{0}⁩\"の数字であるべき箇所に \"⁨{1}⁩\"が入力されています。",
+  "en": "expected a number in \"{0}\", but found \"{1}\"."
+ },
+ {
+  "ja": "\"⁨{0}⁩\"の整数であるべき箇所に\"⁨{1}⁩\"が入力されています。",
+  "en": "expected a whole number in \"{0}\", but found \"{1}\"."
+ },
+ {
+  "ja": "\"⁨{0}⁩\"の正の整数であるべき箇所に \"⁨{1}⁩\"が入力されています。",
+  "en": "expected a positive whole number in \"{0}\", but found \"{1}\"."
+ },
+ {
+  "ja": "\"⁨{0}⁩\"の0かそれ未満の整数であるべき箇所に\"⁨{1}⁩\"が入力されています。",
+  "en": "expected a whole number less than or equal to 0 in \"{0}\", but found \"{1}\"."
+ },
+ {
+  "ja": "\"⁨{0}⁩\"の回答ボタン1-4の間であるべき箇所に\"⁨{1}⁩\"が入力されています。",
+  "en": "expected an answer button between 1-4 in \"{0}\", but found \"{1}\"."
+ },
+ {
+  "ja": "{0:n}秒",
+  "en": "{0} {0|second|seconds}"
+ },
+ {
+  "ja": "{0:n}分",
+  "en": "{0} {0|minute|minutes}"
+ },
+ {
+  "ja": "{0:n}時間",
+  "en": "{0} {0|hour|hours}"
+ },
+ {
+  "ja": "{0:n}日",
+  "en": "{0} {0|day|days}"
+ },
+ {
+  "ja": "{0:n}か月",
+  "en": "{0} {0|month|months}"
+ },
+ {
+  "ja": "{0:n}年",
+  "en": "{0} {0|year|years}"
+ },
+ {
+  "ja": "カード {0:n}",
+  "en": "Card {0}"
+ },
+ {
+  "ja": "これらのフィールドの内容が破棄されます: {0}",
+  "en": "Will discard content on the following fields: {0}"
+ },
+ {
+  "ja": "これらのカードが削除されます: {0}",
+  "en": "Will remove the following cards: {0}"
+ },
+ {
+  "ja": "デッキの設定",
+  "en": "Deck Options"
+ },
+ {
+  "ja": "前回表示日時が古い順",
+  "key": "decks-oldest-seen-first"
+ },
+ {
+  "ja": "無作為",
+  "key": "decks-random"
+ },
+ {
+  "ja": "間隔が小さい順",
+  "key": "decks-increasing-intervals"
+ },
+ {
+  "ja": "間隔が大きい順",
+  "key": "decks-decreasing-intervals"
+ },
+ {
+  "ja": "復習での忘却回数が多い順",
+  "key": "decks-most-lapses"
+ },
+ {
+  "ja": "追加した順",
+  "key": "decks-order-added"
+ },
+ {
+  "ja": "復習期日が古い順",
+  "key": "decks-order-due"
+ },
+ {
+  "ja": "追加時期が新しい順",
+  "key": "decks-latest-added-first"
+ },
+ {
+  "ja": "正答可能性が低い順",
+  "key": "deck-config-sort-order-retrievability-ascending"
+ },
+ {
+  "ja": "正答可能性が高い順",
+  "key": "deck-config-sort-order-retrievability-descending"
+ },
+ {
+  "ja": "ヘルプ",
+  "key": "actions-help"
+ },
+ {
+  "ja": "抽出するカードのタグを選択:",
+  "key": "custom-study-require-one-or-more-of-these"
+ },
+ {
+  "ja": "抽出から除外するカードのタグを選択:",
+  "key": "custom-study-select-tags-to-exclude"
+ },
+ {
+  "ja": "名前",
+  "key": "deck-config-name-prompt",
+  "en": "Name"
+ },
+ {
+  "ja": "フィルター：",
+  "key": "decks-filter"
+ },
+ {
+  "ja": "最大",
+  "key": "decks-limit-to"
+ },
+ {
+  "ja": "枚を、次の順に抜き出す:",
+  "key": "decks-cards-selected-by"
+ },
+ {
+  "ja": "２つめのフィルターを有効にする",
+  "key": "decks-enable-second-filter"
+ },
+ {
+  "ja": "フィルター２",
+  "key": "decks-filter-2"
+ },
+ {
+  "ja": "このフィルターデッキでの回答に基づいて、カードをスケジュールし直す",
+  "key": "decks-reschedule-cards-based-on-my-answers"
+ },
+ {
+  "ja": "スケジュールし直す",
+  "en": "Reschedule"
+ },
+ {
+  "ja": "回答「もう一度」での間隔（秒）",
+  "en": "Again delay (seconds)"
+ },
+ {
+  "ja": "回答「難しい」での間隔（秒）",
+  "en": "Hard delay (seconds)"
+ },
+ {
+  "ja": "回答「正解」での間隔（秒）",
+  "en": "Good delay (seconds)"
+ },
+ {
+  "ja": "(0 = カードを元のデッキに戻す)",
+  "key": "decks-zero-minutes-hint"
+ },
+ {
+  "ja": "このデッキが空でも作成/更新",
+  "en": "Build/update even if empty"
+ },
+ {
+  "ja": "空でも作成",
+  "en": "Build even if empty"
+ },
+ {
+  "ja": "短い",
+  "en": "Short"
+ },
+ {
+  "ja": "長い",
+  "en": "Long"
+ },
+ {
+  "ja": "同期中...",
+  "en": "Syncing..."
+ },
+ {
+  "ja": "追加/変更： {0:n}↑",
+  "en": "Added/modified: {0}↑"
+ },
+ {
+  "ja": "削除：{0:n}↑",
+  "en": "Deleted: {0}↑"
+ },
+ {
+  "ja": "パッケージの中に {0} がありません。",
+  "en": "{0} is missing from the package."
+ },
+ {
+  "ja": "この画面の機能はまだありません: {0}",
+  "en": "Not available yet: {0}"
+ },
+ {
+  "ja": "編集",
+  "en": "Edit",
+  "ctx": "#tabs, #menu, .pick"
  }
 ]

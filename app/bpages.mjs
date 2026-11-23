@@ -35,6 +35,7 @@ function renderGroups(body, groups, onGo) {
       const b = document.createElement('button'); b.className = 'it' + (it.act ? ' act' : '') + (it.tg != null ? ' tgr' : ''); if (it.off) b.disabled = true;
       b.innerHTML = '<span class="lab"></span>' + (it.v != null ? '<span class="val"></span>' : '') + (it.go ? `<span class="chev">${CHEV}</span>` : '') + (it.ck ? '<span class="ck">✓</span>' : '') + (it.tg != null ? `<span class="tg${it.tg ? ' on' : ''}"></span>` : '');
       b.querySelector('.lab').textContent = it.t; if (it.v != null) b.querySelector('.val').textContent = it.v;
+      if (it.data) b.querySelector('.lab').setAttribute('translate', 'no');   // デッキ名などの利用者のデータは訳さない（app/i18n.mjs）
       if (it.key) b.dataset.k = it.key;
       if (!it.off) b.onclick = () => (it.go ? onGo(it.go) : it.run?.());
       box.append(b);
@@ -89,7 +90,7 @@ export function createDeckPicker(env) {
   let el = null;
   function paint() {
     const cur = env.current();
-    renderGroups(el.querySelector('.pbody'), [env.decks().map(d => ({ t: d.name, ck: d.id === cur, key: String(d.id), run: () => choose(d.id) }))], () => {});
+    renderGroups(el.querySelector('.pbody'), [env.decks().map(d => ({ t: d.name, data: 1, ck: d.id === cur, key: String(d.id), run: () => choose(d.id) }))], () => {});
   }
   async function choose(did) { close(); await env.pick(did); }
   function open() {

@@ -291,10 +291,11 @@ function applyServer(cards, revlog) {
 const alive = c => !c.gone && !deckOps.hides(c);   // gone＝消したノートのカード。hides＝消したデッキのカード
 const refreshCards = () => { S.cards = S.all.filter(c => c.type != null && alive(c)); };
 async function load() {
-  $('#status').textContent = '読み込み中…';
   const man = await fetchJSON(BUNDLE + 'manifest.json');
   Object.assign(FEAT, man.features || {}); PREF_DEFAULT.autoSync = !!FEAT.autoSync;
-  if (FEAT.lang && !/^ja/.test(FEAT.lang)) import('./i18n.mjs').then(m => m.start(FEAT.lang)).catch(() => {});
+  // 日本語以外は、画面を出す前に置き換え表を入れる（app/i18n.mjs。出してから置き換えると、日本語が一瞬見える）
+  if (FEAT.lang && !/^ja/.test(FEAT.lang)) await import('./i18n.mjs').then(m => m.start(FEAT.lang)).catch(() => {});
+  $('#status').textContent = '読み込み中…';
   if (FEAT.pen) loadDesign(FEAT.pen);
   const [meta, chunks, base, baseRev] = await Promise.all([fetchJSON(BUNDLE + man.meta), Promise.all(man.chunks.map(c => fetchJSON(BUNDLE + c.f))),
     fetchJSON(BUNDLE + man.base.state), fetchJSON(BUNDLE + man.base.revlog)]);
@@ -601,7 +602,7 @@ function showDecks() {
   const row = (group, d, depth) => {
     const ch = kids(d.name); const el = document.createElement('div'); el.className = 'row'; el.style.setProperty('--depth', depth);
     const [n, l, r] = countsFor(d.id, home).c; const due = l + r;
-    el.innerHTML = `${ch.length ? `<button class="tw">${S.open.has(d.id) ? '−' : '+'}</button>` : ''}<button class="dname"></button>
+    el.innerHTML = `${ch.length ? `<button class="tw">${S.open.has(d.id) ? '−' : '+'}</button>` : ''}<button class="dname" translate="no"></button>
       <span class="nums" lang="en"><span class="${due ? 'due' : 'zero'}">${due}</span><span class="${n ? 'newc' : 'zero'}">${n}</span></span><button class="chev" title="デッキの設定">${chev}</button>`;
     el.querySelector('.dname').textContent = depth === 0 && d.dyn && parentOf(d.name) ? d.name : d.name.split('::').pop(); if (d.dyn) el.querySelector('.dname').classList.add('dyn');
     el.querySelector('.dname').onclick = () => startStudy(d.id);
@@ -918,6 +919,7 @@ function paintBrowse(force = false) {
     r.style.top = i * h + 'px'; r.dataset.i = i;
     keys.forEach((k, j) => {
       const g = geo[j], sp2 = document.createElement('span'); sp2.className = 'bc' + (g.center ? ' ctr' : ''); sp2.dataset.k = k;
+      if (DATA_COLS.has(k)) sp2.setAttribute('translate', 'no');   // 利用者のデータの列は、画面の言語の置き換え（app/i18n.mjs）をしない
       sp2.style.left = g.left; sp2.style.width = g.width; if (g.pad) sp2.style.marginLeft = g.pad + 'px';
       let text = ''; try { text = cs ? noteCell(k, cs, ctx) : cardCell(k, c, ctx); } catch {}
       hlInto(sp2, fitMiddle(text, g.w), BR.hl);
@@ -927,6 +929,7 @@ function paintBrowse(force = false) {
   }
   sp.appendChild(frag);
 }
+const DATA_COLS = new Set(['noteFld', 'question', 'answer', 'deck', 'note', 'noteTags', 'template']);
 // 「表示」（目）: 一覧のカードを1枚ずつ（app/bpages.mjs）。右上の四角で 問題だけ ⇔ 問題と解答
 let brPreview = null;
 function openBrowsePreview() {
@@ -943,8 +946,10 @@ async function previewInto(f, c, side = 'a') {
   await new Promise(r => { f.onload = r; });
   if (dark) try { darkify(f.contentDocument); } catch {}
 }
-function openAnkiPage(route, title, did) {
-  $('#awpage .ptitle').textContent = title; $('#awframe').src = `/${route}/` + (typeof did === 'number' ? `?did=${did}` : '');
+function openAnkiPage(route, title, did, isData) {
+  // 題がデッキ名のとき（isData）は、画面の言語の置き換え（app/i18n.mjs）をしない
+  $('#awpage .ptitle').textContent = title; if (isData) $('#awpage .ptitle').setAttribute('translate', 'no'); else $('#awpage .ptitle').removeAttribute('translate');
+  $('#awframe').src = `/${route}/` + (typeof did === 'number' ? `?did=${did}` : '');
   $('#awpage').hidden = false;
 }
 // 負荷分散の数（rslib は出題の並びを作るときに作り直す＝デッキを開いたとき・日付が変わったとき）
@@ -1356,7 +1361,7 @@ function iosAlert(title, msg) {
 // カード情報は Anki 本体の画面（/card-info/。数字は ankiweb.mjs の cardStatsData が rslib stats/card.rs と同じ計算で返す）
 function cardInfo(c) {
   if (!c) return;
-  $('#awpage .ptitle').textContent = 'カード情報'; $('#awframe').src = `/card-info/?cid=${c.id}`;
+  $('#awpage .ptitle').textContent = 'カード情報'; $('#awpage .ptitle').removeAttribute('translate'); $('#awframe').src = `/card-info/?cid=${c.id}`;
   $('#awpage').hidden = false;
 }
 
@@ -1881,9 +1886,11 @@ function openCustom() {
       return;
     }
     const def = customStudyDeck(k, d.name, { days: n, limit: n, include: sel.inc, exclude: sel.exc }); if (!def || S.busy) return;
+    // デッキの名前は Anki と同じく画面の言語で（日本語なら「カスタム学習セッション」。app/i18n.mjs の置き換え表から）
+    const csName = window.SA_T ? window.SA_T(CUSTOM_STUDY_NAME) : CUSTOM_STUDY_NAME; def.name = csName;
     // 同じ名前のデッキがあればそれを作り直す（ふつうのデッキなら Anki と同じく断る）
-    if (S.meta.decks.some(x => x.name === CUSTOM_STUDY_NAME)) { iosAlert('Error', 'すでに存在しているカスタム学習デッキの名前を変更してください。'); return; }
-    const old = [...S.fdecks.values()].find(f => !f.removed && f.name === CUSTOM_STUDY_NAME);
+    if (S.meta.decks.some(x => x.name === csName)) { iosAlert('Error', 'すでに存在しているカスタム学習デッキの名前を変更してください。'); return; }
+    const old = [...S.fdecks.values()].find(f => !f.removed && f.name === csName);
     const id = old ? old.id : Date.now();
     let picked; try { picked = await computeFDeck(id, def); } catch (e) { iosAlert('Error', displayText(String(e && e.message || e))); return; }
     if (!picked.size) { iosAlert('Error', '指定した条件に一致するカードはありませんでした。'); return; }   // CustomStudyError::NoMatchingCards。画面はそのまま
@@ -1909,7 +1916,7 @@ const ACTIONS = [
   ['info', 'カード情報', () => cardInfo(S.card)],
   ['tools', 'ツールアイコン', () => openTools()],
   ['decks', 'デッキ', () => showDecks()],
-  ['stats', 'デッキの統計', () => openAnkiPage('graphs', deckName(S.deck).split('::').pop() || '統計', S.deck)],
+  ['stats', 'デッキの統計', () => openAnkiPage('graphs', deckName(S.deck).split('::').pop() || '統計', S.deck, !!deckName(S.deck))],
   ['unburyDeck', 'デッキ内非表示解除', () => window.ankiBridge('unbury')],
   ['topbar', 'トップバー', () => flipPref('topbar')],
   ['night', 'ナイトモード', () => { try { localStorage.setItem('theme', isDark() ? 'light' : 'dark'); } catch {} applyTheme(); }],
@@ -2301,7 +2308,7 @@ function setupTools() {
   };
   // 割り当てを選ぶページ（AnkiMobile と同じく全アクションの一覧。まだ写していないものは薄く出して選べない）
   const SWIPES = [['left', '左にスワイプ'], ['right', '右にスワイプ'], ['up', '上にスワイプ'], ['down', '下にスワイプ']];
-  const picker = (title, cur, key) => () => ({ title, groups: [ACTIONS.map(([k, t, fn]) => ({ t, ck: cur() === k, off: fn ? 0 : 1, run: () => { setLS(key, k); renderTopbar(); } }))] });
+  const picker = (title, cur, key) => () => ({ title, pick: 1, groups: [ACTIONS.map(([k, t, fn]) => ({ t, ck: cur() === k, off: fn ? 0 : 1, run: () => { setLS(key, k); renderTopbar(); } }))] });
   for (const side of ['q', 'a']) for (let i = 0; i < ZONES.length; i++) PAGES['tap' + side + i] = picker(ZONES[i], () => tapAct(side, i), `tap:${side}:${i}`);
   for (const [d, t] of SWIPES) PAGES['sw_' + d] = picker(t, () => swipeAct(d), 'swipe:' + d);
   for (let i = 0; i < TOP_DEF.length; i++) PAGES['tb' + i] = picker(`ボタン${i + 1}`, () => topAct(i), 'top:' + i);
@@ -2310,7 +2317,7 @@ function setupTools() {
   let stack = [];
   const closePrefs = () => { $('#prefs').hidden = true; stack = []; };
   const renderPrefs = () => {
-    const pg = PAGES[stack.at(-1)](); const body = $('#prefs .pbody'); body.innerHTML = '';
+    const pg = PAGES[stack.at(-1)](); const body = $('#prefs .pbody'); body.innerHTML = ''; body.classList.toggle('pick', !!pg.pick);   // pick＝アクションを選ぶページ（app/i18n.mjs が「編集」をアクションの名前として訳す）
     if (pg.about) { $('#prefs .ptitle').textContent = pg.title; $('#prefs .bl').textContent = '設定'; body.innerHTML = '<div class="about">' + pg.about.map(t => `<p>${t}</p>`).join('') + '</div>'; return; }
     $('#prefs .ptitle').textContent = pg.title; $('#prefs .bl').textContent = stack.length > 1 ? PAGES[stack.at(-2)]().title : '戻る';
     for (const g of pg.groups) {
@@ -2344,7 +2351,7 @@ function setupTools() {
     notes.openEdit(c);   // 行を押すとそのノートの編集（プレビューは編集の画面の目のボタン）
   });
   // 「絞り込み」（app/bfilter.mjs。ボタンの下の吹き出し。押す＝検索を置き換え、スワイプ＝今の検索の後ろに空白でつなぐ）
-  const fbtn = $('#browse > .pnav .nr [title="絞り込み"]');
+  const fbtn = $('#browse > .pnav .nr .ic.fl');
   const bfilter = createFilter({ host: () => $('#browse'), anchor: () => fbtn, current: () => $('#bq').value, apply: q => { $('#bq').value = q; runBrowse(); },
     names: async () => {
       let tags = []; try { const m = await loadNotes(S, BUNDLE); const set = new Set(); for (const n of m.values()) for (const t of String(n.tags || '').split(/\s+/)) if (t) set.add(t); tags = [...set]; } catch { tags = [...new Set(S.cards.flatMap(c => c.tags || []))]; }
@@ -2357,7 +2364,7 @@ function setupTools() {
     undo: async () => { await undoAnswer(); await runBrowse(); } });
   { const g = $('#browse > .pnav .ic.g'); g.disabled = false; g.onclick = () => bopts.open(); }
   { const e = $('#browse > .pnav .ic.e'); e.disabled = false; e.onclick = () => openBrowsePreview(); }
-  { const nr = $('#browse > .pnav .nr'); const selBtn = nr.querySelector('[title="選択"]'); selBtn.disabled = false; selBtn.onclick = () => setBrowseSelect(true);
+  { const nr = $('#browse > .pnav .nr'); const selBtn = nr.querySelector('.ic.sl'); selBtn.disabled = false; selBtn.onclick = () => setBrowseSelect(true);
     const mk = (t, cls, fn) => { const b = document.createElement('button'); b.className = 'tx ' + cls; b.textContent = t; b.onclick = fn; nr.append(b); };
     mk('アクション', 'sel-act', openBrowseActions);
     mk('すべて選択', 'sel-all', () => { BR.sel = new Set(BR.list.map(c => c.id)); paintBrowseTitle(); paintBrowse(true); });

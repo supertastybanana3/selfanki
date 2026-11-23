@@ -43,7 +43,7 @@ export function createNtScreen(env) {
     saved: '変更を保存しました。', discard: '変更を破棄しますか？', atLeastOneCard: '最低一つのカードタイプが必要です。', atLeastOneField: 'ノートには最低一つのフィールドが必要です。',
     fieldUsed: 'そのフィールド名は既に使用しています。', delField: n => `${n} からこのフィールドを削除しますか？`,
     delCard: (t, n) => `カードタイプ「${t}」とそれを使用している${n}枚のカードを削除しますか？`, createCards: n => `${n}枚のカードが作成されます。続行しますか？`,
-    newPos: n => `カードの新しい位置を入力してください (1...${n}):`, newFieldPos: n => `新しい位置 (1...${n}):`, cardN: n => `カード ${n}`,
+    newPos: n => `カードの新しい位置を入力してください (1...${n}):`, newFieldPos: n => `新しい位置 (1...${n}):`, cardN: n => (window.SA_T ? window.SA_T(`カード ${n}`) : `カード ${n}`),   // 新しいカードタイプの名前（日本語以外はその言語で）
   };
   const ask = (title, message, o = {}) => env.prompt({ title, message, ...o });
   const sheet = items => new Promise(res => {
@@ -94,7 +94,7 @@ ${pv ? '<iframe title="プレビュー"></iframe>' : '<textarea class="code" spe
     el.querySelector('.l').onclick = () => back();
     if (DEV) {
       const sel = el.querySelector('.tsel');
-      w.templates.forEach((x, i) => { const o = document.createElement('option'); o.value = i; o.textContent = `${i + 1}: ${x.name}`; sel.append(o); });
+      w.templates.forEach((x, i) => { const o = document.createElement('option'); o.value = i; o.textContent = `${i + 1}: ${x.name}`; o.setAttribute('translate', 'no'); sel.append(o); });
       sel.value = st.ti; sel.onchange = () => { keep(); st.ti = +sel.value; paint(); };
       el.querySelector('.opt').onclick = () => options();
       el.querySelector('.flds').onclick = () => { keep(); st.page = 'fields'; paint(); };
@@ -146,7 +146,7 @@ ${pv ? '<iframe title="プレビュー"></iframe>' : '<textarea class="code" spe
     const list = el.querySelector('.list');
     w.fields.forEach((f, i) => {
       const r = document.createElement('button'); r.className = 'row'; r.style.width = '100%';
-      r.innerHTML = '<span class="n"></span><span class="s"></span>'; r.querySelector('.n').textContent = `${i + 1}: ${f.name}`;
+      r.innerHTML = '<span class="n"></span><span class="s"></span>'; r.querySelector('.n').textContent = `${i + 1}: ${f.name}`; r.querySelector('.n').setAttribute('translate', 'no');
       if (sortIdx() === i) r.querySelector('.s').textContent = 'ソート';
       r.onclick = () => fieldMenu(i); list.append(r);
     });
@@ -262,13 +262,13 @@ ${pv ? '<iframe title="プレビュー"></iframe>' : '<textarea class="code" spe
       el.innerHTML = `<nav class="pnav"><button class="l">キャンセル</button><span class="t">ノートタイプを変更</span><button class="r">保存</button></nav>
 <div class="list"><div class="sec">現在のノートタイプ: <b class="on"></b></div><div class="bar">変更後のノートタイプ: <select class="nsel"></select></div>
 <div class="sec">フィールド</div><div class="fl"></div><div class="tsec"><div class="sec">テンプレート</div><div class="tl"></div></div><div class="note warn"></div></div>`;
-      el.querySelector('.on').textContent = o.name;
+      el.querySelector('.on').textContent = o.name; el.querySelector('.on').setAttribute('translate', 'no');
       const nsel = el.querySelector('.nsel');
-      for (const [id, x] of list) { const op = document.createElement('option'); op.value = id; op.textContent = x.name; nsel.append(op); }
+      for (const [id, x] of list) { const op = document.createElement('option'); op.value = id; op.textContent = x.name; op.setAttribute('translate', 'no'); nsel.append(op); }
       nsel.value = st.newMid; nsel.onchange = () => { st.newMid = +nsel.value; reset(); draw(); };
       const rowSel = (label, opts, val, on) => {
-        const r = document.createElement('div'); r.className = 'row'; const s = document.createElement('span'); s.className = 'n'; s.textContent = label;
-        const sel = document.createElement('select'); opts.forEach((t, i) => { const op = document.createElement('option'); op.value = i; op.textContent = t; sel.append(op); });
+        const r = document.createElement('div'); r.className = 'row'; const s = document.createElement('span'); s.className = 'n'; s.textContent = label; s.setAttribute('translate', 'no');
+        const sel = document.createElement('select'); opts.forEach((t, i) => { const op = document.createElement('option'); op.value = i; op.textContent = t; op.setAttribute('translate', 'no'); sel.append(op); });
         const none = document.createElement('option'); none.value = ''; none.textContent = '(なし)'; sel.append(none);
         sel.value = val == null ? '' : String(val); sel.onchange = () => { on(sel.value === '' ? null : +sel.value); draw(); };
         r.append(s, sel); return r;
@@ -281,7 +281,8 @@ ${pv ? '<iframe title="プレビュー"></iframe>' : '<textarea class="code" spe
       const lostF = o.fields.filter((_, i) => !st.fmap.includes(i)).map(f => f.name);
       if (lostF.length) warn.push('これらのフィールドの内容が破棄されます: ' + lostF.join(', '));
       if (st.tmap) { const lostT = templateMap(st.tmap, o.templates.length).removed.map(i => o.templates[i].name); if (lostT.length) warn.push('これらのカードが削除されます: ' + lostT.join(', ')); }
-      el.querySelector('.warn').textContent = warn.join('\n\n');
+      // 注意は1つずつ別の文字の塊にする（画面の言語の置き換え app/i18n.mjs が1つずつ訳せるように）
+      const wl = el.querySelector('.warn'); wl.textContent = ''; warn.forEach((w, i) => { if (i) wl.append('\n\n'); wl.append(w); });
       el.querySelector('.l').onclick = () => hide();
       el.querySelector('.r').onclick = async () => {
         const same = st.newMid === st.oldMid && st.fmap.every((v, i) => v === i) && (!st.tmap || st.tmap.every((v, i) => v === i));

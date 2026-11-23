@@ -226,12 +226,30 @@ def build_i18n(out, code, log=print):
             m = _re.match(r'^([a-z0-9-]+) = (.+)$', line)
             if m and '{' not in m.group(2): d[m.group(1)] = m.group(2).strip()
         return d
-    tgt = parse(res['resources'][0]); en = parse(res['resources'][-1])
-    table = {}
+    def parse_vars(text):
+        # 1行で、{ $名前 } と { "文字" } だけを含む訳（数で形の変わる -> のものは除く）
+        d = {}
+        for line in text.splitlines():
+            m = _re.match(r'^([a-z0-9-]+) = (.+)$', line)
+            if m and '{' in m.group(2) and '->' not in m.group(2): d[m.group(1)] = _re.sub(r'\{ *"([^"]*)" *\}', r'\1', m.group(2).strip())
+        return d
+    tgt = parse(res['resources'][0]); en = parse(res['resources'][-1]); tgt_v = parse_vars(res['resources'][0])
+    def keyed_pattern(e):
+        # 「{0}」のある文言に key と vars（{0} から順の Anki の変数名）があれば、その言語の Anki の訳を使う
+        v = tgt_v.get(e['key']) if e.get('key') and e.get('vars') else None
+        if not v: return None
+        for i, name in enumerate(e['vars']): v = _re.sub(r'\{ *\$' + name + r' *\}', '{%d}' % i, v)
+        return None if '{ $' in v or '{$' in v else v
+    table = {}; pats = []; ctxs = []
     for e in json.load(open(os.path.join(ROOT, 'app', 'i18n', 'strings.json'), encoding='utf-8')):
-        k = e.get('key'); v = tgt.get(k) if k else None
-        if not v: v = e.get('en') or (en.get(k) if k else None)
-        if v: table[e['ja']] = v
+        k = e.get('key'); v = (keyed_pattern(e) if e.get('vars') else tgt.get(k)) if k else None
+        if not v: v = e.get('en') or (en.get(k) if k and not e.get('vars') else None)
+        if not v: continue
+        if e.get('ctx'): ctxs.append([e['ctx'], e['ja'], v])        # その場所でだけ使う訳
+        elif _re.search(r'\{\d+(:n)?\}', e['ja']): pats.append([e['ja'], v])   # 数や名前が入る文言（i18n.mjs が正規表現にする）
+        else: table[e['ja']] = v
+    pats.sort(key=lambda x: -len(_re.sub(r'\{\d+(:n)?\}', '', x[0])))   # 決まった部分の長いものから試す
+    table['__pat'] = pats; table['__ctx'] = ctxs
     # 答えのボタンの間隔の単位（Anki の scheduling-answer-button-time-*。{ $amount } のところに数が入る）
     units = {}
     for line in res['resources'][0].splitlines():
@@ -242,6 +260,11 @@ def build_i18n(out, code, log=print):
     table['__ivl'] = units
     os.makedirs(os.path.join(out, 'app', 'i18n'), exist_ok=True)
     with open(os.path.join(out, 'app', 'i18n', 'ui.json'), 'w', encoding='utf-8') as f: json.dump(table, f, ensure_ascii=False)
+    # 画面より前に出る <html lang> も組むときに置き換える（ホーム画面の名前とページの題は apply_icon_name が config の app_name か言語で決める）
+    ix = os.path.join(out, 'app', 'index.html')
+    if os.path.exists(ix):
+        h = open(ix, encoding='utf-8').read().replace('<html lang="ja">', f'<html lang="{tag.split("-")[0]}">', 1)
+        with open(ix, 'w', encoding='utf-8') as f: f.write(h)
     log(L(f'画面の言語: {code}（置き換え {len(table)} 件）', f'Screen language: {code} ({len(table)} replacements)'))
     return tag
 
@@ -271,6 +294,7 @@ def apply_icon_name(out, cfg, log=print):
     link = '<link rel="manifest" href="./manifest.webmanifest">'
     if link in html:
         esc = name.replace('&', '&amp;').replace('"', '&quot;').replace('<', '&lt;').replace('>', '&gt;')
+        html = html.replace('<title>暗記</title>', f'<title>{esc}</title>', 1)
         html = html.replace(link, link + f'\n<link rel="apple-touch-icon" href="{touch}">\n<meta name="apple-mobile-web-app-title" content="{esc}">', 1)
         with open(idx_p, 'w', encoding='utf-8') as f: f.write(html)
 
