@@ -21,10 +21,10 @@ PARTS = [
 def fetch(name, ver, sha512, sub, mark, pick):
     dst = os.path.join(VENDOR, sub)
     if os.path.isfile(os.path.join(dst, mark)):
-        print(f'{name} はもう入っている:', dst); return
-    print(f'{name} {ver} を取ってくる…')
+        print(L(f'{name} はもう入っている:', f'{name} is already installed:'), dst); return
+    print(L(f'{name} {ver} を取ってくる…', f'Downloading {name} {ver}…'))
     b = urllib.request.urlopen(f'https://registry.npmjs.org/{name}/-/{name.split("/")[-1]}-{ver}.tgz', timeout=300).read()
-    if base64.b64encode(hashlib.sha512(b).digest()).decode() != sha512: die(f'{name}: 取ってきたファイルの指紋が合いません（途中で壊れたか、別物です）。もう一度動かしてください。')
+    if base64.b64encode(hashlib.sha512(b).digest()).decode() != sha512: die(L(f'{name}: 取ってきたファイルの指紋が合いません（途中で壊れたか、別物です）。もう一度動かしてください。', f'{name}: the downloaded file\'s hash does not match (corrupted or not the expected file). Run this again.'))
     tmp = dst + '.tmp'; shutil.rmtree(tmp, ignore_errors=True); os.makedirs(tmp)
     with tarfile.open(fileobj=io.BytesIO(b), mode='r:gz') as t:
         for m in t.getmembers():
@@ -37,9 +37,9 @@ def fetch(name, ver, sha512, sub, mark, pick):
             p = os.path.join(tmp, *rel.split('/'))
             os.makedirs(os.path.dirname(p), exist_ok=True)
             with open(p, 'wb') as f: f.write(t.extractfile(m).read())
-    if not os.path.isfile(os.path.join(tmp, mark)): die(f'{name}: 中に {mark} が見つかりません。')
+    if not os.path.isfile(os.path.join(tmp, mark)): die(L(f'{name}: 中に {mark} が見つかりません。', f'{name}: {mark} was not found inside.'))
     shutil.rmtree(dst, ignore_errors=True); os.replace(tmp, dst)
-    print('入れた:', dst, sum(len(f) for _, _, f in os.walk(dst)), 'ファイル')
+    print(L('入れた:', 'Installed:'), dst, sum(len(f) for _, _, f in os.walk(dst)), L('ファイル', 'files'))
 
 
 for part in PARTS: fetch(*part)

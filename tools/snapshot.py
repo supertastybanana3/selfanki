@@ -9,7 +9,8 @@ KEEP = 20
 def take(cfg, tag=''):
     src = expand(cfg.get('anki_collection') or '')
     if not src or not os.path.isfile(src):
-        raise SetupError(f'Anki のコレクションが見つかりません: "{src}"。config.json の "anki_collection" に collection.anki2 の場所を書いてください（README の「手順 2」）。')
+        raise SetupError(L(f'Anki のコレクションが見つかりません: "{src}"。config.json の "anki_collection" に collection.anki2 の場所を書いてください（README の「手順 2」）。',
+                           f'Anki collection not found: "{src}". Put the path of collection.anki2 in "anki_collection" in config.json (README "Step 2").'))
     base = os.path.join(STATE, 'snap'); os.makedirs(base, exist_ok=True)
     for attempt in range(3):
         out = os.path.join(base, datetime.datetime.now().strftime('%Y%m%d_%H%M%S') + (('_' + tag) if tag else ''))
@@ -28,7 +29,8 @@ def take(cfg, tag=''):
         except sqlite3.DatabaseError: ok = False
         if ok: break
         shutil.rmtree(out, ignore_errors=True); time.sleep(5)
-    else: raise SetupError('コレクションの写しが3回とも壊れていました。Anki で勉強や編集をしていないときに、もう一度動かしてください。')
+    else: raise SetupError(L('コレクションの写しが3回とも壊れていました。Anki で勉強や編集をしていないときに、もう一度動かしてください。',
+                             'The copy of the collection was corrupted all 3 times. Run this again while you are not studying or editing in Anki.'))
     for d in sorted(glob.glob(os.path.join(base, '2*')))[:-KEEP]: shutil.rmtree(d, ignore_errors=True)
     return info
 

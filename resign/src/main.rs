@@ -38,6 +38,42 @@ use serde::{Deserialize, Serialize};
 
 const SERVICE: &str = "iloader";
 
+/// 文言の言語: 環境変数 SELFANKI_LANG → Windows の表示言語。ja で始まれば日本語、ほかは英語
+fn ja() -> bool {
+    static JA: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *JA.get_or_init(|| {
+        if let Ok(v) = std::env::var("SELFANKI_LANG") {
+            if !v.trim().is_empty() {
+                return v.trim().to_lowercase().starts_with("ja");
+            }
+        }
+        #[cfg(windows)]
+        {
+            (unsafe { windows_sys::Win32::Globalization::GetUserDefaultUILanguage() } & 0x3ff) == 0x11 // 0x11＝日本語
+        }
+        #[cfg(not(windows))]
+        {
+            ["LC_ALL", "LC_MESSAGES", "LANG"]
+                .iter()
+                .find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
+                .is_some_and(|v| v.to_lowercase().starts_with("ja"))
+        }
+    })
+}
+/// 日本語か英語の決まった文
+fn l(ja_s: &'static str, en: &'static str) -> &'static str {
+    if ja() { ja_s } else { en }
+}
+/// 日本語か英語の format!
+macro_rules! t {
+    ($ja:literal, $en:literal $(, $a:expr)* $(,)?) => {
+        if ja() { format!($ja $(, $a)*) } else { format!($en $(, $a)*) }
+    };
+}
+fn title() -> &'static str {
+    l("暗記の署名し直し", "selfanki re-signing")
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
 struct Config {
@@ -92,7 +128,7 @@ fn now() -> u64 {
 fn fmt_time(t: u64) -> String {
     use chrono::{Local, TimeZone};
     if t == 0 {
-        return "なし".into();
+        return l("なし", "none").into();
     }
     match Local.timestamp_opt(t as i64, 0) {
         chrono::LocalResult::Single(d) => d.format("%m/%d %H:%M").to_string(),
@@ -124,9 +160,9 @@ fn load<T: for<'de> Deserialize<'de> + Default>(p: &Path) -> Result<T, String> {
     let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     match fs::read_to_string(p) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(T::default()),
-        Err(e) => Err(format!("{name} を読めない（{e}）")),
+        Err(e) => Err(t!("{name} を読めない（{e}）", "cannot read {name} ({e})")),
         Ok(s) => serde_json::from_str(s.trim_start_matches('\u{feff}'))
-            .map_err(|e| format!("{name} の書き方が違う（{e}）。直すか、消して作り直してください")),
+            .map_err(|e| t!("{name} の書き方が違う（{e}）。直すか、消して作り直してください", "{name} is not valid ({e}). Fix it, or delete it to have it created again")),
     }
 }
 
@@ -134,7 +170,7 @@ fn save<T: Serialize>(p: &Path, v: &T) -> Result<(), String> {
     let tmp = p.with_extension("json.tmp");
     fs::write(&tmp, serde_json::to_string_pretty(v).unwrap())
         .and_then(|_| fs::rename(&tmp, p))
-        .map_err(|e| format!("{} に書けない（{e}）", p.display()))
+        .map_err(|e| t!("{} に書けない（{e}）", "cannot write {} ({e})", p.display()))
 }
 
 fn norm_udid(s: &str) -> String {
@@ -169,7 +205,7 @@ impl Drop for RunLock {
 /// Windows のトースト通知。同じ種類の知らせは 12 時間に1回まで。出せたときだけ「出した」と覚える
 /// 文は環境変数で渡し、PowerShell の中で XML 用にくるむ（Apple から来たエラー文に引用符などが入っていても、命令として読まれないように）
 fn notify(state: &mut State, key: &str, title: &str, body: &str) {
-    log(&format!("通知: {title} / {body}"));
+    log(&t!("通知: {title} / {body}", "Notification: {title} / {body}"));
     if std::env::args().any(|a| a == "--check") {
         return;
     }
@@ -203,7 +239,7 @@ fn notify(state: &mut State, key: &str, title: &str, body: &str) {
     if ok {
         state.notices.insert(key.into(), t);
     } else {
-        log("通知を出せなかった（次の回でもう一度出す）");
+        log(l("通知を出せなかった（次の回でもう一度出す）", "Could not show the notification (will try again next run)"));
     }
 }
 
@@ -229,7 +265,7 @@ fn find_saved_emails() -> Result<Vec<String>, String> {
     unsafe {
         if CredEnumerateW(std::ptr::null(), 0, &mut count, &mut creds) == 0 {
             let e = GetLastError();
-            return if e == ERROR_NOT_FOUND { Ok(out) } else { Err(format!("資格情報マネージャーを読めない（エラー {e}）")) };
+            return if e == ERROR_NOT_FOUND { Ok(out) } else { Err(t!("資格情報マネージャーを読めない（エラー {e}）", "cannot read Credential Manager (error {e})")) };
         }
         for i in 0..count as usize {
             let c = &**creds.add(i);
@@ -252,11 +288,11 @@ struct Found {
 async fn find_ipad(udid: &str) -> Result<Option<Found>, String> {
     let mut mux = UsbmuxdConnection::default()
         .await
-        .map_err(|e| format!("Apple の端末管理（usbmuxd）につながらない: {e}"))?;
+        .map_err(|e| t!("Apple の端末管理（usbmuxd）につながらない: {e}", "cannot connect to Apple's device service (usbmuxd): {e}"))?;
     let devs = mux
         .get_devices()
         .await
-        .map_err(|e| format!("端末の一覧が取れない: {e}"))?;
+        .map_err(|e| t!("端末の一覧が取れない: {e}", "cannot get the device list: {e}"))?;
     // udid（config.json か、最初に入れ直せた端末）が空なら、見えている端末が1台だけのときそれを使う（2台以上なら udid で選んでもらう）
     let udid = if udid.is_empty() {
         let mut ids: Vec<String> = devs.iter().map(|d| norm_udid(&d.udid)).collect();
@@ -265,7 +301,7 @@ async fn find_ipad(udid: &str) -> Result<Option<Found>, String> {
         match ids.len() {
             0 => return Ok(None),
             1 => ids.remove(0),
-            n => return Err(format!("端末が {n} 台見えています。config.json の udid で、入れ直す iPad・iPhone を選んでください（{}）", ids.join(", "))),
+            n => return Err(t!("端末が {n} 台見えています。config.json の udid で、入れ直す iPad・iPhone を選んでください（{}）", "{n} devices are visible. Choose the iPad/iPhone to re-sign with udid in config.json ({})", ids.join(", "))),
         }
     } else {
         norm_udid(udid)
@@ -278,7 +314,7 @@ async fn find_ipad(udid: &str) -> Result<Option<Found>, String> {
         let kind = match d.connection_type {
             Connection::Usb => "USB",
             Connection::Network(_) => "Wi-Fi",
-            _ => "不明",
+            _ => l("不明", "unknown"),
         };
         // USB があれば USB を優先（--wifi なら Wi-Fi だけを使う＝試験用）
         let want_wifi = std::env::args().any(|a| a == "--wifi");
@@ -295,6 +331,23 @@ async fn find_ipad(udid: &str) -> Result<Option<Found>, String> {
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--help" || a == "-h" || a == "/?") {
+        println!("{}", l(
+            "selfanki_resign.exe              期限が近ければ入れ直す（タスクから呼ぶ用）\n\
+             selfanki_resign.exe --force      期限に関係なく今すぐ入れ直す\n\
+             selfanki_resign.exe --check      端末が見えるか・パスワードと IPA があるかだけ見る（Apple にはつながない）\n\
+             --interactive                    確認コードを聞かれたらこの窓で打てるようにする\n\
+             --wifi                           USB がつながっていても Wi-Fi の接続だけを使う（試験用）\n\
+             置き場: exe と同じフォルダの config.json・state.json・resign.log",
+            "selfanki_resign.exe              re-sign if the signature expires soon (for the scheduled task)\n\
+             selfanki_resign.exe --force      re-sign now regardless of the expiry\n\
+             selfanki_resign.exe --check      only check that the device is visible and the password and IPA exist (does not contact Apple)\n\
+             --interactive                    let you type a verification code in this window if asked\n\
+             --wifi                           use only the Wi-Fi connection even if USB is connected (for testing)\n\
+             Files: config.json, state.json and resign.log in the same folder as the exe",
+        ));
+        return;
+    }
     let force = args.iter().any(|a| a == "--force");
     let check_only = args.iter().any(|a| a == "--check");
     let interactive = args.iter().any(|a| a == "--interactive");
@@ -306,22 +359,22 @@ async fn run(force: bool, check_only: bool, interactive: bool) -> i32 {
     let cfg_path = dir.join("config.json");
     let state_path = dir.join("state.json");
     let Some(_lock) = RunLock::take(&dir) else {
-        log("ほかの回が動いているので、やめた");
+        log(l("ほかの回が動いているので、やめた", "Another run is in progress; stopped"));
         return 0;
     };
     let mut state: State = match load(&state_path) {
         Ok(s) => s,
         Err(e) => {
-            log(&format!("失敗: {e}"));
-            notify(&mut State::default(), "state", "暗記の署名し直し", &e);
+            log(&t!("失敗: {e}", "Failed: {e}"));
+            notify(&mut State::default(), "state", title(), &e);
             return 6;
         }
     };
     let cfg: Config = match load(&cfg_path) {
         Ok(c) => c,
         Err(e) => {
-            log(&format!("失敗: {e}"));
-            notify(&mut state, "config", "暗記の署名し直し", &e);
+            log(&t!("失敗: {e}", "Failed: {e}"));
+            notify(&mut state, "config", title(), &e);
             let _ = save(&state_path, &state);
             return 6;
         }
@@ -332,22 +385,22 @@ async fn run(force: bool, check_only: bool, interactive: bool) -> i32 {
     // state.json に書けないと、成功しても覚えられず、タスクのたびに入れ直してしまう。先に確かめる（--check では書かずに試す）
     let writable = if check_only {
         let p = dir.join("state.json.tmp");
-        let r = fs::write(&p, b"{}").map_err(|e| format!("{} に書けない（{e}）", dir.display()));
+        let r = fs::write(&p, b"{}").map_err(|e| t!("{} に書けない（{e}）", "cannot write {} ({e})", dir.display()));
         let _ = fs::remove_file(&p);
         r
     } else {
         save(&state_path, &state)
     };
     if let Err(e) = writable {
-        log(&format!("失敗: {e}"));
-        notify(&mut state, "write", "暗記の署名し直し", &format!("{e}。exe を書き込めるフォルダに置いてください"));
+        log(&t!("失敗: {e}", "Failed: {e}"));
+        notify(&mut state, "write", title(), &t!("{e}。exe を書き込めるフォルダに置いてください", "{e}. Put the exe in a folder you can write to"));
         return 7;
     }
     // ここから先の「覚える」（--check では書かない）
     let persist = |st: &State| {
         if !check_only {
             if let Err(e) = save(&state_path, st) {
-                log(&format!("覚えられなかった: {e}"));
+                log(&t!("覚えられなかった: {e}", "Could not save the state: {e}"));
             }
         }
     };
@@ -359,7 +412,7 @@ async fn run(force: bool, check_only: bool, interactive: bool) -> i32 {
         (t.saturating_sub(state.last_success)) as f64 / 3600.0
     };
     let expires = state.last_success + 7 * 24 * 3600;
-    let expires_s = if state.last_success == 0 { "不明（まだ一度も入れ直していない）".to_string() } else { fmt_time(expires) };
+    let expires_s = if state.last_success == 0 { l("不明（まだ一度も入れ直していない）", "unknown (never re-signed yet)").to_string() } else { fmt_time(expires) };
 
     if !force && !check_only {
         if age_h < cfg.min_age_hours {
@@ -381,9 +434,9 @@ async fn run(force: bool, check_only: bool, interactive: bool) -> i32 {
         if p.is_absolute() { p } else { dir.join(p) }
     };
     if !ipa.exists() {
-        let msg = format!("IPA（{}）が exe と同じフォルダにありません", ipa.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
-        log(&format!("失敗: {msg}"));
-        notify(&mut state, "noipa", "暗記の署名し直し", &msg);
+        let msg = t!("IPA（{}）が exe と同じフォルダにありません", "The IPA ({}) is not in the same folder as the exe", ipa.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
+        log(&t!("失敗: {msg}", "Failed: {msg}"));
+        notify(&mut state, "noipa", title(), &msg);
         persist(&state);
         return 5;
     }
@@ -393,24 +446,25 @@ async fn run(force: bool, check_only: bool, interactive: bool) -> i32 {
     let found = match find_ipad(&udid).await {
         Ok(f) => f,
         Err(e) => {
-            log(&format!("失敗: {e}"));
-            notify(&mut state, "usbmuxd", "暗記の署名し直し", &e);
+            log(&t!("失敗: {e}", "Failed: {e}"));
+            notify(&mut state, "usbmuxd", title(), &e);
             persist(&state);
             return 2;
         }
     };
     let Some(found) = found else {
-        log(&format!(
+        log(&t!(
             "{}が見えない（USB でも Wi-Fi でも）。前回の成功 {}・期限 {}",
-            if udid.is_empty() { "端末" } else { "入れ直す端末" },
+            "{} (neither USB nor Wi-Fi). Last success {}, expires {}",
+            if udid.is_empty() { l("端末", "No device is visible") } else { l("入れ直す端末", "The device to re-sign is not visible") },
             fmt_time(state.last_success),
             expires_s
         ));
         if state.last_success > 0 && t + 30 * 3600 > expires {
             let (title, body) = if t >= expires {
-                ("暗記の署名が切れています", format!("{} に切れました。iPad・iPhone をこのパソコンと同じ Wi-Fi か USB につなぐと、次の回で入れ直します", fmt_time(expires)))
+                (l("暗記の署名が切れています", "selfanki's signature has expired"), t!("{} に切れました。iPad・iPhone をこのパソコンと同じ Wi-Fi か USB につなぐと、次の回で入れ直します", "It expired at {}. Connect the iPad/iPhone to the same Wi-Fi as this PC or by USB, and it will be re-signed on the next run", fmt_time(expires)))
             } else {
-                ("暗記の署名がもうすぐ切れます", format!("{} に切れます。iPad・iPhone をこのパソコンと同じ Wi-Fi につなぐか、USB でつないでおいてください", fmt_time(expires)))
+                (l("暗記の署名がもうすぐ切れます", "selfanki's signature expires soon"), t!("{} に切れます。iPad・iPhone をこのパソコンと同じ Wi-Fi につなぐか、USB でつないでおいてください", "It expires at {}. Connect the iPad/iPhone to the same Wi-Fi as this PC, or by USB", fmt_time(expires)))
             };
             notify(&mut state, "noipad", title, &body);
         }
@@ -425,8 +479,8 @@ async fn run(force: bool, check_only: bool, interactive: bool) -> i32 {
         let mut v = match find_saved_emails() {
             Ok(v) => v,
             Err(e) => {
-                log(&format!("失敗: {e}"));
-                notify(&mut state, "nocred", "暗記の署名し直し", &e);
+                log(&t!("失敗: {e}", "Failed: {e}"));
+                notify(&mut state, "nocred", title(), &e);
                 persist(&state);
                 return 3;
             }
@@ -436,12 +490,13 @@ async fn run(force: bool, check_only: bool, interactive: bool) -> i32 {
         v.dedup();
         if v.len() != 1 {
             let msg = if v.is_empty() {
-                "パスワードが保存されていません。iloader で「Save Credentials」にチェックを入れてログインし直してください".to_string()
+                l("パスワードが保存されていません。iloader で「Save Credentials」にチェックを入れてログインし直してください",
+                  "No saved password. In iloader, check \"Save Credentials\" and log in again").to_string()
             } else {
-                format!("保存された Apple ID が {} 個あります。config.json の email で選んでください", v.len())
+                t!("保存された Apple ID が {} 個あります。config.json の email で選んでください", "{} Apple IDs are saved. Choose one with email in config.json", v.len())
             };
-            log(&format!("失敗: {msg}"));
-            notify(&mut state, "nocred", "暗記の署名し直し", &msg);
+            log(&t!("失敗: {msg}", "Failed: {msg}"));
+            notify(&mut state, "nocred", title(), &msg);
             persist(&state);
             return 3;
         }
@@ -450,30 +505,33 @@ async fn run(force: bool, check_only: bool, interactive: bool) -> i32 {
     let password = match keyring::Entry::new(SERVICE, &email).and_then(|e| e.get_password()) {
         Ok(p) => p,
         Err(_) => {
-            let msg = "パスワードが保存されていません。iloader で「Save Credentials」にチェックを入れてログインし直してください";
-            log(&format!("失敗: {msg}"));
-            notify(&mut state, "nocred", "暗記の署名し直し", msg);
+            let msg = l("パスワードが保存されていません。iloader で「Save Credentials」にチェックを入れてログインし直してください",
+                        "No saved password. In iloader, check \"Save Credentials\" and log in again");
+            log(&t!("失敗: {msg}", "Failed: {msg}"));
+            notify(&mut state, "nocred", title(), msg);
             persist(&state);
             return 3;
         }
     };
 
     if check_only {
-        log(&format!(
+        log(&t!(
             "確認: 端末は {} で見えている・パスワードと IPA はある・前回の成功 {}・期限 {}{}",
+            "Check: the device is visible via {}, the password and IPA exist. Last success {}, expires {}{}",
             found.kind,
             fmt_time(state.last_success),
-            if state.last_success == 0 { "まだ分からない（--force で一度入れ直すと決まる）".to_string() } else { fmt_time(expires) },
-            if udid.is_empty() { "・入れ直す端末はまだ決めていない（最初に入れ直せた端末に決める）" } else { "" }
+            if state.last_success == 0 { l("まだ分からない（--force で一度入れ直すと決まる）", "not known yet (set once you re-sign with --force)").to_string() } else { fmt_time(expires) },
+            if udid.is_empty() { l("・入れ直す端末はまだ決めていない（最初に入れ直せた端末に決める）", ". The device to re-sign is not fixed yet (the first device re-signed successfully is used)") } else { "" }
         ));
         return 0;
     }
 
-    log(&format!(
+    log(&t!(
         "入れ直しを始める（端末は {}・前回の成功 {}{}）",
+        "Starting to re-sign (device via {}, last success {}{})",
         found.kind,
         fmt_time(state.last_success),
-        if force { "・--force" } else { "" }
+        if force { l("・--force", ", --force") } else { "" }
     ));
     state.last_attempt = t;
     persist(&state);
@@ -490,12 +548,12 @@ async fn run(force: bool, check_only: bool, interactive: bool) -> i32 {
     // 3. ログイン（iloader 2.4.2 と同じ設定・同じ保存先）
     let tfa = move |params: TwoFactorCallbackParams| async move {
         if !interactive {
-            return Err(rootcause::report!("確認コード（2FA）を求められた"));
+            return Err(if ja() { rootcause::report!("確認コード（2FA）を求められた") } else { rootcause::report!("A verification code (2FA) was requested") });
         }
         if params.unknown {
-            println!("直前の確認方法がうまくいきませんでした。d で端末に送り直せます。");
+            println!("{}", l("直前の確認方法がうまくいきませんでした。d で端末に送り直せます。", "The last verification method did not work. Enter d to send to your devices again."));
         }
-        println!("確認コードを入れてください（d＝端末に送る、r＝送り直す）:");
+        println!("{}", l("確認コードを入れてください（d＝端末に送る、r＝送り直す）:", "Enter the verification code (d = send to devices, r = resend):"));
         let mut code = String::new();
         std::io::stdin().read_line(&mut code).ok();
         let code = code.trim().to_string();
@@ -508,7 +566,7 @@ async fn run(force: bool, check_only: bool, interactive: bool) -> i32 {
 
     let result: Result<(), String> = async {
         let provider = RemoteV3AnisetteProvider::default()
-            .map_err(|e| format!("anisette の準備: {e}"))?
+            .map_err(|e| t!("anisette の準備: {e}", "anisette setup: {e}"))?
             .set_serial_number("0".to_string())
             .set_storage(Box::new(KeyringStorage::new(SERVICE.to_string())))
             .set_client_info_override(Some(AnisetteClientInfo {
@@ -520,10 +578,10 @@ async fn run(force: bool, check_only: bool, interactive: bool) -> i32 {
             .anisette_provider(provider)
             .login(&password, tfa)
             .await
-            .map_err(|e| format!("ログイン: {e}"))?;
+            .map_err(|e| t!("ログイン: {e}", "login: {e}"))?;
         let dev_session = DeveloperSession::from_account(&mut account)
             .await
-            .map_err(|e| format!("開発者セッション: {e}"))?;
+            .map_err(|e| t!("開発者セッション: {e}", "developer session: {e}"))?;
 
         let mut sideloader = SideloaderBuilder::<MaxCertsCallbackBox, ExtensionsBehaviorCallbackBox>::new(
             dev_session,
@@ -535,7 +593,7 @@ async fn run(force: bool, check_only: bool, interactive: bool) -> i32 {
         .max_certs_behavior(MaxCertsBehavior::Error)
         .build();
 
-        let addr = UsbmuxdAddr::from_env_var().map_err(|e| format!("usbmuxd の宛先: {e}"))?;
+        let addr = UsbmuxdAddr::from_env_var().map_err(|e| t!("usbmuxd の宛先: {e}", "usbmuxd address: {e}"))?;
         let dev_provider = found.device.to_provider(addr, "selfanki_resign");
         sideloader
             .install_app(
@@ -546,7 +604,7 @@ async fn run(force: bool, check_only: bool, interactive: bool) -> i32 {
                 None,
             )
             .await
-            .map_err(|e| format!("署名・インストール: {e}"))?;
+            .map_err(|e| t!("署名・インストール: {e}", "sign and install: {e}"))?;
         Ok(())
     }
     .await;
@@ -558,32 +616,35 @@ async fn run(force: bool, check_only: bool, interactive: bool) -> i32 {
             state.last_error.clear();
             if cfg.udid.is_empty() && state.udid.is_empty() {
                 state.udid = norm_udid(&found.device.udid);
-                log("この端末に決めた（以後はこの端末だけを入れ直す。替えるときは state.json の udid を消す）");
+                log(l("この端末に決めた（以後はこの端末だけを入れ直す。替えるときは state.json の udid を消す）",
+                      "Fixed on this device (from now on only this device is re-signed; to change it, delete udid in state.json)"));
             }
-            log(&format!(
+            log(&t!(
                 "成功: 入れ直した（{}）。次の期限 {}",
+                "Success: re-signed ({}). Next expiry {}",
                 found.kind,
                 fmt_time(state.last_success + 7 * 24 * 3600)
             ));
             if let Err(e) = save(&state_path, &state) {
-                log(&format!("失敗: 入れ直せたが覚えられなかった（{e}）"));
-                notify(&mut state, "write", "暗記の署名し直し", &format!("入れ直せましたが、{e}"));
+                log(&t!("失敗: 入れ直せたが覚えられなかった（{e}）", "Failed: re-signed, but could not save the state ({e})"));
+                notify(&mut state, "write", title(), &t!("入れ直せましたが、{e}", "Re-signed, but {e}"));
                 return 7;
             }
             0
         }
         Err(e) => {
             let first = e.lines().next().unwrap_or("").to_string();
-            log(&format!("失敗: {e}"));
+            log(&t!("失敗: {e}", "Failed: {e}"));
             state.fail_count += 1;
             state.last_fail_at = now();
             state.last_error = first.clone();
             let body = if e.contains("2FA") {
-                "確認コードを求められました。selfanki_resign.exe --force --interactive を開いて、コードを入れてください".to_string()
+                l("確認コードを求められました。selfanki_resign.exe --force --interactive を開いて、コードを入れてください",
+                  "A verification code was requested. Run selfanki_resign.exe --force --interactive and enter the code").to_string()
             } else {
-                format!("{}（期限 {}）", first.chars().take(120).collect::<String>(), expires_s)
+                t!("{}（期限 {}）", "{} (expires {})", first.chars().take(120).collect::<String>(), expires_s)
             };
-            notify(&mut state, &format!("fail:{}", first.chars().take(40).collect::<String>()), "暗記の署名し直しに失敗", &body);
+            notify(&mut state, &format!("fail:{}", first.chars().take(40).collect::<String>()), l("暗記の署名し直しに失敗", "selfanki re-signing failed"), &body);
             persist(&state);
             4
         }

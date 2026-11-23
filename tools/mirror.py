@@ -34,7 +34,7 @@ class _Snap:
     def sync_anki():
         # 試し（--dry）では同期しない。ankiweb_sync は true/false（文字列の "false" などはまちがいとして止める）
         v = CFG.get('ankiweb_sync', False)
-        if not isinstance(v, bool): raise SetupError('config.json の "ankiweb_sync" は true か false で書いてください（"" で囲まない）。')
+        if not isinstance(v, bool): raise SetupError(L('config.json の "ankiweb_sync" は true か false で書いてください（"" で囲まない）。', 'Write "ankiweb_sync" in config.json as true or false (without quotes).'))
         if v and not DRY: ac('sync'); time.sleep(5)
     @staticmethod
     def take(tag=''):
@@ -58,7 +58,7 @@ def api(path, body=None):
             with urllib.request.urlopen(req, timeout=120) as r: return json.loads(r.read())
         except Exception as e:
             if i == 4: raise
-            log('API やり直し', path[:40], e); time.sleep(5 * (i + 1))
+            log(L('API やり直し', 'API retry'), path[:40], e); time.sleep(5 * (i + 1))
 
 # ---- サーバー側の今の状態 ----
 def server_view():
@@ -160,9 +160,11 @@ def apply_notes():
         if not DRY: ac('updateNote', note={'id': rec['id'], 'fields': fields, 'tags': rec['tags'].split()})
         n['updated'] += 1
     if push and not DRY: api('push', {'ops': push})
-    if n['pending_removed'] or n['pending_gone']: log(f"消す操作 {n['pending_removed'] + n['pending_gone']} 件（端末で消したノート {n['pending_removed']}・Anki に無いノート {n['pending_gone']}）は書かなかった。中身を確かめてから --allow-delete を付けて動かす（Anki をバックアップから戻した直後なら付けない）")
-    if n['need_addon']: log('端末で追加したノート・カードが増える編集・ノートタイプを直したノート・ノートタイプを変えたノート', n['need_addon'], '件は、Anki のアドオン「暗記と同期」で入れる（ここでは書かない）')
-    if nt_app: log(f'端末で直した・読み込んだノートタイプが {len(nt_app)} 件あります。Anki に入れるにはアドオン「暗記と同期」を使ってください（この書き戻しでは書きません）')
+    if n['pending_removed'] or n['pending_gone']: log(L(f"消す操作 {n['pending_removed'] + n['pending_gone']} 件（端末で消したノート {n['pending_removed']}・Anki に無いノート {n['pending_gone']}）は書かなかった。中身を確かめてから --allow-delete を付けて動かす（Anki をバックアップから戻した直後なら付けない）",
+                                                         f"Did not write {n['pending_removed'] + n['pending_gone']} deletions (notes deleted on a device: {n['pending_removed']}, notes missing in Anki: {n['pending_gone']}). Check them, then run with --allow-delete (not right after restoring Anki from a backup)"))
+    if n['need_addon']: log(L('端末で追加したノート・カードが増える編集・ノートタイプを直したノート・ノートタイプを変えたノート', 'Notes added on a device, edits that add cards, and notes whose note type was edited or changed:'), n['need_addon'], L('件は、Anki のアドオン「暗記と同期」で入れる（ここでは書かない）', 'are brought into Anki by the add-on "selfanki Sync" (not written here)'))
+    if nt_app: log(L(f'端末で直した・読み込んだノートタイプが {len(nt_app)} 件あります。Anki に入れるにはアドオン「暗記と同期」を使ってください（この書き戻しでは書きません）',
+                     f'{len(nt_app)} note types were edited or imported on a device. Use the add-on "selfanki Sync" to bring them into Anki (this write-back does not write them)'))
     return n
 
 def count_decks():
@@ -170,7 +172,8 @@ def count_decks():
     （Anki に入れるのはアドオン「暗記と同期」。手順 8-A）"""
     rows = api('pull?cs=999999999999&ci=0&rs=999999999999&ri=0&n=1').get('conf', [])
     n = sum(1 for k, v, rev, src, _ in rows if k.startswith('dname:') and src == 'app')
-    if n: log(f'端末で作った・名前を変えた・消したデッキが {n} 件あります。Anki に入れるにはアドオン「暗記と同期」を使ってください（この書き戻しでは書きません）')
+    if n: log(L(f'端末で作った・名前を変えた・消したデッキが {n} 件あります。Anki に入れるにはアドオン「暗記と同期」を使ってください（この書き戻しでは書きません）',
+                f'{n} decks were created, renamed or deleted on a device. Use the add-on "selfanki Sync" to bring them into Anki (this write-back does not write them)'))
     return n
 
 
@@ -188,14 +191,14 @@ def apply_conf(exp):
         pid = int(k[7:]); v = json.loads(v)
         if v.get('removed'):
             # プリセットの削除は Anki の次の同期を一方向にすることがあるので、自動ではしない（ログに出すだけ）
-            if pid in presets and pid != 1 and rev > presets[pid].get('mod', 0) * 1000: log('アプリで消したプリセット（Anki では手で消す）:', presets[pid].get('name'), pid); n['removed'] += 1
+            if pid in presets and pid != 1 and rev > presets[pid].get('mod', 0) * 1000: log(L('アプリで消したプリセット（Anki では手で消す）:', 'Preset deleted in the app (delete it by hand in Anki):'), presets[pid].get('name'), pid); n['removed'] += 1
             continue
         if pid in presets:
             if rev > presets[pid].get('mod', 0) * 1000:
                 cfg = {**presets[pid], **v, 'id': pid}; cfg.pop('mod', None)
                 if ac('saveDeckConfig', config=cfg): n['preset'] += 1
         else:
-            nid = ac('cloneDeckConfigId', name=v.get('name') or 'プリセット', cloneFrom=1)
+            nid = ac('cloneDeckConfigId', name=v.get('name') or L('プリセット', 'Preset'), cloneFrom=1)
             if nid:
                 cfg = {**v, 'id': nid}; cfg.pop('mod', None); ac('saveDeckConfig', config=cfg); remap[pid] = nid; n['new'] += 1
                 push += [{'t': 'conf', 'src': 'anki', 'k': k, 'v': {'removed': True}, 'rev': now}, {'t': 'conf', 'src': 'anki', 'k': f'preset:{nid}', 'v': cfg, 'rev': now}]
@@ -214,9 +217,11 @@ def check_profile():
     """AnkiConnect が今開いている Anki のプロファイルが、config.json の anki_collection のプロファイルと同じかを確かめる（違えば止める）"""
     want = os.path.basename(os.path.dirname(expand(CFG['anki_collection'])))
     try: cur = ac('getActiveProfile')
-    except RuntimeError: raise SetupError('AnkiConnect が古く、Anki で開いているプロファイルを確かめられません。Anki の「ツール」→「アドオン」で AnkiConnect を新しくしてください。')
+    except RuntimeError: raise SetupError(L('AnkiConnect が古く、Anki で開いているプロファイルを確かめられません。Anki の「ツール」→「アドオン」で AnkiConnect を新しくしてください。',
+                                            'AnkiConnect is too old to tell which profile is open in Anki. Update AnkiConnect from Anki\'s Tools → Add-ons.'))
     if cur != want:
-        raise SetupError(f'Anki で開いているプロファイル「{cur}」が、config.json の anki_collection のプロファイル「{want}」と違います。Anki でプロファイルを切り替えてから、もう一度動かしてください。')
+        raise SetupError(L(f'Anki で開いているプロファイル「{cur}」が、config.json の anki_collection のプロファイル「{want}」と違います。Anki でプロファイルを切り替えてから、もう一度動かしてください。',
+                           f'The profile open in Anki ("{cur}") differs from the profile of anki_collection in config.json ("{want}"). Switch profiles in Anki, then run this again.'))
 
 def lock(on):
     # config.json の lock_command（コマンドの配列）があれば、書き戻しの前後に「on」「off」を付けて呼ぶ（ほかの道具が同じ時刻に Anki を触らないようにするためのもの。無ければ何もしない）
@@ -230,19 +235,19 @@ def main():
     lock(True)
     try:
         # 0. 同期する前・書く前に、今のコレクションの控えを取る（同期や書き戻しで困ったときに戻せるように。AnkiWeb と同期しない設定でも）
-        if not DRY: b0 = snap.take('before_sync' if CFG.get('ankiweb_sync') is True else 'before_write'); log('書く前の控え', b0['path'])
+        if not DRY: b0 = snap.take('before_sync' if CFG.get('ankiweb_sync') is True else 'before_write'); log(L('書く前の控え', 'Backup before writing'), b0['path'])
         # 1. 同期 → 写し
         snap.sync_anki()
-        try: nnote = apply_notes(); summary['notes'] = nnote; log('ノート', nnote)
-        except Exception as e: log('ノートを書けなかった（続ける）', repr(e)); summary['note_fail'] = repr(e)[:200]
+        try: nnote = apply_notes(); summary['notes'] = nnote; log(L('ノート', 'Notes'), nnote)
+        except Exception as e: log(L('ノートを書けなかった（続ける）', 'Could not write notes (continuing)'), repr(e)); summary['note_fail'] = repr(e)[:200]
         try: summary['decks_need_addon'] = count_decks()
-        except Exception as e: log('デッキの記録を読めなかった（続ける）', repr(e))
-        info = snap.take('mirror'); log('写し', info['dir'], 'カード', info['cards'], '記録', info['revlog'])
+        except Exception as e: log(L('デッキの記録を読めなかった（続ける）', 'Could not read deck records (continuing)'), repr(e))
+        info = snap.take('mirror'); log(L('写し', 'Copy'), info['dir'], L('カード', 'cards'), info['cards'], L('記録', 'reviews'), info['revlog'])
         # 2. 書き出し
         exp = os.path.join(ST, 'export_new')
         r = subprocess.run([sys.executable, os.path.join(HERE, 'export_anki.py'), info['local'], exp], cwd=ROOT, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=1800)
-        if r.returncode: raise RuntimeError('書き出し失敗: ' + r.stderr[-800:])
-        log('書き出し', next((l for l in r.stdout.splitlines() if l.startswith('cards')), '?'))
+        if r.returncode: raise RuntimeError(L('書き出し失敗: ', 'Export failed: ') + r.stderr[-800:])
+        log(L('書き出し', 'Export'), next((l for l in r.stdout.splitlines() if l.startswith('cards')), '?'))
         acards = {c['id']: c for c in json.load(open(os.path.join(exp, 'cards.json'), encoding='utf-8'))}
         arevlog = json.load(open(os.path.join(exp, 'revlog.json'), encoding='utf-8'))
         db = sqlite3.connect(info['local'])
@@ -253,7 +258,7 @@ def main():
         for rr in arevlog: last[rr[1]] = max(last.get(rr[1], 0), rr[0])
         aver = {cid: max(c['mod'] * 1000, last.get(cid, 0)) for cid, c in acards.items()}
         # 3. サーバー側
-        scards, srevs, seq0 = server_view(); log('サーバー', 'seq', seq0, '差分のカード', sum(1 for v in scards.values() if v['src'] != 'base'))
+        scards, srevs, seq0 = server_view(); log(L('サーバー', 'Server'), 'seq', seq0, L('差分のカード', 'changed cards'), sum(1 for v in scards.values() if v['src'] != 'base'))
         # 4. 比べる（決まりはアドオンと同じ: 相手の知らない新しい答えがある側を正に。最後の答えが同じなら新しく変えたほう）
         to_srv, new_srv, view = [], 0, {}
         for cid, c in acards.items():
@@ -266,16 +271,17 @@ def main():
         mark_add, mark_del, leech_nids, rev_to_anki = set(p['mark_add']), set(p['mark_del']), p['leech'], p['rev_to_anki']
         rev_to_srv = [{'id': rr[0], 'cid': rr[1], 'ease': rr[2], 'ivl': rr[3], 'lastIvl': rr[4], 'factor': rr[5], 'time': rr[6], 'type': rr[7]} for rr in arevlog if rr[0] not in srevs]
         summary.update(to_anki=len(to_anki), rev_to_anki=len(rev_to_anki), to_srv=len(to_srv), new_srv=new_srv, rev_to_srv=len(rev_to_srv), leech=len(leech_nids))
-        log('比べた: Anki へ カード', len(to_anki), '記録', len(rev_to_anki), '／サーバーへ カード', len(to_srv), f'(うち新しいカード {new_srv})', '記録', len(rev_to_srv), '／リーチの印', len(leech_nids))
+        log(L('比べた: Anki へ カード', 'Compared: to Anki, cards'), len(to_anki), L('記録', 'reviews'), len(rev_to_anki), L('／サーバーへ カード', '/ to server, cards'), len(to_srv), L(f'(うち新しいカード {new_srv})', f'({new_srv} new)'), L('記録', 'reviews'), len(rev_to_srv), L('／リーチの印', '/ leech tags'), len(leech_nids))
         if DRY:
-            for cid, st, rev in to_anki[:5]: log('  例 Anki へ', cid, {k: st[k] for k in ('type', 'queue', 'due', 'ivl', 'reps')}, '←', {k: acards[cid][k] for k in ('type', 'queue', 'due', 'ivl', 'reps')})
-            for cid, st, _, _ in to_srv[:5]: log('  例 サーバーへ', cid, {k: st[k] for k in ('type', 'queue', 'due', 'ivl', 'reps')})
+            for cid, st, rev in to_anki[:5]: log(L('  例 Anki へ', '  e.g. to Anki'), cid, {k: st[k] for k in ('type', 'queue', 'due', 'ivl', 'reps')}, '←', {k: acards[cid][k] for k in ('type', 'queue', 'due', 'ivl', 'reps')})
+            for cid, st, _, _ in to_srv[:5]: log(L('  例 サーバーへ', '  e.g. to server'), cid, {k: st[k] for k in ('type', 'queue', 'due', 'ivl', 'reps')})
             return summary
         # 5. Anki に書く（カード → 記録。記録を先に入れて途中で止まると、次の回で「Anki のほうが新しい」に見えてしまう）
         bad = []
         deck_ids = set((ac('deckNamesAndIds') or {}).values())   # 端末で動かしたカードの行き先が Anki にあるか
         nomove = sum(1 for cid, st, _ in to_anki if st.get('didAt') and st.get('did') not in deck_ids)
-        if nomove: log(f'端末で動かした先のデッキが Anki に無いので、{nomove} 枚はデッキを動かさなかった（端末で作ったデッキはアドオンでしか作れない。手順 8-A）')
+        if nomove: log(L(f'端末で動かした先のデッキが Anki に無いので、{nomove} 枚はデッキを動かさなかった（端末で作ったデッキはアドオンでしか作れない。手順 8-A）',
+                         f'Did not move {nomove} cards because their target deck (moved on a device) does not exist in Anki (decks created on a device can only be created by the add-on; Step 8-A)'))
         for i in range(0, len(to_anki), 100):
             part = to_anki[i:i + 100]
             res = ac('multi', actions=[{'action': 'setSpecificValueOfCard', 'params': anki_params(cid, st, odid.get(cid, 0), acards[cid]['mod'], deck_ids)} for cid, st, _ in part])
@@ -283,7 +289,7 @@ def main():
                 # multi の中身は版によって [True] のままか {'result': [True], 'error': None} で返る
                 ok = x == [True] or (isinstance(x, dict) and not x.get('error') and x.get('result') == [True])
                 if not ok: bad.append((cid, x))
-        if bad: log('Anki に書けなかったカード', len(bad), bad[:3])
+        if bad: log(L('Anki に書けなかったカード', 'Cards that could not be written to Anki'), len(bad), bad[:3])
         if rev_to_anki:
             rows = [[r['id'], r['cid'], -1, r['ease'], r['ivl'], r['lastIvl'], r['factor'], r['time'], r['type']] for r in sorted(rev_to_anki, key=lambda r: r['id'])]
             for i in range(0, len(rows), 500): ac('insertReviews', reviews=rows[i:i + 500])
@@ -292,8 +298,8 @@ def main():
         if mark_del: ac('removeTags', notes=sorted(mark_del), tags='marked')
         summary.update(mark_add=len(mark_add), mark_del=len(mark_del))
         # 5b. デッキのオプション
-        try: nconf = apply_conf(exp); summary['conf'] = nconf; log('オプション', nconf)
-        except Exception as e: log('オプションを書けなかった（続ける）', repr(e)); summary['conf_fail'] = repr(e)[:200]
+        try: nconf = apply_conf(exp); summary['conf'] = nconf; log(L('オプション', 'Options'), nconf)
+        except Exception as e: log(L('オプションを書けなかった（続ける）', 'Could not write options (continuing)'), repr(e)); summary['conf_fail'] = repr(e)[:200]
         summary['anki_write_fail'] = len(bad)
         # サーバーに送る（Anki 側のほうが新しかったもの）
         ops = [{'t': 'state', 'src': 'anki', 'c': {'id': cid, 'st': st, 'rev': rev}, 'base': base} for cid, st, rev, base in to_srv]
@@ -307,12 +313,12 @@ def main():
             for cid, st, _ in to_anki:
                 row = db.execute('select type, queue, due, ivl, factor, reps, lapses, left, data, odid, odue, flags from cards where id = ?', (cid,)).fetchone()
                 got = dict(zip(['type', 'queue', 'due', 'ivl', 'factor', 'reps', 'lapses', 'left'], row[:8])); got['data'] = json.loads(row[8] or '{}'); got['flags'] = row[11]
-                if not same(st, got): ng += 1; ng <= 3 and log('  書いた値が違う', cid, st, got)
+                if not same(st, got): ng += 1; ng <= 3 and log(L('  書いた値が違う', '  written value differs'), cid, st, got)
             ids = {x for (x,) in db.execute('select id from revlog')}
             miss = sum(1 for r in rev_to_anki if r['id'] not in ids)
             db.close()
             summary.update(verify_card_ng=ng, verify_rev_missing=miss)
-            log('確かめた: 値が違うカード', ng, '入っていない記録', miss)
+            log(L('確かめた: 値が違うカード', 'Verified: cards with different values'), ng, L('入っていない記録', 'missing reviews'), miss)
         # 6. 中身（カード・デッキ・画像）やアプリ本体が変わっていれば site を組み直して上げる
         cur = os.path.join(ST, 'export')
         if os.path.exists(cur):
@@ -335,14 +341,14 @@ def main():
 
 if __name__ == '__main__':
     try:
-        res = main(); log('終わり', json.dumps(res, ensure_ascii=False))
+        res = main(); log(L('終わり', 'Done'), json.dumps(res, ensure_ascii=False))
         if not res.get('dry') and not res.get('ok'): sys.exit(1)   # どこかがうまくいかなかった（ログの「失敗」「違う」「上げられなかった」の行を見る）
     except SystemExit: raise
     except SetupError as e:
-        log('止まった', str(e))
+        log(L('止まった', 'Stopped'), str(e))
         json.dump({'ok': False, 'error': str(e), 'at': int(time.time())}, open(os.path.join(ST, 'last_mirror.json'), 'w', encoding='utf-8'), ensure_ascii=False)
         die(str(e))
     except Exception as e:
-        log('失敗', repr(e), traceback.format_exc()[-1500:])
+        log(L('失敗', 'Failed'), repr(e), traceback.format_exc()[-1500:])
         json.dump({'ok': False, 'error': repr(e), 'at': int(time.time())}, open(os.path.join(ST, 'last_mirror.json'), 'w', encoding='utf-8'), ensure_ascii=False)
         sys.exit(1)

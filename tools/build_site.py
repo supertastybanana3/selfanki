@@ -37,7 +37,7 @@ def ensure_media(names, log=print):
     ok_name = safe_name
     mdir = expand(cfg.get('anki_media_dir') or '')
     if mdir:
-        if not os.path.isdir(mdir): raise SetupError(f'config.json の "anki_media_dir" のフォルダがありません: {mdir}')
+        if not os.path.isdir(mdir): raise SetupError(L(f'config.json の "anki_media_dir" のフォルダがありません: {mdir}', f'The "anki_media_dir" folder in config.json does not exist: {mdir}'))
         got, missing = [], []
         for n in names:
             if not ok_name(n): continue
@@ -48,7 +48,7 @@ def ensure_media(names, log=print):
                 dt = os.stat(d_)
                 if dt.st_size == st.st_size and int(dt.st_mtime) == int(st.st_mtime): continue
             shutil.copy2(s_, d_ + '.tmp'); os.replace(d_ + '.tmp', d_); got.append(n)
-        log(f'画像・音声: collection.media から写した {len(got)}、見つからない {len(missing)}')
+        log(L(f'画像・音声: collection.media から写した {len(got)}、見つからない {len(missing)}', f'Media: copied {len(got)} from collection.media, {len(missing)} not found'))
         return got, missing
     need = [n for n in names if n not in have and ok_name(n)]
     if not need: return [], []
@@ -61,7 +61,7 @@ def ensure_media(names, log=print):
         os.replace(tmp, os.path.join(MEDIA, n)); return n, True
     with cf.ThreadPoolExecutor(6) as ex:
         for n, ok in ex.map(one, need): (got if ok else missing).append(n)
-    log(f'画像・音声: 取ってきた {len(got)}、Anki にも無い {len(missing)}')
+    log(L(f'画像・音声: 取ってきた {len(got)}、Anki にも無い {len(missing)}', f'Media: fetched {len(got)}, {len(missing)} missing in Anki too'))
     return got, missing
 
 def build(export_dir, rebase=False, fetch_media=True, log=print):
@@ -78,7 +78,7 @@ def build(export_dir, rebase=False, fetch_media=True, log=print):
     shutil.copytree(os.path.join(ROOT, 'fsrs'), os.path.join(out, 'fsrs'), ignore=shutil.ignore_patterns('*.bak*'))
     if os.path.exists(os.path.join(out, 'app', 'sw.js')): shutil.move(os.path.join(out, 'app', 'sw.js'), os.path.join(out, 'sw.js'))
     for sub, mark, what in (('mathjax', 'tex-chtml.js', 'MathJax'), ('sqljs', 'sql-wasm-browser.wasm', 'sql.js'), ('fzstd', 'index.mjs', 'fzstd')):
-        if not os.path.isfile(os.path.join(VENDOR, sub, mark)): raise SetupError(f'{what} がありません。先に python tools/fetch_vendor.py を動かしてください。')
+        if not os.path.isfile(os.path.join(VENDOR, sub, mark)): raise SetupError(L(f'{what} がありません。先に python tools/fetch_vendor.py を動かしてください。', f'{what} is missing. Run python tools/fetch_vendor.py first.'))
     shutil.copytree(VENDOR, os.path.join(out, 'vendor'), copy_function=link_or_copy)
     # Anki 本体のウェブ画面（統計・デッキのオプションなど。aqt 25.9.4 の SvelteKit を取り出したもの）と日本語の文言
     aw = os.path.join(ROOT, 'ankiweb')
@@ -95,11 +95,12 @@ def build(export_dir, rebase=False, fetch_media=True, log=print):
                 'revlog': revlog}
         if os.path.exists(base_p): shutil.copy(base_p, base_p + '.old')
         with open(base_p, 'wb') as f: f.write(dump(base))
-        log(f'移行時点の状態を作った: カード {len(base["state"])}・記録 {len(revlog)}')
+        log(L(f'移行時点の状態を作った: カード {len(base["state"])}・記録 {len(revlog)}', f'Created the state at migration: {len(base["state"])} cards, {len(revlog)} review log entries'))
     base = json.load(open(base_p, encoding='utf-8'))
     pn = load_config().get('project_name')
     if base.get('project') and base['project'] != pn:
-        raise SetupError(f'cloud/state/base.json は置き場「{base["project"]}」用です（今の config.json は「{pn}」）。別の置き場で最初からやり直すなら、cloud/state を別の名前に変えてから動かしてください。')
+        raise SetupError(L(f'cloud/state/base.json は置き場「{base["project"]}」用です（今の config.json は「{pn}」）。別の置き場で最初からやり直すなら、cloud/state を別の名前に変えてから動かしてください。',
+                           f'cloud/state/base.json is for the project "{base["project"]}" (config.json now says "{pn}"). To start over with another project, rename cloud/state first.'))
     # 移行した時点のあとに Anki で足したカード（と、あとから移す対象にしたデッキのカード）の状態と記録。
     # 移行時点の状態は作り直さず、足りない分だけを別のファイルで配る（端末で答えた分は D1 の差分が上に重なる）
     base_ids = {row[0] for row in base['state']}; base_rev_ids = {r[0] for r in base['revlog']}
@@ -168,7 +169,8 @@ def build(export_dir, rebase=False, fetch_media=True, log=print):
     ex = (load_config().get('extras') or {})
     pen_design = str(ex.get('pen_design') or '').strip()
     if pen_design and not os.path.isfile(os.path.join(ROOT, 'app', 'designs', pen_design, 'design.mjs')):
-        raise SetupError(f'書き込みのデザイン "{pen_design}" がありません（app/designs/{pen_design}/design.mjs）。config.json の extras.pen_design を直すか、空にしてください。')
+        raise SetupError(L(f'書き込みのデザイン "{pen_design}" がありません（app/designs/{pen_design}/design.mjs）。config.json の extras.pen_design を直すか、空にしてください。',
+                           f'The Ink design "{pen_design}" does not exist (app/designs/{pen_design}/design.mjs). Fix extras.pen_design in config.json or leave it empty.'))
     lang = build_i18n(out, load_config().get('language') or 'ja_JP', log)
     features = {'pen': pen_design, 'autoSync': bool(ex.get('auto_sync')), 'lang': lang}
     manifest = {'built': int(__import__('time').time()), 'features': features, 'meta': files['meta'], 'chunks': chunks, 'media': files['media'],
@@ -178,7 +180,8 @@ def build(export_dir, rebase=False, fetch_media=True, log=print):
     site = os.path.join(HERE, 'site')
     if os.path.exists(site): shutil.rmtree(site)
     os.replace(out, site)
-    log(f'site を組んだ: カード {len(cards)}（束 {len(chunks)}）・画像音声 {len(present)}/{len(names)}・独自の機能: 書き込み {features["pen"] or "なし"}／自動同期 {"あり" if features["autoSync"] else "なし"}')
+    log(L(f'site を組んだ: カード {len(cards)}（束 {len(chunks)}）・画像音声 {len(present)}/{len(names)}・独自の機能: 書き込み {features["pen"] or "なし"}／自動同期 {"あり" if features["autoSync"] else "なし"}',
+          f'Built the site: {len(cards)} cards ({len(chunks)} chunks), media {len(present)}/{len(names)}, extras: Ink {features["pen"] or "off"} / Auto sync {"on" if features["autoSync"] else "off"}'))
     return manifest
 
 def site_key():
@@ -197,10 +200,10 @@ def site_key():
 def deploy(log=print):
     import subprocess
     cfg = load_config(required=('project_name',))
-    if not os.path.exists(os.path.join(CLOUD, 'wrangler.toml')): raise SetupError('cloud/wrangler.toml がありません。先に python tools/setup_cloud.py を動かしてください。')
+    if not os.path.exists(os.path.join(CLOUD, 'wrangler.toml')): raise SetupError(L('cloud/wrangler.toml がありません。先に python tools/setup_cloud.py を動かしてください。', 'cloud/wrangler.toml is missing. Run python tools/setup_cloud.py first.'))
     r = wrangler(['pages', 'deploy', 'site', '--project-name', cfg['project_name'], '--branch', 'main', '--commit-dirty=true'], check=False)
     tail = [l for l in (r.stdout + r.stderr).strip().splitlines() if 'Deployment complete' in l or 'rror' in l] or (r.stdout + r.stderr).strip().splitlines()
-    log('Pages に上げた' if r.returncode == 0 else 'Pages に上げられなかった', (tail[-1] if tail else '')[:200])
+    log(L('Pages に上げた', 'Uploaded to Pages') if r.returncode == 0 else L('Pages に上げられなかった', 'Could not upload to Pages'), (tail[-1] if tail else '')[:200])
     if r.returncode == 0: open(os.path.join(ST, 'deployed_key.txt'), 'w', encoding='utf-8').write(site_key())
     return r.returncode == 0
 
@@ -213,7 +216,7 @@ def build_i18n(out, code, log=print):
         from anki._backend import RustBackend
         res = json.loads(RustBackend(langs=[tag, 'en-US']).i18n_resources(modules=[]))
     except Exception as e:
-        log(f'Anki の翻訳を作れなかった（{e}）。日本語のまま組む'); shutil.copy2(os.path.join(ROOT, 'ankiweb', 'i18n_ja.json'), os.path.join(out, 'i18n_anki.json')); return 'ja'
+        log(L(f'Anki の翻訳を作れなかった（{e}）。日本語のまま組む', f'Could not build Anki\'s translations ({e}); building in Japanese')); shutil.copy2(os.path.join(ROOT, 'ankiweb', 'i18n_ja.json'), os.path.join(out, 'i18n_anki.json')); return 'ja'
     with open(os.path.join(out, 'i18n_anki.json'), 'w', encoding='utf-8') as f: json.dump(res, f, ensure_ascii=False)
     if tag.startswith('ja'): return 'ja'
     def parse(text):
@@ -238,7 +241,7 @@ def build_i18n(out, code, log=print):
     table['__ivl'] = units
     os.makedirs(os.path.join(out, 'app', 'i18n'), exist_ok=True)
     with open(os.path.join(out, 'app', 'i18n', 'ui.json'), 'w', encoding='utf-8') as f: json.dump(table, f, ensure_ascii=False)
-    log(f'画面の言語: {code}（置き換え {len(table)} 件）')
+    log(L(f'画面の言語: {code}（置き換え {len(table)} 件）', f'Screen language: {code} ({len(table)} replacements)'))
     return tag
 
 def safe_name(n):
@@ -253,7 +256,7 @@ if __name__ == '__main__':
         args = [a for a in sys.argv[1:] if not a.startswith('--')]
         # ふだんは export_anki.py の書き出し（export_new）。書き戻し（mirror.py）のあとは export に移っているので、そちらを使う
         exp = args[0] if args else next((d for d in (os.path.join(ST, 'export_new'), os.path.join(ST, 'export')) if os.path.exists(os.path.join(d, 'meta.json'))), os.path.join(ST, 'export_new'))
-        if not os.path.exists(os.path.join(exp, 'meta.json')): raise SetupError(f'書き出し {exp} がありません。先に python tools/export_anki.py を動かしてください。')
+        if not os.path.exists(os.path.join(exp, 'meta.json')): raise SetupError(L(f'書き出し {exp} がありません。先に python tools/export_anki.py を動かしてください。', f'The export {exp} does not exist. Run python tools/export_anki.py first.'))
         build(exp, rebase='--rebase' in sys.argv, fetch_media='--nomedia' not in sys.argv)
         if '--deploy' in sys.argv and not deploy(): sys.exit(1)
     except SetupError as e: die(str(e))

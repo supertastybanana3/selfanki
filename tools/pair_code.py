@@ -12,6 +12,6 @@ try:
     sql = f"create table if not exists pair (h text primary key, exp integer not null); delete from pair where exp < {now}; insert into pair(h, exp) values ('{h}', {exp});"
     wrangler(['d1', 'execute', cfg['project_name'], '--local' if local else '--remote', '--command', sql, '--yes'])
     url = 'http://127.0.0.1:8788' if local else site_url(cfg)
-    print(f'番号: {code}（{time.strftime("%H:%M", time.localtime(exp / 1000))} まで有効）')
-    print(f'端末で {url}/pair を開いて、この番号を入れてください。')
+    print(L(f'番号: {code}（{time.strftime("%H:%M", time.localtime(exp / 1000))} まで有効）', f'Pairing code: {code} (valid until {time.strftime("%H:%M", time.localtime(exp / 1000))})'))
+    print(L(f'端末で {url}/pair を開いて、この番号を入れてください。', f'On your device, open {url}/pair and enter this code.'))
 except SetupError as e: die(str(e))

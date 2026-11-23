@@ -61,6 +61,8 @@ final class AudioBridge: NSObject, AVAudioPlayerDelegate, AVSpeechSynthesizerDel
 // ネットが無いときは中身の Service Worker が端末の控えを出す（WKAppBoundDomains に入れたドメインだけ Service Worker が動く）
 let appHost = SelfAnkiConfig.host
 let defaultURL = "https://\(SelfAnkiConfig.host)/app/"
+/// 殻が自分で出す文言（確認の「キャンセル」・開けなかったときの画面）の言語。端末の言語が日本語なら日本語、ほかは英語
+let uiJapanese = Locale.preferredLanguages.first?.lowercased().hasPrefix("ja") ?? false
 
 struct ContentView: View {
     @State private var ready = false
@@ -220,7 +222,7 @@ struct WebShell: UIViewRepresentable {
         func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
             guard let vc = topVC() else { completionHandler(false); return }
             let ac = UIAlertController(title: nil, message: message, preferredStyle: .alert)
-            ac.addAction(UIAlertAction(title: "キャンセル", style: .cancel) { [weak self] _ in completionHandler(false); self?.takeKeys() })
+            ac.addAction(UIAlertAction(title: uiJapanese ? "キャンセル" : "Cancel", style: .cancel) { [weak self] _ in completionHandler(false); self?.takeKeys() })
             ac.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in completionHandler(true); self?.takeKeys() })
             vc.present(ac, animated: true)
         }
@@ -230,8 +232,8 @@ struct WebShell: UIViewRepresentable {
             webView.loadHTMLString("""
             <html><head><meta name=viewport content='width=device-width,initial-scale=1'></head>
             <body style='background:#000;color:#eee;font:17px -apple-system;padding:60px 24px'>
-            <h2>開けませんでした</h2><p>\(msg)</p><p>最初の1回だけはネットが要ります（そのあとはオフラインでも開けます）。</p>
-            <p><a href='\(UserDefaults.standard.string(forKey: "url") ?? defaultURL)' style='color:#77ccff;font-size:20px'>もう一度</a></p></body></html>
+            <h2>\(uiJapanese ? "開けませんでした" : "Could not open")</h2><p>\(msg)</p><p>\(uiJapanese ? "最初の1回だけはネットが要ります（そのあとはオフラインでも開けます）。" : "The first launch needs the internet (after that it also opens offline).")</p>
+            <p><a href='\(UserDefaults.standard.string(forKey: "url") ?? defaultURL)' style='color:#77ccff;font-size:20px'>\(uiJapanese ? "もう一度" : "Try again")</a></p></body></html>
             """, baseURL: nil)
         }
     }

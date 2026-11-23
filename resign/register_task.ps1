@@ -3,7 +3,8 @@
 #   使い方: powershell -ExecutionPolicy Bypass -File register_task.ps1   （selfanki_resign.exe と同じフォルダに置いて動かす）
 $dir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $exe = Join-Path $dir 'selfanki_resign.exe'
-if (-not (Test-Path $exe)) { Write-Host "selfanki_resign.exe が同じフォルダにありません: $dir"; exit 1 }
+$ja = if ($env:SELFANKI_LANG) { $env:SELFANKI_LANG -like 'ja*' } else { (Get-UICulture).Name -like 'ja*' }
+if (-not (Test-Path $exe)) { if ($ja) { Write-Host "selfanki_resign.exe が同じフォルダにありません: $dir" } else { Write-Host "selfanki_resign.exe is not in the same folder: $dir" }; exit 1 }
 $action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "--headless `"$exe`"" -WorkingDirectory $dir
 $t1 = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
 $t2 = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddHours((Get-Date).Hour + 1) -RepetitionInterval (New-TimeSpan -Hours 2)

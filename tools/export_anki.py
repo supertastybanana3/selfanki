@@ -9,10 +9,10 @@ try:
     from anki.collection import Collection
     from anki.sound import SoundOrVideoTag, TTSTag
 except ImportError:
-    die('Python の anki パッケージがありません。README の「手順 1」の pip install をしてください。')
+    die(L('Python の anki パッケージがありません。README の「手順 1」の pip install をしてください。', 'The Python package "anki" is not installed. Do the pip install in README "Step 1".'))
 from anki.buildinfo import version as ANKI_VERSION
 if not ANKI_VERSION.startswith('25.09'):
-    print(f'注意: anki パッケージの版が {ANKI_VERSION} です。確かめてあるのは 25.9.4 です（pip install anki==25.9.4）。', file=sys.stderr)
+    print(L(f'注意: anki パッケージの版が {ANKI_VERSION} です。確かめてあるのは 25.9.4 です（pip install anki==25.9.4）。', f'Note: the anki package is version {ANKI_VERSION}. Only 25.9.4 has been tested (pip install anki==25.9.4).'), file=sys.stderr)
 import html as _html
 def html_to_text_line(h):
     # rslib text.rs の html_to_text_line と同じ: <br>・<div>・改行を空白に、[[type:]]・[sound:] を消し、コメント・style・script・タグを除いて文字参照を戻す
@@ -81,7 +81,8 @@ def fdeck_def(d):
             'previewAgain': int(d.get('previewAgainSecs', 60)), 'previewHard': int(d.get('previewHardSecs', 600)), 'previewGood': int(d.get('previewGoodSecs', 0)), 'mod': d.get('mod', 0)}
 try: col = Collection(SRC)
 except Exception as e:
-    die(f'コレクションを開けませんでした（{e}）。Anki が新しい形で保存している場合は、先にバックアップを取り、パソコンの Anki で「ファイル」→「プロファイルを切り替え」→「Downgrade & Quit」をしてから、もう一度書き出してください。')
+    die(L(f'コレクションを開けませんでした（{e}）。Anki が新しい形で保存している場合は、先にバックアップを取り、パソコンの Anki で「ファイル」→「プロファイルを切り替え」→「Downgrade & Quit」をしてから、もう一度書き出してください。',
+          f'Could not open the collection ({e}). If Anki saved it in a newer format, back it up first, do File → Switch Profile → "Downgrade & Quit" in Anki for desktop, then export again.'))
 decks = {d['id']: d for d in col.decks.all()}
 def top(did): return decks[did]['name'].split('::')[0]
 keep_deck = {did for did, d in decks.items() if not d.get('dyn') and top(did) not in EXCLUDE_TOP and not (SKIP_UNDERSCORE and any(part.startswith('_') for part in d['name'].split('::')))}
@@ -110,7 +111,7 @@ for (cid, nid, did, odid, ord_, ctype, queue, due, odue, ivl, factor, reps, laps
                   'sfld': sort_text(note, note.note_type()), 'tname': (card.template() or {}).get('name', ''),
                   **({'typ': type_info(card, note, q)} if TYPE_PAT.search(q) else {})})
 print('cards', len(cards), 'secs', round(time.time() - t0, 1))
-if not cards: die('書き出すカードが0枚でした。exclude_top_decks で全部を除いていないか確かめてください。')
+if not cards: die(L('書き出すカードが0枚でした。exclude_top_decks で全部を除いていないか確かめてください。', 'There were 0 cards to export. Check that exclude_top_decks does not exclude everything.'))
 keep_cids = {c['id'] for c in cards}
 revlog = [r for r in col.db.all("select id, cid, ease, ivl, lastIvl, factor, time, type from revlog") if r[1] in keep_cids]
 # ノートタイプ（端末でノートを追加・編集するときに、テンプレートからカードを描くので、全部のノートタイプの中身も配る）
@@ -158,6 +159,6 @@ json.dump(cards, open(f'{OUT}/cards.json', 'w', encoding='utf-8'), ensure_ascii=
 json.dump(revlog, open(f'{OUT}/revlog.json', 'w', encoding='utf-8'))
 json.dump(mlist, open(f'{OUT}/media.json', 'w', encoding='utf-8'), ensure_ascii=False)
 tops = collections.Counter(top(c['did']) for c in cards)
-print('decks', len(keep_deck), 'presets', len(presets), 'notetypes', len(notetypes), 'revlog', len(revlog), 'media', len(mlist), 'missing(コピーに無い)', sum(1 for m in mlist if m['size'] is None))
-print('最上位デッキごと', tops.most_common())
+print('decks', len(keep_deck), 'presets', len(presets), 'notetypes', len(notetypes), 'revlog', len(revlog), 'media', len(mlist), L('missing(コピーに無い)', 'missing'), sum(1 for m in mlist if m['size'] is None))
+print(L('最上位デッキごと', 'per top-level deck'), tops.most_common())
 col.close()
